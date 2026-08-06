@@ -12,6 +12,7 @@ window.Shell = (function () {
     { key: 'board',    href: '/board.html',    label: 'Board',    feature: 'board' },
     { key: 'parts',    href: '/parts.html',    label: 'Parts',    feature: 'parts',   cap: 'manageParts' },
     { key: 'leads',    href: '/leads.html',    label: 'Leads',    feature: 'leads',   cap: 'manageLeads' },
+    { key: 'clients',  href: '/clients.html',  label: 'Clients',  feature: 'clients' },
     { key: 'schedule', href: '/schedule.html', label: 'Schedule', feature: 'sched' },
     { key: 'import',   href: '/import.html',   label: 'Import',   feature: 'ems',     cap: 'acceptImports' },
     { key: 'reports',  href: '/reports.html',  label: 'Reports',  feature: 'reports', cap: 'viewReports' },

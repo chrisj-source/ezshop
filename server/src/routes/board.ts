@@ -6,11 +6,12 @@ import { scrubMoney } from '../permissions';
 
 interface BoardRow extends RowDataPacket {
   id: number; ro_number: string; status_slot: string | null; status_since: Date | null;
-  on_hold: number; hold_reason: string | null; hold_owner: string | null;
-  repair_path: string; opened_at: Date; promised_at: Date | null; target_days: number | null;
+  on_hold: number; hold_reason: string | null; hold_owner: string | null; claim_number: string | null;
+  repair_path: string; ro_type: string; opened_at: Date; promised_at: Date | null; target_days: number | null;
   amount_cents: number; labor_hours: string;
-  customer_name: string | null; insurer_name: string | null;
-  vin: string | null; year: number | null; make: string | null; model: string | null; color: string | null;
+  customer_name: string | null; customer_phone: string | null; insurer_name: string | null;
+  vin: string | null; year: number | null; make: string | null; model: string | null;
+  color: string | null; plate: string | null; plate_state: string | null; status_by: string | null;
   status_label: string | null; customer_label: string | null; group_id: string | null;
   group_label: string | null; lane_key: string | null; kind: string | null;
   age_yellow_hours: number | null; age_red_hours: number | null;
@@ -47,11 +48,11 @@ export async function registerBoard(app: FastifyInstance): Promise<void> {
     const rows = await tq<BoardRow[]>(ctx.company!.id, `
       SELECT
         r.id, r.ro_number, r.status_slot, r.status_since, r.on_hold, r.hold_reason, r.hold_owner,
-        r.repair_path, r.opened_at, r.promised_at, r.target_days,
+        r.claim_number, r.repair_path, r.ro_type, r.opened_at, r.promised_at, r.target_days,
         r.amount_cents, r.labor_hours,
-        c.name AS customer_name,
+        c.name AS customer_name, c.phone AS customer_phone,
         ins.name AS insurer_name,
-        v.vin, v.year, v.make, v.model, v.color,
+        v.vin, v.year, v.make, v.model, v.color, v.plate, v.plate_state,
         s.label AS status_label, s.customer_label, s.group_id, s.lane_key, s.kind,
         s.age_yellow_hours, s.age_red_hours,
         g.label AS group_label,
@@ -59,7 +60,9 @@ export async function registerBoard(app: FastifyInstance): Promise<void> {
           WHERE p.ro_id = r.id AND p.gating = 1
             AND p.state IN ('need','ordered','partial','backordered')) AS parts_waiting,
         (SELECT COUNT(*) FROM supplements sp
-          WHERE sp.ro_id = r.id AND sp.state IN ('draft','sent','awaiting')) AS supp_open
+          WHERE sp.ro_id = r.id AND sp.state IN ('draft','sent','awaiting')) AS supp_open,
+        (SELECT h.user_name FROM ro_status_history h
+          WHERE h.ro_id = r.id ORDER BY h.id DESC LIMIT 1) AS status_by
       FROM repair_orders r
       LEFT JOIN clients c   ON c.id = r.client_id
       LEFT JOIN clients ins ON ins.id = r.insurer_client_id
@@ -108,11 +111,18 @@ export async function registerBoard(app: FastifyInstance): Promise<void> {
         holdReason: r.hold_reason,
         holdOwner: r.hold_owner,
         repairPath: r.repair_path,
+        roType: r.ro_type,
         customer: r.customer_name,
+        phone: r.customer_phone,
         insurer: r.insurer_name,
+        claimNumber: r.claim_number,
+        statusSince: r.status_since,
         vehicle: [r.year, r.make, r.model].filter(Boolean).join(' ') || null,
         color: r.color,
+        plate: r.plate,
+        plateState: r.plate_state,
         vin: r.vin,
+        statusBy: r.status_by,
         openedAt: r.opened_at,
         promisedAt: r.promised_at,
         targetDays: r.target_days,
@@ -151,7 +161,8 @@ export async function registerBoard(app: FastifyInstance): Promise<void> {
         SUM(r.labor_hours) AS labor_hours,
         AVG(DATEDIFF(NOW(), r.opened_at)) AS avg_days,
         SUM(r.promised_at IS NOT NULL AND r.promised_at < CURDATE()) AS past_target,
-        SUM(TIMESTAMPDIFF(HOUR, r.status_since, NOW()) >= COALESCE(s.age_red_hours, 999999)) AS stalled
+        SUM(TIMESTAMPDIFF(HOUR, r.status_since, NOW()) >= 96) AS stalled,
+        COALESCE(SUM(r.amount_cents), 0) AS severity_cents
       FROM repair_orders r
       LEFT JOIN statuses s ON s.slot_id = r.status_slot
       WHERE r.closed_at IS NULL
@@ -163,7 +174,8 @@ export async function registerBoard(app: FastifyInstance): Promise<void> {
       laborHours: Number(row.labor_hours ?? 0),
       avgDays: row.avg_days === null ? 0 : Math.round(Number(row.avg_days) * 10) / 10,
       pastTarget: Number(row.past_target ?? 0),
-      stalled: Number(row.stalled ?? 0)
+      stalled: Number(row.stalled ?? 0),
+      severityCents: ctx.caps.money ? Number(row.severity_cents ?? 0) : null
     };
   });
 }

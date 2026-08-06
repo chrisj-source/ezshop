@@ -1,0 +1,432 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1c2740">
+<title>Clients — Easy Shop</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/shell.css">
+<style>
+  .pane { padding:0 18px 40px; }
+  .clientrow {
+    display:grid; grid-template-columns:1fr 150px 120px 130px 100px; gap:12px; align-items:center;
+    padding:12px 0; border-top:1px solid var(--whisper); cursor:pointer;
+  }
+  .clientrow:hover { background:var(--whisper); }
+  .kindpill {
+    font:500 9px var(--font); letter-spacing:.07em; text-transform:uppercase;
+    padding:3px 7px; border-radius:3px; white-space:nowrap;
+  }
+  .newcard { border:1px solid var(--line); border-radius:6px; padding:14px; margin-top:6px; }
+  @media (max-width:900px) {
+    .clientrow { grid-template-columns:1fr auto; }
+    .pane { padding:0 14px 40px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="bar">
+  <div class="brand"><div class="mark">ES</div><div class="word">Easy Shop</div></div>
+  <div class="vr"></div>
+  <div class="co" id="coName">—</div>
+  <div id="nav"></div>
+  <div class="spacer"></div>
+  <div id="bell"></div>
+  <div class="who" id="who">—</div>
+  <button class="ghostbtn" id="signout">Sign out</button>
+</div>
+<div class="hairline"></div>
+
+<div class="head">
+  <h1>Clients</h1>
+  <div class="headmeta" id="headmeta">Loading…</div>
+</div>
+
+<div class="kpis" id="kpis"></div>
+
+<div class="filters">
+  <div id="kindTabs" class="row" style="gap:2px"></div>
+  <input type="search" id="fSearch" placeholder="Name, contact, phone">
+  <label class="row" style="font:400 11.5px var(--font);color:var(--dim);gap:5px">
+    <input type="checkbox" id="fInactive"> Include switched off
+  </label>
+  <button class="btn btn-ghost" id="refresh">Refresh</button>
+  <button class="btn" id="newBtn">New account</button>
+</div>
+
+<main>
+  <div class="pane">
+    <div id="newBox" hidden></div>
+    <div id="list"></div>
+  </div>
+</main>
+
+<div class="scrim" id="scrim"></div>
+<aside class="drawer" id="drawer" aria-hidden="true">
+  <div class="dhead">
+    <div style="min-width:0;flex:1">
+      <div style="font:500 16px var(--font)" id="dTitle">—</div>
+      <div class="sub" id="dSub">—</div>
+    </div>
+    <button class="close" id="dClose" aria-label="Close">&times;</button>
+  </div>
+  <div class="dbody" id="dBody"></div>
+</aside>
+
+<script src="/shell.js"></script>
+<script>
+(function () {
+  var api = Shell.api, esc = Shell.esc;
+  var ME = null, TYPES = null, CLIENTS = [], KIND = 'wholesale', OPEN = null;
+
+  var KINDS = [
+    { k: 'wholesale', t: 'Wholesale' },
+    { k: 'insurance', t: 'Insurance' },
+    { k: 'retail', t: 'Retail' }
+  ];
+  var TONE = { wholesale: 'var(--acc)', insurance: 'var(--move)', retail: 'var(--done)' };
+
+  function $(id) { return document.getElementById(id); }
+  function money(c) { return c == null ? '—' : '$' + Math.round(c / 100).toLocaleString('en-US'); }
+  function wtLabel(k) {
+    if (!TYPES) return k || '';
+    var t = TYPES.wholesaleTypes.filter(function (x) { return x.key === k; })[0];
+    return t ? t.label : (k || '');
+  }
+
+  api('/api/me').then(function (me) {
+    ME = me;
+    if (!me.company) { location.href = '/'; return null; }
+    if (me.features.indexOf('clients') < 0) {
+      document.body.innerHTML = '<div class="empty">Clients is not switched on for this shop.</div>';
+      return null;
+    }
+    Shell.mount({ me: me, active: 'clients' });
+    return api('/api/client-types');
+  }).then(function (t) {
+    if (!t) return;
+    TYPES = t;
+    renderTabs();
+    return load();
+  }).catch(function (e) { if (e.message !== 'signed out') console.error(e); });
+
+  function renderTabs() {
+    $('kindTabs').innerHTML = KINDS.map(function (k) {
+      return '<button class="btn ' + (k.k === KIND ? '' : 'btn-ghost') + '" data-kind="' + k.k +
+        '" style="padding:7px 13px">' + esc(k.t) + '</button>';
+    }).join('');
+    Array.prototype.forEach.call($('kindTabs').children, function (b) {
+      b.addEventListener('click', function () {
+        KIND = b.dataset.kind;
+        $('newBox').hidden = true;
+        renderTabs();
+        render();
+      });
+    });
+  }
+
+  function load() {
+    return api('/api/clients?active=all').then(function (d) {
+      CLIENTS = d.clients;
+      render();
+    });
+  }
+
+  function filtered() {
+    var q = $('fSearch').value.trim().toLowerCase();
+    return CLIENTS.filter(function (c) {
+      if (c.kind !== KIND) return false;
+      if (!$('fInactive').checked && !c.active) return false;
+      if (q && [c.name, c.contact_name, c.phone, c.email, c.city].join(' ').toLowerCase().indexOf(q) < 0) return false;
+      return true;
+    }).sort(function (a, b) {
+      return Number(b.open_files) - Number(a.open_files) || String(a.name).localeCompare(String(b.name));
+    });
+  }
+
+  function render() {
+    var rows = filtered();
+    var all = CLIENTS.filter(function (c) { return c.kind === KIND; });
+
+    $('headmeta').textContent = rows.length + ' of ' + all.length + ' ' +
+      (KIND === 'wholesale' ? 'wholesale account' : KIND === 'insurance' ? 'carrier' : 'retail customer') +
+      (rows.length === 1 ? '' : 's');
+
+    var openFiles = all.reduce(function (a, c) { return a + Number(c.open_files); }, 0);
+    var ytd = all.reduce(function (a, c) { return a + Number(c.ytd_files); }, 0);
+    $('kpis').innerHTML = [
+      { v: all.filter(function (c) { return c.active; }).length, k: 'active' },
+      { v: openFiles, k: 'open files' },
+      { v: ytd, k: 'files this year' },
+      { v: all.filter(function (c) { return !c.active; }).length, k: 'switched off' }
+    ].map(function (i) {
+      return '<div><div class="kpi-v">' + esc(i.v) + '</div><div class="kpi-k">' + esc(i.k) + '</div></div>';
+    }).join('');
+
+    if (!rows.length) {
+      $('list').innerHTML = '<div class="empty">' + (all.length
+        ? 'Nothing matches that.'
+        : KIND === 'wholesale'
+          ? 'No wholesale accounts yet.<br>Add the dealers and hail companies you work for — ' +
+            'check-in needs them before a car can be billed to an account.'
+          : KIND === 'insurance'
+            ? 'No carriers yet. They are also created automatically when a claim comes in.'
+            : 'No retail customers yet. They are created as cars come in.') + '</div>';
+      return;
+    }
+
+    $('list').innerHTML =
+      '<div class="clientrow" style="border:none;cursor:default"><div class="f-l">Name</div>' +
+      '<div class="f-l">' + (KIND === 'wholesale' ? 'Type' : KIND === 'insurance' ? 'Adjuster desk' : 'Phone') + '</div>' +
+      '<div class="f-l">' + (KIND === 'wholesale' ? 'Terms' : 'City') + '</div>' +
+      '<div class="f-l">Files</div><div class="f-l">State</div></div>' +
+      rows.map(function (c) {
+        return '<div class="clientrow" data-id="' + c.id + '">' +
+          '<div><div class="log-b">' + esc(c.name) +
+          (c.platform_locked ? ' <span class="flag" style="color:var(--move);border:1px solid var(--move)">Platform</span>' : '') +
+          '</div><div class="sub">' + esc([c.contact_name, c.phone, c.email].filter(Boolean).join(' · ') || 'no contact') +
+          '</div></div>' +
+          '<div class="sub">' + esc(KIND === 'wholesale' ? wtLabel(c.wholesale_type)
+            : KIND === 'insurance' ? (c.adjuster_desk || '—') : (c.phone || '—')) +
+          (KIND === 'insurance' && c.is_drp ? ' <span class="flag" style="color:var(--done);border:1px solid var(--done)">DRP</span>' : '') +
+          '</div>' +
+          '<div class="sub">' + esc(KIND === 'wholesale' ? (c.terms || '—')
+            : ([c.city, c.state].filter(Boolean).join(', ') || '—')) + '</div>' +
+          '<div class="sub">' + c.open_files + ' open · ' + c.ytd_files + ' YTD</div>' +
+          '<div><span class="kindpill" style="color:' + (c.active ? TONE[c.kind] : 'var(--dim)') +
+          ';border:1px solid ' + (c.active ? TONE[c.kind] : 'var(--line)') + '">' +
+          (c.active ? 'Active' : 'Off') + '</span></div></div>';
+      }).join('');
+
+    Array.prototype.forEach.call($('list').querySelectorAll('[data-id]'), function (el) {
+      el.addEventListener('click', function () { openClient(Number(el.dataset.id)); });
+    });
+  }
+
+  /* ------------------------------------------------------------------ new */
+
+  $('newBtn').addEventListener('click', function () {
+    var box = $('newBox');
+    if (!box.hidden) { box.hidden = true; return; }
+
+    var isW = KIND === 'wholesale', isI = KIND === 'insurance';
+    box.innerHTML = '<div class="newcard"><div style="font:500 14px var(--font)">New ' +
+      (isW ? 'wholesale account' : isI ? 'carrier' : 'customer') + '</div>' +
+      '<div class="grid3" style="margin-top:12px">' +
+      '<div><label class="fl">Name</label><input id="cName" placeholder="' +
+      (isW ? 'Bob Smith Chevrolet' : isI ? 'State Farm' : 'Customer name') + '"></div>' +
+      (isW ? '<div><label class="fl">Account type</label><select id="cWType">' +
+        TYPES.wholesaleTypes.map(function (t) {
+          return '<option value="' + esc(t.key) + '">' + esc(t.label) + '</option>';
+        }).join('') + '</select></div>' +
+        '<div><label class="fl">Terms</label><select id="cTerms">' +
+        TYPES.terms.map(function (t) { return '<option value="' + esc(t) + '">' + esc(t) + '</option>'; }).join('') +
+        '</select></div>' : '') +
+      '<div><label class="fl">Contact</label><input id="cContact"></div>' +
+      '<div><label class="fl">Phone</label><input id="cPhone" type="tel"></div>' +
+      '<div><label class="fl">Email</label><input id="cEmail" type="email"></div>' +
+      '<div><label class="fl">City</label><input id="cCity"></div>' +
+      '<div><label class="fl">State</label><input id="cState" maxlength="2"></div>' +
+      (isI ? '<div><label class="fl">Adjuster desk</label><input id="cDesk"></div>' : '') +
+      '</div><div class="row" style="margin-top:13px">' +
+      '<button class="btn btn-solid" id="saveNew">Create</button>' +
+      '<button class="btn btn-ghost" id="cancelNew">Cancel</button></div>' +
+      '<div class="msg" id="nMsg"></div></div>';
+    box.hidden = false;
+
+    $('cancelNew').addEventListener('click', function () { box.hidden = true; });
+    $('saveNew').addEventListener('click', function () {
+      var msg = $('nMsg');
+      var name = $('cName').value.trim();
+      if (!name) { msg.textContent = 'A name is required.'; msg.className = 'msg err'; return; }
+
+      var body = {
+        kind: KIND, name: name,
+        contactName: $('cContact').value.trim() || undefined,
+        phone: $('cPhone').value.trim() || undefined,
+        email: $('cEmail').value.trim() || undefined,
+        city: $('cCity').value.trim() || undefined,
+        state: $('cState').value.trim().toUpperCase() || undefined
+      };
+      if (isW) { body.wholesaleType = $('cWType').value; body.terms = $('cTerms').value; }
+      if (isI && $('cDesk')) body.adjusterDesk = $('cDesk').value.trim() || undefined;
+
+      api('/api/clients', { method: 'POST', body: JSON.stringify(body) })
+        .then(function () { box.hidden = true; return load(); })
+        .catch(function (e) { msg.textContent = e.message; msg.className = 'msg err'; });
+    });
+  });
+
+  /* --------------------------------------------------------------- drawer */
+
+  function openClient(id) {
+    OPEN = id;
+    var c = CLIENTS.filter(function (x) { return x.id === id; })[0];
+    if (!c) return;
+
+    $('scrim').classList.add('open');
+    $('drawer').classList.add('open');
+    $('drawer').setAttribute('aria-hidden', 'false');
+    $('dTitle').textContent = c.name;
+    $('dSub').textContent = [wtLabel(c.wholesale_type) || c.kind, c.terms, c.city].filter(Boolean).join(' · ');
+    $('dBody').innerHTML = '<div class="empty">Loading…</div>';
+
+    api('/api/clients/' + id + '/files').then(function (d) {
+      renderClient(c, d);
+    }).catch(function () {
+      renderClient(c, { files: [] });
+    });
+  }
+
+  function closeClient() {
+    OPEN = null;
+    $('scrim').classList.remove('open');
+    $('drawer').classList.remove('open');
+    $('drawer').setAttribute('aria-hidden', 'true');
+  }
+
+  function renderClient(c, d) {
+    var isW = c.kind === 'wholesale', isI = c.kind === 'insurance';
+    var locked = c.platform_locked && !ME.isPlatformOwner;
+    var h = [];
+
+    h.push('<div class="sec">Account</div>');
+    if (locked) {
+      h.push('<div class="sub" style="margin-bottom:10px">This account is managed by the platform ' +
+        'and cannot be edited here.</div>');
+    }
+
+    h.push('<div class="grid2">' +
+      '<div><label class="fl">Name</label><input id="eName" value="' + esc(c.name) + '"' +
+      (locked ? ' disabled' : '') + ' style="width:100%"></div>' +
+      (isW ? '<div><label class="fl">Account type</label><select id="eWType"' + (locked ? ' disabled' : '') +
+        ' style="width:100%">' + TYPES.wholesaleTypes.map(function (t) {
+          return '<option value="' + esc(t.key) + '"' + (t.key === c.wholesale_type ? ' selected' : '') + '>' +
+            esc(t.label) + '</option>';
+        }).join('') + '</select></div>' +
+        '<div><label class="fl">Terms</label><select id="eTerms"' + (locked ? ' disabled' : '') +
+        ' style="width:100%"><option value="">—</option>' + TYPES.terms.map(function (t) {
+          return '<option value="' + esc(t) + '"' + (t === c.terms ? ' selected' : '') + '>' + esc(t) + '</option>';
+        }).join('') + '</select></div>' : '') +
+      '<div><label class="fl">Contact</label><input id="eContact" value="' + esc(c.contact_name || '') + '"' +
+      (locked ? ' disabled' : '') + ' style="width:100%"></div>' +
+      '<div><label class="fl">Phone</label><input id="ePhone" value="' + esc(c.phone || '') + '"' +
+      (locked ? ' disabled' : '') + ' style="width:100%"></div>' +
+      '<div><label class="fl">Email</label><input id="eEmail" value="' + esc(c.email || '') + '"' +
+      (locked ? ' disabled' : '') + ' style="width:100%"></div>' +
+      '<div><label class="fl">City</label><input id="eCity" value="' + esc(c.city || '') + '"' +
+      (locked ? ' disabled' : '') + ' style="width:100%"></div>' +
+      '<div><label class="fl">State</label><input id="eState" maxlength="2" value="' + esc(c.state || '') + '"' +
+      (locked ? ' disabled' : '') + ' style="width:100%"></div>' +
+      (isI ? '<div><label class="fl">Adjuster desk</label><input id="eDesk" value="' +
+        esc(c.adjuster_desk || '') + '"' + (locked ? ' disabled' : '') + ' style="width:100%"></div>' : '') +
+      '</div>');
+
+    if (isI && !locked) {
+      h.push('<div class="row" style="margin-top:11px">' +
+        '<button class="btn ' + (c.is_drp ? '' : 'btn-ghost') + '" id="eDrp" data-on="' +
+        (c.is_drp ? 1 : 0) + '" style="padding:6px 12px">' +
+        (c.is_drp ? 'DRP account' : 'Not DRP') + '</button></div>');
+    }
+
+    if (!locked) {
+      h.push('<div class="row" style="margin-top:13px">' +
+        '<button class="btn btn-solid" id="saveClient">Save</button>' +
+        '<button class="btn ' + (c.active ? 'btn-danger' : 'btn-ghost') + '" id="toggleActive">' +
+        (c.active ? 'Switch this account off' : 'Switch back on') + '</button></div>' +
+        '<div class="msg" id="cMsg"></div>');
+      if (c.active) {
+        h.push('<div class="sub" style="margin-top:8px">Switching off hides it from check-in and the ' +
+          'pickers. Open files keep working.</div>');
+      }
+    }
+
+    h.push('<div class="sec">Volume</div><div class="grid2">' +
+      '<div><div class="f-l">Open files</div><div class="f-v">' + c.open_files + '</div></div>' +
+      '<div><div class="f-l">Files this year</div><div class="f-v">' + c.ytd_files + '</div></div>' +
+      (ME.caps.money && d.grossCents != null
+        ? '<div><div class="f-l">Value this year</div><div class="f-v">' + money(d.grossCents) + '</div></div>'
+        : '') +
+      (d.avgDays != null
+        ? '<div><div class="f-l">Average days</div><div class="f-v">' + d.avgDays + '</div></div>'
+        : '') +
+      '</div>');
+
+    h.push('<div class="sec">Files</div>');
+    if (!d.files || !d.files.length) {
+      h.push('<div class="sub">Nothing on the board for this account.</div>');
+    } else {
+      d.files.forEach(function (f) {
+        h.push('<div class="log"><div class="row" style="gap:8px">' +
+          '<a href="/board.html?ro=' + f.id + '" class="log-b">' + esc(f.ro_number) + '</a>' +
+          '<span class="sub">' + esc(f.vehicle || '') + '</span>' +
+          (ME.caps.money ? '<span class="sub" style="margin-left:auto">' + money(f.amount_cents) + '</span>' : '') +
+          '</div><div class="log-m">' + esc(f.status_label || 'No status') + ' · ' +
+          f.days_in_shop + ' days' + (f.closed_at ? ' · closed' : '') + '</div></div>');
+      });
+    }
+
+    $('dBody').innerHTML = h.join('');
+    wireClient(c);
+  }
+
+  function wireClient(c) {
+    var drp = $('eDrp');
+    if (drp) drp.addEventListener('click', function () {
+      var on = drp.dataset.on !== '1';
+      drp.dataset.on = on ? '1' : '0';
+      drp.className = 'btn ' + (on ? '' : 'btn-ghost');
+      drp.textContent = on ? 'DRP account' : 'Not DRP';
+    });
+
+    var save = $('saveClient');
+    if (save) save.addEventListener('click', function () {
+      var msg = $('cMsg');
+      var body = {
+        name: $('eName').value.trim(),
+        contactName: $('eContact').value.trim() || null,
+        phone: $('ePhone').value.trim() || null,
+        email: $('eEmail').value.trim() || null,
+        city: $('eCity').value.trim() || null,
+        state: $('eState').value.trim().toUpperCase() || null
+      };
+      if ($('eWType')) body.wholesaleType = $('eWType').value;
+      if ($('eTerms')) body.terms = $('eTerms').value || null;
+      if ($('eDesk')) body.adjusterDesk = $('eDesk').value.trim() || null;
+      if ($('eDrp')) body.isDrp = $('eDrp').dataset.on === '1';
+
+      api('/api/clients/' + c.id, { method: 'PATCH', body: JSON.stringify(body) })
+        .then(function () {
+          msg.textContent = 'Saved.';
+          msg.className = 'msg ok';
+          return load();
+        })
+        .catch(function (e) { msg.textContent = e.message; msg.className = 'msg err'; });
+    });
+
+    var t = $('toggleActive');
+    if (t) t.addEventListener('click', function () {
+      var next = !c.active;
+      if (!next && !confirm('Switch ' + c.name + ' off? It disappears from check-in and the pickers.')) return;
+      api('/api/clients/' + c.id, { method: 'PATCH', body: JSON.stringify({ active: next }) })
+        .then(function () { closeClient(); return load(); })
+        .catch(function (e) {
+          var msg = $('cMsg');
+          msg.textContent = e.message;
+          msg.className = 'msg err';
+        });
+    });
+  }
+
+  $('fSearch').addEventListener('input', render);
+  $('fInactive').addEventListener('change', render);
+  $('refresh').addEventListener('click', load);
+  $('scrim').addEventListener('click', closeClient);
+  $('dClose').addEventListener('click', closeClient);
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeClient(); });
+})();
+</script>
+</body>
+</html>

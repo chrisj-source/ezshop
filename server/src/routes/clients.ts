@@ -137,6 +137,37 @@ export async function registerClients(app: FastifyInstance): Promise<void> {
     return { ok: true };
   });
 
+  /** Everything on the board for one client, plus its rolled-up value. */
+  app.get('/api/clients/:id/files', async (req, reply) => {
+    const ctx = requireCompany(req, reply);
+    if (!ctx) return;
+    const id = Number((req.params as { id: string }).id);
+
+    const files = await tq<RowDataPacket[]>(ctx.company!.id, `
+      SELECT r.id, r.ro_number, r.amount_cents, r.opened_at, r.closed_at,
+             DATEDIFF(COALESCE(r.closed_at, NOW()), r.opened_at) AS days_in_shop,
+             s.label AS status_label,
+             CONCAT_WS(' ', v.year, v.make, v.model) AS vehicle
+      FROM repair_orders r
+      LEFT JOIN statuses s ON s.slot_id = r.status_slot
+      LEFT JOIN vehicles v ON v.id = r.vehicle_id
+      WHERE r.client_id = ?
+      ORDER BY (r.closed_at IS NOT NULL), r.opened_at DESC
+      LIMIT 60`, [id]);
+
+    const [roll] = await tq<RowDataPacket[]>(ctx.company!.id, `
+      SELECT COALESCE(SUM(amount_cents), 0) AS gross_cents,
+             AVG(DATEDIFF(COALESCE(closed_at, NOW()), opened_at)) AS avg_days
+      FROM repair_orders
+      WHERE client_id = ? AND YEAR(opened_at) = YEAR(CURDATE())`, [id]);
+
+    return {
+      files: files.map(f => ctx.caps.money ? f : Object.assign({}, f, { amount_cents: undefined })),
+      grossCents: ctx.caps.money ? Number(roll.gross_cents ?? 0) : null,
+      avgDays: roll.avg_days === null ? null : Math.round(Number(roll.avg_days) * 10) / 10
+    };
+  });
+
   /** Switching an account off hides it from pickers; open files keep working. */
   app.delete('/api/clients/:id', async (req, reply) => {
     const ctx = requireCompany(req, reply);

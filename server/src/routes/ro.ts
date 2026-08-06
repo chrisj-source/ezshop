@@ -256,6 +256,63 @@ export async function registerRepairOrders(app: FastifyInstance): Promise<void> 
    * so they are editable rather than derived from the status history.
    */
   /** Money and promise fields the counter corrects on the file. */
+  /** Promises: what someone told the customer, and whether it was kept. */
+  app.post('/api/ro/:id/promises', async (req, reply) => {
+    const ctx = requireCompany(req, reply);
+    if (!ctx) return;
+    const id = Number((req.params as { id: string }).id);
+    const { body } = req.body as { body?: string };
+    if (!body?.trim()) return reply.code(400).send({ error: 'Write what was promised.' });
+
+    const res = await texec(ctx.company!.id,
+      'INSERT INTO ro_promises (ro_id, body, created_by) VALUES (?, ?, ?)',
+      [id, body.trim().slice(0, 255), ctx.user.id]);
+
+    await texec(ctx.company!.id,
+      `INSERT INTO ro_notes (ro_id, kind, body, user_id, user_name) VALUES (?, 'auto', ?, ?, ?)`,
+      [id, `Promised: ${body.trim()}`, ctx.user.id, ctx.user.name]);
+
+    return { ok: true, id: res.insertId };
+  });
+
+  app.patch('/api/promises/:id', async (req, reply) => {
+    const ctx = requireCompany(req, reply);
+    if (!ctx) return;
+    const id = Number((req.params as { id: string }).id);
+    const { done, body } = req.body as { done?: boolean; body?: string };
+    const cid = ctx.company!.id;
+
+    const before = await tqOne<RowDataPacket & { ro_id: number; body: string; done: number }>(
+      cid, 'SELECT ro_id, body, done FROM ro_promises WHERE id = ?', [id]);
+    if (!before) return reply.code(404).send({ error: 'No such promise' });
+
+    const sets: string[] = [];
+    const vals: unknown[] = [];
+    if (done !== undefined) { sets.push('done = ?'); vals.push(done ? 1 : 0); }
+    if (body !== undefined) { sets.push('body = ?'); vals.push(body.slice(0, 255)); }
+    if (!sets.length) return reply.code(400).send({ error: 'Nothing to change' });
+
+    vals.push(id);
+    await texec(cid, `UPDATE ro_promises SET ${sets.join(', ')} WHERE id = ?`, vals);
+
+    if (done !== undefined && (before.done === 1) !== done) {
+      await texec(cid,
+        `INSERT INTO ro_notes (ro_id, kind, body, user_id, user_name) VALUES (?, 'auto', ?, ?, ?)`,
+        [before.ro_id, `Promise ${done ? 'kept' : 'reopened'}: ${before.body}`,
+         ctx.user.id, ctx.user.name]);
+    }
+
+    return { ok: true };
+  });
+
+  app.delete('/api/promises/:id', async (req, reply) => {
+    const ctx = requireCompany(req, reply);
+    if (!ctx) return;
+    await texec(ctx.company!.id, 'DELETE FROM ro_promises WHERE id = ?',
+      [Number((req.params as { id: string }).id)]);
+    return { ok: true };
+  });
+
   app.patch('/api/ro/:id/money', async (req, reply) => {
     const ctx = requireCompany(req, reply);
     if (!ctx) return;
