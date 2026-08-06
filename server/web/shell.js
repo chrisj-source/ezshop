@@ -11,6 +11,9 @@ window.Shell = (function () {
   var NAV = [
     { key: 'board',    href: '/board.html',    label: 'Board',    feature: 'board' },
     { key: 'parts',    href: '/parts.html',    label: 'Parts',    feature: 'parts',   cap: 'manageParts' },
+    { key: 'leads',    href: '/leads.html',    label: 'Leads',    feature: 'leads',   cap: 'manageLeads' },
+    { key: 'schedule', href: '/schedule.html', label: 'Schedule', feature: 'sched' },
+    { key: 'import',   href: '/import.html',   label: 'Import',   feature: 'ems',     cap: 'acceptImports' },
     { key: 'checkin',  href: '/checkin.html',  label: 'Check-in', feature: 'mcheck' },
     { key: 'admin',    href: '/admin.html',    label: 'Admin',    feature: 'board',   cap: 'admin' }
   ];

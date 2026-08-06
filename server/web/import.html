@@ -1,0 +1,402 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1c2740">
+<title>Import — Easy Shop</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/shell.css">
+<style>
+  .pane { padding:0 18px 40px; }
+  .drop {
+    border:1px dashed var(--line); border-radius:8px; padding:26px 20px; text-align:center;
+    cursor:pointer; margin-top:6px;
+  }
+  .drop:hover, .drop.hot { border-color:var(--acc); background:rgba(217,164,65,.05); }
+  .dropt { font:500 13px var(--font); }
+  .dropn { font:400 11px var(--font); color:var(--dim); margin-top:6px; line-height:1.6; }
+  .improw {
+    display:grid; grid-template-columns:1fr 150px 130px 110px 96px; gap:12px; align-items:center;
+    padding:11px 0; border-top:1px solid var(--whisper); cursor:pointer;
+  }
+  .improw:hover { background:var(--whisper); }
+  .state { font:500 9px var(--font); letter-spacing:.07em; text-transform:uppercase;
+           padding:3px 7px; border-radius:3px; white-space:nowrap; }
+  .conf { font:400 10px var(--font); color:var(--dim); }
+  .lines { max-height:330px; overflow-y:auto; border:1px solid var(--line); border-radius:6px; margin-top:10px; }
+  .lines table { width:100%; }
+  .lines th { position:sticky; top:0; background:var(--surf); padding:8px 10px; }
+  .lines td { padding:7px 10px; font-size:11.5px; }
+  .cand {
+    display:grid; grid-template-columns:1fr auto; gap:10px; align-items:center;
+    padding:10px 12px; border:1px solid var(--line); border-radius:6px; margin-top:8px;
+  }
+  .cand.sel { border-color:var(--acc); background:rgba(217,164,65,.07); }
+  .warnbox {
+    border:1px solid var(--blocked); border-radius:6px; padding:11px 13px; margin-top:12px;
+    font:400 11.5px var(--font); line-height:1.6; color:var(--blocked);
+  }
+  .opts { display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:9px; margin-top:12px; }
+  .opt { display:flex; gap:8px; align-items:flex-start; font:400 11.5px var(--font); }
+  .opt input { margin-top:2px; }
+  @media (max-width:860px) {
+    .improw { grid-template-columns:1fr auto; }
+    .pane { padding:0 14px 40px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="bar">
+  <div class="brand"><div class="mark">ES</div><div class="word">Easy Shop</div></div>
+  <div class="vr"></div>
+  <div class="co" id="coName">—</div>
+  <div id="nav"></div>
+  <div class="spacer"></div>
+  <div id="bell"></div>
+  <div class="who" id="who">—</div>
+  <button class="ghostbtn" id="signout">Sign out</button>
+</div>
+<div class="hairline"></div>
+
+<div class="head">
+  <h1>Estimate import</h1>
+  <div class="headmeta" id="headmeta">Loading…</div>
+</div>
+
+<div class="kpis" id="kpis"></div>
+
+<main>
+  <div class="pane">
+    <div class="drop" id="drop">
+      <div class="dropt">Drop a CCC, Mitchell or Audatex export here</div>
+      <div class="dropn">
+        Select the whole set — every file that shares the estimate's name
+        (<code>a9062516.env</code>, <code>.veh</code>, <code>.lin</code> and the rest).<br>
+        Nothing touches a repair order until you accept it below.
+      </div>
+      <input type="file" id="fileInput" multiple hidden>
+    </div>
+    <div class="msg" id="msg"></div>
+
+    <div class="sec">Waiting for review</div>
+    <div id="list"></div>
+  </div>
+</main>
+
+<div class="scrim" id="scrim"></div>
+<aside class="drawer" id="drawer" aria-hidden="true">
+  <div class="dhead">
+    <div style="min-width:0;flex:1">
+      <div style="font:500 16px var(--font)" id="dTitle">—</div>
+      <div class="sub" id="dSub">—</div>
+    </div>
+    <button class="close" id="dClose" aria-label="Close">&times;</button>
+  </div>
+  <div class="dbody" id="dBody"></div>
+</aside>
+
+<script src="/shell.js"></script>
+<script>
+(function () {
+  var api = Shell.api, esc = Shell.esc;
+  var ME = null, IMPORTS = [], OPEN = null, PICKED = null;
+
+  function $(id) { return document.getElementById(id); }
+  function money(c) { return c == null ? '—' : '$' + (c / 100).toLocaleString('en-US', { maximumFractionDigits: 2 }); }
+  function when(v) {
+    if (!v) return '—';
+    var d = new Date(v);
+    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + ' ' +
+           d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+  }
+  var TONE = {
+    pending: 'var(--blocked)', accepted: 'var(--done)', rejected: 'var(--dim)',
+    failed: 'var(--stopped)', superseded: 'var(--dim)'
+  };
+
+  api('/api/me').then(function (me) {
+    ME = me;
+    if (!me.company) { location.href = '/'; return null; }
+    if (me.features.indexOf('ems') < 0) {
+      document.body.innerHTML = '<div class="empty">Estimate import is not switched on for this shop.</div>';
+      return null;
+    }
+    Shell.mount({ me: me, active: 'import' });
+    return load();
+  }).catch(function (e) { if (e.message !== 'signed out') console.error(e); });
+
+  function load() {
+    return api('/api/ems/imports').then(function (d) {
+      IMPORTS = d.imports;
+      $('kpis').innerHTML = [
+        { v: d.counts.pending, k: 'waiting' },
+        { v: d.counts.failed, k: 'failed to read' },
+        { v: d.counts.acceptedWeek, k: 'accepted this week' }
+      ].map(function (i) {
+        return '<div><div class="kpi-v"' + (i.k === 'waiting' && i.v > 0 ? ' style="color:var(--acc)"' : '') +
+          '>' + esc(i.v) + '</div><div class="kpi-k">' + esc(i.k) + '</div></div>';
+      }).join('');
+      render();
+    });
+  }
+
+  function render() {
+    $('headmeta').textContent = IMPORTS.length + ' import' + (IMPORTS.length === 1 ? '' : 's') +
+      ' — pending, failed, and anything decided in the last two weeks';
+
+    if (!IMPORTS.length) {
+      $('list').innerHTML = '<div class="empty">Nothing imported yet.<br>' +
+        'Export an EMS set from CCC and drop it above.</div>';
+      return;
+    }
+
+    $('list').innerHTML =
+      '<div class="improw" style="border:none;cursor:default">' +
+      '<div class="f-l">Estimate</div><div class="f-l">Vehicle</div>' +
+      '<div class="f-l">Total</div><div class="f-l">Received</div><div class="f-l">State</div></div>' +
+      IMPORTS.map(function (i) {
+        return '<div class="improw" data-id="' + i.id + '">' +
+          '<div><div class="log-b">' + esc(i.ro_number || i.envelope_name || 'Unnamed') +
+          (i.supplement_seq ? ' <span class="flag" style="color:var(--move);border:1px solid var(--move)">Supp ' +
+            i.supplement_seq + '</span>' : '') + '</div>' +
+          '<div class="conf">' + esc([
+            i.estimating_system ? String(i.estimating_system).toUpperCase() : null,
+            i.line_count ? i.line_count + ' lines' : null,
+            i.matched_ro_number ? 'matched ' + i.matched_ro_number :
+              i.state === 'pending' ? 'no match yet' : null
+          ].filter(Boolean).join(' · ')) + '</div></div>' +
+          '<div class="sub">' + esc(i.vehicle_text || '—') + '<br>' + esc(i.vin || '') + '</div>' +
+          '<div class="sub">' + money(i.total_cents) + '</div>' +
+          '<div class="sub">' + when(i.received_at) + '</div>' +
+          '<div><span class="state" style="color:' + TONE[i.state] + ';border:1px solid ' +
+          TONE[i.state] + '">' + esc(i.state) + '</span></div>' +
+          '</div>';
+      }).join('');
+
+    Array.prototype.forEach.call($('list').querySelectorAll('[data-id]'), function (el) {
+      el.addEventListener('click', function () { openImport(Number(el.dataset.id)); });
+    });
+  }
+
+  /* -------------------------------------------------------------- upload */
+
+  var drop = $('drop'), input = $('fileInput');
+  drop.addEventListener('click', function () { input.click(); });
+  input.addEventListener('change', function () { upload(input.files); });
+  ['dragenter', 'dragover'].forEach(function (ev) {
+    drop.addEventListener(ev, function (e) { e.preventDefault(); drop.classList.add('hot'); });
+  });
+  ['dragleave', 'drop'].forEach(function (ev) {
+    drop.addEventListener(ev, function (e) { e.preventDefault(); drop.classList.remove('hot'); });
+  });
+  drop.addEventListener('drop', function (e) {
+    if (e.dataTransfer && e.dataTransfer.files.length) upload(e.dataTransfer.files);
+  });
+
+  function upload(files) {
+    if (!files || !files.length) return;
+    var msg = $('msg');
+    msg.className = 'msg';
+
+    var fd = new FormData();
+    for (var i = 0; i < files.length; i++) fd.append('f' + i, files[i]);
+
+    var was = drop.innerHTML;
+    drop.innerHTML = '<div class="dropt">Reading ' + files.length + ' file' +
+      (files.length === 1 ? '' : 's') + '…</div>';
+
+    fetch('/api/ems/upload', { method: 'POST', body: fd })
+      .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+      .then(function (res) {
+        drop.innerHTML = was;
+        if (!res.ok) {
+          msg.textContent = res.j.error;
+          msg.className = 'msg err';
+          return load();
+        }
+        return load().then(function () { openImport(res.j.importId); });
+      })
+      .catch(function () {
+        drop.innerHTML = was;
+        msg.textContent = 'Upload failed.';
+        msg.className = 'msg err';
+      });
+  }
+
+  /* -------------------------------------------------------------- review */
+
+  function openImport(id) {
+    OPEN = id;
+    PICKED = null;
+    $('scrim').classList.add('open');
+    $('drawer').classList.add('open');
+    $('drawer').setAttribute('aria-hidden', 'false');
+    $('dBody').innerHTML = '<div class="empty">Loading…</div>';
+
+    api('/api/ems/imports/' + id).then(renderReview).catch(function (e) {
+      $('dBody').innerHTML = '<div class="empty">' + esc(e.message) + '</div>';
+    });
+  }
+
+  function closeReview() {
+    OPEN = null;
+    $('scrim').classList.remove('open');
+    $('drawer').classList.remove('open');
+    $('drawer').setAttribute('aria-hidden', 'true');
+  }
+
+  function field(l, v) {
+    return '<div><div class="f-l">' + esc(l) + '</div><div class="f-v">' +
+      esc(v == null || v === '' ? '—' : v) + '</div></div>';
+  }
+
+  function renderReview(d) {
+    var i = d.import, h = [];
+    PICKED = i.matched_ro_id || null;
+
+    $('dTitle').textContent = (i.ro_number || i.envelope_name || 'Unnamed estimate') +
+      (i.supplement_seq ? ' — supplement ' + i.supplement_seq : '');
+    $('dSub').textContent = [
+      i.estimating_system ? String(i.estimating_system).toUpperCase() : null,
+      i.vehicle_text, i.vin, i.line_count + ' lines'
+    ].filter(Boolean).join(' · ');
+
+    if (i.state === 'failed') {
+      h.push('<div class="warnbox" style="color:var(--stopped);border-color:var(--stopped)">' +
+        'This set could not be read: ' + esc(i.parse_error || 'unknown reason') + '</div>');
+    }
+
+    h.push('<div class="sec">What the file says</div><div class="grid2">');
+    h.push(field('RO number', i.ro_number), field('Claim', i.claim_number));
+    h.push(field('Customer', i.customer_name), field('Vehicle', i.vehicle_text));
+    h.push(field('VIN', i.vin), field('Total', money(i.total_cents)));
+    h.push(field('Supplement', i.supplement_seq ? 'Number ' + i.supplement_seq : 'Original estimate'));
+    h.push(field('Received', when(i.received_at)));
+    h.push('</div>');
+
+    if (i.state === 'pending') {
+      h.push('<div class="sec">Which repair order?</div>');
+
+      if (i.matched_ro_id) {
+        var m = d.candidates.filter(function (c) { return c.id === i.matched_ro_id; })[0];
+        h.push('<div class="cand sel" data-ro="' + i.matched_ro_id + '">' +
+          '<div><div class="log-b">' + esc(m ? m.ro_number : 'RO ' + i.matched_ro_id) + '</div>' +
+          '<div class="conf">Matched on ' + esc(i.match_confidence === 'exact' ? 'an exact key' : 'a likely key') +
+          (m ? ' · ' + esc([m.vehicle, m.customer_name, m.status_label].filter(Boolean).join(' · ')) : '') +
+          '</div></div><div class="state" style="color:var(--done);border:1px solid var(--done)">Chosen</div></div>');
+      }
+
+      var others = d.candidates.filter(function (c) { return c.id !== i.matched_ro_id; });
+      if (others.length) {
+        h.push('<div class="sub" style="margin-top:10px">' +
+          (i.matched_ro_id ? 'Or pick a different file:' : 'Open files that might be it:') + '</div>');
+        others.forEach(function (c) {
+          h.push('<div class="cand" data-ro="' + c.id + '">' +
+            '<div><div class="log-b">' + esc(c.ro_number) + '</div>' +
+            '<div class="conf">' + esc([c.vehicle, c.customer_name, c.vin, c.status_label]
+              .filter(Boolean).join(' · ')) + '</div></div>' +
+            '<button class="btn btn-ghost" style="padding:5px 10px;font-size:10.5px">Use this</button></div>');
+        });
+      }
+
+      if (!i.matched_ro_id && !others.length) {
+        h.push('<div class="warnbox">Nothing on the board matches this estimate\\u2019s RO number, VIN or claim ' +
+          'number. Create the file from it — the estimate fills the customer, vehicle, insurance, ' +
+          'parts and labour with no typing.</div>');
+      }
+
+      h.push('<div class="sec">What to bring across</div>' +
+        '<div class="opts">' +
+        opt('optParts', 'Parts lines', true) +
+        opt('optMoney', 'Total and labour hours', true) +
+        opt('optVehicle', 'Fill blank vehicle fields', true) +
+        '</div>');
+
+      h.push('<div class="row" style="margin-top:18px">' +
+        '<button class="btn btn-solid" id="accept">' +
+        (i.matched_ro_id ? 'Accept onto this file' : 'Create the file and accept') + '</button>' +
+        '<button class="btn btn-ghost" id="reject">Reject</button></div>');
+      h.push('<div class="msg" id="rMsg"></div>');
+    } else {
+      h.push('<div class="sec">Outcome</div><div class="grid2">' +
+        field('State', i.state) + field('Decided', when(i.decided_at)) + '</div>');
+    }
+
+    if (d.lines.length) {
+      h.push('<div class="sec">Estimate lines</div><div class="lines"><table><thead><tr>' +
+        '<th>#</th><th>Description</th><th>Part</th><th class="num">Price</th><th class="num">Hrs</th>' +
+        '</tr></thead><tbody>');
+      d.lines.forEach(function (l) {
+        h.push('<tr><td class="num">' + (l.line_no || '') + '</td>' +
+          '<td>' + esc(l.description || '—') + '</td>' +
+          '<td>' + esc(l.part_number || '') + '</td>' +
+          '<td class="num">' + (l.price_cents ? money(l.price_cents) : '') + '</td>' +
+          '<td class="num">' + (l.labor_hours || '') + '</td></tr>');
+      });
+      h.push('</tbody></table></div>');
+    }
+
+    $('dBody').innerHTML = h.join('');
+    wireReview(i);
+  }
+
+  function opt(id, label, on) {
+    return '<label class="opt"><input type="checkbox" id="' + id + '"' + (on ? ' checked' : '') + '>' +
+      '<span>' + esc(label) + '</span></label>';
+  }
+
+  function wireReview(i) {
+    Array.prototype.forEach.call(document.querySelectorAll('[data-ro]'), function (el) {
+      el.addEventListener('click', function () {
+        PICKED = Number(el.dataset.ro);
+        Array.prototype.forEach.call(document.querySelectorAll('[data-ro]'), function (x) {
+          x.classList.toggle('sel', Number(x.dataset.ro) === PICKED);
+        });
+        var btn = $('accept');
+        if (btn) btn.textContent = 'Accept onto ' + (el.querySelector('.log-b') || {}).textContent;
+      });
+    });
+
+    var acc = $('accept');
+    if (acc) acc.addEventListener('click', function () {
+      var msg = $('rMsg');
+      acc.disabled = true;
+      api('/api/ems/imports/' + OPEN + '/accept', {
+        method: 'POST',
+        body: JSON.stringify({
+          roId: PICKED,
+          createNew: !PICKED,
+          importParts: $('optParts').checked,
+          updateMoney: $('optMoney').checked,
+          updateVehicle: $('optVehicle').checked
+        })
+      }).then(function (r) {
+        msg.textContent = r.created ? 'File created and estimate applied.' : 'Applied.';
+        msg.className = 'msg ok';
+        return load().then(function () {
+          setTimeout(function () { location.href = '/board.html?ro=' + r.roId; }, 700);
+        });
+      }).catch(function (e) {
+        acc.disabled = false;
+        msg.textContent = e.message;
+        msg.className = 'msg err';
+      });
+    });
+
+    var rej = $('reject');
+    if (rej) rej.addEventListener('click', function () {
+      if (!confirm('Reject this import? The file set is kept but nothing is applied.')) return;
+      api('/api/ems/imports/' + OPEN + '/reject', { method: 'POST' })
+        .then(function () { closeReview(); return load(); });
+    });
+  }
+
+  $('scrim').addEventListener('click', closeReview);
+  $('dClose').addEventListener('click', closeReview);
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeReview(); });
+})();
+</script>
+</body>
+</html>

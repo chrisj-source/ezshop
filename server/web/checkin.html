@@ -107,7 +107,7 @@
     jobType: '', roNumber: '',
     vin: '', year: '', make: '', model: '', color: '', plate: '', plateState: '', mileage: '',
     customerName: '', phone: '', email: '', insurerName: '', claimNumber: '', dateOfLoss: '',
-    damageNote: '',
+    damageNote: '', amount: '',
     _derivedRo: '', _typedRo: ''
   };
 
@@ -251,11 +251,15 @@
         f('plate', 'Plate') + f('mileage', 'Mileage', 'number') +
         '</div>' +
         (D.payType === 'wholesale'
-          ? '<div class="fields" style="margin-top:14px"><div>' +
-            '<label class="fl" for="roNumber">RO number — last six of the VIN</label>' +
-            '<input id="roNumber" value="' + esc(D.roNumber) + '" autocapitalize="characters">' +
-            '<div class="hint">Filled from the VIN. Change it if this shop numbers them differently.</div>' +
-            '</div></div>'
+          ? '<div class="fields two" style="margin-top:14px">' +
+            '<div><label class="fl" for="roNumber">RO number — last six of the VIN</label>' +
+            '<input id="roNumber" value="' + esc(D.roNumber) + '" autocapitalize="characters"></div>' +
+            '<div><label class="fl" for="amount">Agreed amount</label>' +
+            '<input id="amount" value="' + esc(D.amount) + '" type="number" step="0.01" min="0" ' +
+            'inputmode="decimal" placeholder="0.00"></div>' +
+            '</div><div class="hint">RO number comes off the VIN — change it if this shop numbers ' +
+            'them differently. Wholesale work rarely has an estimate file, so the agreed price goes ' +
+            'in here.</div>'
           : '') +
         '</div>' + foot('Back', D.payType === 'wholesale' ? 'Photos' : 'Customer');
     }
@@ -311,7 +315,7 @@
         kv('Job', (JOBS.filter(function (j) { return j.k === D.jobType; })[0] || {}).t) +
         kv('Vehicle', [D.year, D.make, D.model].filter(Boolean).join(' ')) +
         kv('VIN', D.vin) + kv('Plate', D.plate) + kv('Colour', D.color) +
-        (D.payType === 'wholesale' ? kv('Dropped by', D.droppedBy)
+        (D.payType === 'wholesale' ? kv('Amount', D.amount ? '$' + Number(D.amount).toLocaleString('en-US', { minimumFractionDigits: 2 }) : '—') + kv('Dropped by', D.droppedBy)
           : kv('Customer', D.customerName) + kv('Phone', D.phone)) +
         (D.payType === 'insurance' ? kv('Claim', D.claimNumber) : '') +
         kv('Photos', PHOTOS.length) + kv('Note', D.damageNote) +
@@ -825,9 +829,12 @@
 
     var fd = new FormData();
     Object.keys(D).forEach(function (k) {
-      if (k.charAt(0) === '_') return;
+      if (k.charAt(0) === '_' || k === 'amount') return;
       if (D[k]) fd.append(k, D[k]);
     });
+    if (D.amount !== '' && !isNaN(Number(D.amount))) {
+      fd.append('amountCents', String(Math.round(Number(D.amount) * 100)));
+    }
     PHOTOS.forEach(function (p, i) {
       fd.append('photo' + i, p.file, p.file.name || ('photo' + i + '.jpg'));
     });

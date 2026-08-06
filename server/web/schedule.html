@@ -1,0 +1,386 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1c2740">
+<title>Schedule — Easy Shop</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/shell.css">
+<style>
+  .pane { padding:0 18px 40px; }
+  .week { display:grid; grid-template-columns:repeat(7,1fr); gap:1px; background:var(--line); border:1px solid var(--line); border-radius:6px; overflow:hidden; }
+  .day { background:var(--bg); min-height:200px; display:flex; flex-direction:column; }
+  .day.closed { background:rgba(231,234,242,.03); }
+  .day.today .dayhead { background:rgba(217,164,65,.12); }
+  .dayhead { padding:8px 10px; border-bottom:1px solid var(--whisper); }
+  .dayname { font:600 8.5px var(--font); letter-spacing:.12em; text-transform:uppercase; color:var(--acc2); }
+  .daynum { font:500 15px var(--font); font-variant-numeric:tabular-nums; margin-top:2px; }
+  .daycap { font:400 9.5px var(--font); color:var(--dim); margin-top:3px; line-height:1.4; }
+  .daycap .full { color:var(--stopped); }
+  .daybody { flex:1; padding:6px; display:flex; flex-direction:column; gap:4px; }
+  .appt {
+    border-left:3px solid var(--dim); background:var(--whisper); border-radius:3px;
+    padding:5px 7px; cursor:pointer; text-align:left; border-top:none; border-right:none; border-bottom:none;
+    color:var(--text); width:100%;
+  }
+  .appt:hover { background:rgba(217,164,65,.1); }
+  .apptt { font:500 11px var(--font); }
+  .apptm { font:400 9.5px var(--font); color:var(--dim); margin-top:1px; }
+  .addday {
+    background:none; border:1px dashed var(--line); border-radius:3px; color:var(--dim);
+    font:400 10px var(--font); padding:5px; margin-top:auto;
+  }
+  .addday:hover { border-color:var(--acc); color:var(--acc); }
+  .legend { display:flex; gap:14px; flex-wrap:wrap; padding:12px 18px 0; }
+  .legitem { display:flex; align-items:center; gap:6px; font:400 10.5px var(--font); color:var(--dim); }
+  .swatch { width:10px; height:10px; border-radius:2px; }
+  .capbar { display:flex; gap:20px; flex-wrap:wrap; padding:0 18px 14px; }
+  .capcell { font:400 10.5px var(--font); color:var(--dim); }
+  .capcell strong { color:var(--text); font-weight:500; font-variant-numeric:tabular-nums; }
+  @media (max-width:900px) {
+    .week { grid-template-columns:1fr; }
+    .day { min-height:0; }
+    .pane { padding:0 14px 40px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="bar">
+  <div class="brand"><div class="mark">ES</div><div class="word">Easy Shop</div></div>
+  <div class="vr"></div>
+  <div class="co" id="coName">—</div>
+  <div id="nav"></div>
+  <div class="spacer"></div>
+  <div id="bell"></div>
+  <div class="who" id="who">—</div>
+  <button class="ghostbtn" id="signout">Sign out</button>
+</div>
+<div class="hairline"></div>
+
+<div class="head">
+  <h1>Schedule</h1>
+  <div class="headmeta" id="headmeta">Loading…</div>
+</div>
+
+<div class="filters">
+  <button class="btn btn-ghost" id="prev">Previous week</button>
+  <button class="btn btn-ghost" id="thisWeek">This week</button>
+  <button class="btn btn-ghost" id="next">Next week</button>
+  <input type="date" id="jump">
+  <button class="btn" id="book">Book something</button>
+</div>
+
+<div class="legend" id="legend"></div>
+<div class="capbar" id="capbar"></div>
+
+<main>
+  <div class="pane">
+    <div class="week" id="week"></div>
+    <div class="msg" id="msg"></div>
+  </div>
+</main>
+
+<div class="scrim" id="scrim"></div>
+<aside class="drawer" id="drawer" aria-hidden="true">
+  <div class="dhead">
+    <div style="min-width:0;flex:1">
+      <div style="font:500 16px var(--font)" id="dTitle">—</div>
+      <div class="sub" id="dSub">—</div>
+    </div>
+    <button class="close" id="dClose" aria-label="Close">&times;</button>
+  </div>
+  <div class="dbody" id="dBody"></div>
+</aside>
+
+<script src="/shell.js"></script>
+<script>
+(function () {
+  var api = Shell.api, esc = Shell.esc;
+  var ME = null, META = null, DATA = null, FROM = null;
+
+  var TONE = {
+    drop: 'var(--move)', pickup: 'var(--done)', return: 'var(--blocked)',
+    estimate: 'var(--acc)', appraiser: 'var(--stopped)'
+  };
+  var DAYS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+
+  function $(id) { return document.getElementById(id); }
+  function iso(d) {
+    return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+  }
+  function mondayOf(d) {
+    var x = new Date(d);
+    x.setHours(12, 0, 0, 0);
+    var diff = (x.getDay() + 6) % 7;
+    x.setDate(x.getDate() - diff);
+    return x;
+  }
+  function timeOf(v) {
+    return new Date(v).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+  }
+  function kindLabel(k) {
+    return (META.kinds.filter(function (x) { return x.key === k; })[0] || {}).label || k;
+  }
+
+  api('/api/me').then(function (me) {
+    ME = me;
+    if (!me.company) { location.href = '/'; return null; }
+    if (me.features.indexOf('sched') < 0) {
+      document.body.innerHTML = '<div class="empty">The scheduler is not switched on for this shop.</div>';
+      return null;
+    }
+    Shell.mount({ me: me, active: 'schedule' });
+    return api('/api/schedule-meta');
+  }).then(function (m) {
+    if (!m) return;
+    META = m;
+    $('legend').innerHTML = m.kinds.map(function (k) {
+      return '<div class="legitem"><div class="swatch" style="background:' + TONE[k.key] + '"></div>' +
+        esc(k.label) + (k.cap ? ' · ' + k.cap + '/day' : ' · no limit') + '</div>';
+    }).join('');
+    FROM = iso(mondayOf(new Date()));
+    return load();
+  }).catch(function (e) { if (e.message !== 'signed out') console.error(e); });
+
+  function load() {
+    return api('/api/schedule?from=' + FROM + '&days=7').then(function (d) {
+      DATA = d;
+      render();
+    });
+  }
+
+  function render() {
+    var start = new Date(FROM + 'T12:00');
+    var end = new Date(start); end.setDate(end.getDate() + 6);
+
+    $('headmeta').textContent =
+      start.toLocaleDateString('en-US', { month: 'long', day: 'numeric' }) + ' – ' +
+      end.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }) +
+      ' · ' + DATA.appointments.length + ' booked' +
+      (META.canOverbook ? ' · you can overbook a full day' : '');
+
+    var totals = {};
+    DATA.appointments.forEach(function (a) { totals[a.kind] = (totals[a.kind] || 0) + 1; });
+    $('capbar').innerHTML = META.kinds.map(function (k) {
+      return '<div class="capcell">' + esc(k.label) + ' <strong>' + (totals[k.key] || 0) + '</strong>' +
+        (k.cap ? ' of ' + (k.cap * 7) + ' this week' : '') + '</div>';
+    }).join('');
+
+    var todayIso = iso(new Date());
+    var html = '';
+
+    for (var i = 0; i < 7; i++) {
+      var d = new Date(start);
+      d.setDate(d.getDate() + i);
+      var key = iso(d);
+      var weekday = DAYS[d.getDay()];
+      var isClosed = META.closedDays.indexOf(weekday) >= 0;
+
+      var mine = DATA.appointments.filter(function (a) { return iso(new Date(a.starts_at)) === key; });
+      var used = DATA.used[key] || {};
+
+      var capText = META.kinds.filter(function (k) { return k.cap > 0; }).map(function (k) {
+        var n = used[k.key] || 0;
+        var full = n >= k.cap;
+        return '<span class="' + (full ? 'full' : '') + '">' + k.label.charAt(0) + k.label.slice(1, 4).toLowerCase() +
+          ' ' + n + '/' + k.cap + '</span>';
+      }).join(' · ');
+
+      html += '<div class="day' + (isClosed ? ' closed' : '') + (key === todayIso ? ' today' : '') + '">' +
+        '<div class="dayhead"><div class="dayname">' + weekday.slice(0, 3).toUpperCase() + '</div>' +
+        '<div class="daynum">' + d.getDate() + '</div>' +
+        '<div class="daycap">' + (isClosed ? 'Closed' : capText || 'no limits') + '</div></div>' +
+        '<div class="daybody">' +
+        mine.map(function (a) {
+          return '<button class="appt" data-appt="' + a.id + '" style="border-left-color:' + TONE[a.kind] + '">' +
+            '<div class="apptt">' + esc(a.customer_name) + '</div>' +
+            '<div class="apptm">' + timeOf(a.starts_at) + ' · ' + esc(kindLabel(a.kind)) +
+            (a.ro_number ? ' · ' + esc(a.ro_number) : '') + '</div></button>';
+        }).join('') +
+        (isClosed ? '' : '<button class="addday" data-add="' + key + '">Book</button>') +
+        '</div></div>';
+    }
+
+    $('week').innerHTML = html;
+
+    Array.prototype.forEach.call(document.querySelectorAll('[data-appt]'), function (b) {
+      b.addEventListener('click', function () { openAppt(Number(b.dataset.appt)); });
+    });
+    Array.prototype.forEach.call(document.querySelectorAll('[data-add]'), function (b) {
+      b.addEventListener('click', function () { openBooking(b.dataset.add); });
+    });
+  }
+
+  /* ------------------------------------------------------------- booking */
+
+  function openBooking(day) {
+    $('scrim').classList.add('open');
+    $('drawer').classList.add('open');
+    $('drawer').setAttribute('aria-hidden', 'false');
+    $('dTitle').textContent = 'Book something';
+    $('dSub').textContent = new Date(day + 'T12:00')
+      .toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+
+    var used = DATA.used[day] || {};
+
+    $('dBody').innerHTML =
+      '<div class="sec">What</div>' +
+      '<div class="row">' + META.kinds.map(function (k) {
+        var n = used[k.key] || 0;
+        var full = k.cap > 0 && n >= k.cap;
+        return '<button class="btn btn-ghost" data-kind="' + k.key + '" style="padding:7px 12px">' +
+          esc(k.label) + (k.cap ? ' <span class="sub">' + n + '/' + k.cap + '</span>' : '') +
+          (full ? ' <span class="sub" style="color:var(--stopped)">full</span>' : '') + '</button>';
+      }).join('') + '</div>' +
+      '<div class="sec">Who</div>' +
+      '<div class="grid2">' +
+      '<div><label class="fl">Name</label><input id="bName"></div>' +
+      '<div><label class="fl">Phone</label><input id="bPhone" type="tel"></div>' +
+      '<div><label class="fl">Vehicle</label><input id="bVehicle" placeholder="2020 Silverado"></div>' +
+      '<div><label class="fl">Time</label><input id="bTime" type="time" value="09:00"></div>' +
+      '</div>' +
+      '<div style="margin-top:12px"><label class="fl">Note</label>' +
+      '<textarea id="bNote" placeholder="Hail damage, wants an estimate"></textarea></div>' +
+      '<div class="row" style="margin-top:14px">' +
+      '<button class="btn btn-solid" id="bSave" disabled>Pick a type first</button></div>' +
+      '<div class="msg" id="bMsg"></div>' +
+      '<div class="sub" style="margin-top:14px">An estimate appointment, or a drop for a car that is ' +
+      'not already on the board, raises a lead automatically.</div>';
+
+    var kind = null;
+    Array.prototype.forEach.call(document.querySelectorAll('[data-kind]'), function (b) {
+      b.addEventListener('click', function () {
+        kind = b.dataset.kind;
+        Array.prototype.forEach.call(document.querySelectorAll('[data-kind]'), function (x) {
+          x.className = 'btn ' + (x.dataset.kind === kind ? '' : 'btn-ghost');
+        });
+        $('bSave').disabled = false;
+        $('bSave').textContent = 'Book the ' + kindLabel(kind).toLowerCase();
+      });
+    });
+
+    $('bSave').addEventListener('click', function () { save(false); });
+
+    function save(override) {
+      var msg = $('bMsg');
+      var name = $('bName').value.trim();
+      if (!name) { msg.textContent = 'A name is required.'; msg.className = 'msg err'; return; }
+
+      api('/api/schedule', {
+        method: 'POST',
+        body: JSON.stringify({
+          kind: kind,
+          startsAt: day + 'T' + ($('bTime').value || '09:00'),
+          customerName: name,
+          phone: $('bPhone').value.trim() || undefined,
+          vehicleText: $('bVehicle').value.trim() || undefined,
+          note: $('bNote').value.trim() || undefined,
+          override: override
+        })
+      }).then(function (r) {
+        closeDrawer();
+        return load().then(function () {
+          var m = $('msg');
+          m.textContent = r.leadId ? 'Booked, and a lead was raised.' : 'Booked.';
+          m.className = 'msg ok';
+          setTimeout(function () { m.className = 'msg'; }, 4000);
+        });
+      }).catch(function (e) {
+        msg.className = 'msg err';
+        if (/full/i.test(e.message) && META.canOverbook) {
+          msg.innerHTML = esc(e.message) +
+            ' <button class="btn btn-ghost" id="ovr" style="padding:4px 9px;font-size:10.5px;margin-left:6px">' +
+            'Overbook anyway</button>';
+          $('ovr').addEventListener('click', function () { save(true); });
+        } else {
+          msg.textContent = e.message;
+        }
+      });
+    }
+  }
+
+  function openAppt(id) {
+    var a = DATA.appointments.filter(function (x) { return x.id === id; })[0];
+    if (!a) return;
+
+    $('scrim').classList.add('open');
+    $('drawer').classList.add('open');
+    $('drawer').setAttribute('aria-hidden', 'false');
+    $('dTitle').textContent = a.customer_name;
+    $('dSub').textContent = kindLabel(a.kind) + ' · ' +
+      new Date(a.starts_at).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' }) +
+      ' at ' + timeOf(a.starts_at);
+
+    var h = ['<div class="sec">Details</div><div class="grid2">'];
+    [['Phone', a.phone], ['Vehicle', a.vehicle_text || a.ro_vehicle],
+     ['Repair order', a.ro_number], ['Lead', a.lead_number],
+     ['Status', a.status_label], ['Note', a.note]].forEach(function (p) {
+      h.push('<div><div class="f-l">' + esc(p[0]) + '</div><div class="f-v">' +
+        esc(p[1] || '—') + '</div></div>');
+    });
+    h.push('</div>');
+
+    if (a.ro_id) h.push('<div class="row" style="margin-top:16px">' +
+      '<a class="btn btn-ghost" href="/board.html?ro=' + a.ro_id + '">Open the file</a></div>');
+    if (a.lead_id) h.push('<div class="row" style="margin-top:9px">' +
+      '<a class="btn btn-ghost" href="/leads.html">Go to leads</a></div>');
+
+    h.push('<div class="sec">Move it</div>' +
+      '<div class="row"><input type="date" id="mDate" value="' + iso(new Date(a.starts_at)) + '">' +
+      '<input type="time" id="mTime" value="' +
+      new Date(a.starts_at).toTimeString().slice(0, 5) + '">' +
+      '<button class="btn btn-ghost" id="mSave">Save</button></div>');
+
+    h.push('<div class="row" style="margin-top:18px">' +
+      '<button class="btn btn-danger" id="cancelAppt">Cancel this appointment</button></div>' +
+      '<div class="msg" id="aMsg"></div>');
+
+    $('dBody').innerHTML = h.join('');
+
+    $('mSave').addEventListener('click', function () {
+      api('/api/schedule/' + id, {
+        method: 'PATCH',
+        body: JSON.stringify({ startsAt: $('mDate').value + 'T' + ($('mTime').value || '09:00') })
+      }).then(function () { closeDrawer(); return load(); })
+        .catch(function (e) {
+          $('aMsg').textContent = e.message;
+          $('aMsg').className = 'msg err';
+        });
+    });
+
+    $('cancelAppt').addEventListener('click', function () {
+      if (!confirm('Cancel this appointment?')) return;
+      api('/api/schedule/' + id, { method: 'DELETE' })
+        .then(function () { closeDrawer(); return load(); });
+    });
+  }
+
+  function closeDrawer() {
+    $('scrim').classList.remove('open');
+    $('drawer').classList.remove('open');
+    $('drawer').setAttribute('aria-hidden', 'true');
+  }
+
+  function shift(days) {
+    var d = new Date(FROM + 'T12:00');
+    d.setDate(d.getDate() + days);
+    FROM = iso(d);
+    load();
+  }
+
+  $('prev').addEventListener('click', function () { shift(-7); });
+  $('next').addEventListener('click', function () { shift(7); });
+  $('thisWeek').addEventListener('click', function () { FROM = iso(mondayOf(new Date())); load(); });
+  $('jump').addEventListener('change', function () {
+    if (this.value) { FROM = iso(mondayOf(new Date(this.value + 'T12:00'))); load(); }
+  });
+  $('book').addEventListener('click', function () { openBooking(iso(new Date())); });
+  $('scrim').addEventListener('click', closeDrawer);
+  $('dClose').addEventListener('click', closeDrawer);
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeDrawer(); });
+})();
+</script>
+</body>
+</html>

@@ -19,6 +19,9 @@ import { registerParts } from './routes/parts';
 import { registerAdmin } from './routes/admin';
 import { registerCheckin } from './routes/checkin';
 import { registerClients } from './routes/clients';
+import { registerEms } from './routes/ems';
+import { registerLeads } from './routes/leads';
+import { registerScheduler } from './routes/scheduler';
 import { purgeExpiredSessions } from './auth/session';
 
 async function main(): Promise<void> {
@@ -32,7 +35,7 @@ async function main(): Promise<void> {
 
   await app.register(cookie, { secret: config.cookieSecret });
   await app.register(multipart, {
-    limits: { fileSize: 25 * 1024 * 1024, files: 12 }
+    limits: { fileSize: 25 * 1024 * 1024, files: 60, fieldSize: 64 * 1024 }
   });
 
   const webRoot = path.join(__dirname, '..', 'web');
@@ -52,6 +55,9 @@ async function main(): Promise<void> {
   await registerAdmin(app);
   await registerCheckin(app);
   await registerClients(app);
+  await registerEms(app);
+  await registerLeads(app);
+  await registerScheduler(app);
 
   app.get('/api/health', async () => {
     const [r] = await master().query('SELECT 1 AS ok');

@@ -322,8 +322,25 @@
     h.push(field('Insurer', r.insurer_name), field('Claim', r.claim_number));
     h.push(field('VIN', r.vin), field('Plate', r.plate));
     h.push(field('Repair path', r.repair_path), field('Labour hours', r.labor_hours));
-    if (ME.caps.money) h.push(field('Amount', money(r.amount_cents)), field('Deductible', money(r.deductible_cents)));
     h.push('</div>');
+
+    if (ME.caps.money) {
+      h.push('<div class="sec">Money</div><div class="grid2">' +
+        '<div><label class="fl" for="m_amount">Amount</label>' +
+        '<input type="number" step="0.01" min="0" id="m_amount" style="width:100%" ' +
+        'value="' + ((r.amount_cents || 0) / 100).toFixed(2) + '" data-was="' +
+        ((r.amount_cents || 0) / 100).toFixed(2) + '"></div>' +
+        '<div><label class="fl" for="m_deduct">Deductible</label>' +
+        '<input type="number" step="0.01" min="0" id="m_deduct" style="width:100%" ' +
+        'value="' + ((r.deductible_cents || 0) / 100).toFixed(2) + '" data-was="' +
+        ((r.deductible_cents || 0) / 100).toFixed(2) + '"></div>' +
+        '<div><label class="fl" for="m_hours">Labour hours</label>' +
+        '<input type="number" step="0.1" min="0" id="m_hours" style="width:100%" ' +
+        'value="' + (Number(r.labor_hours) || 0) + '" data-was="' + (Number(r.labor_hours) || 0) + '"></div>' +
+        '</div><div class="row" style="margin-top:11px">' +
+        '<button class="btn btn-ghost" id="saveMoney">Save money</button>' +
+        '<span class="sub">Wholesale work is priced here, not imported.</span></div>');
+    }
 
     var ak = Object.keys(d.assigned || {});
     if (ak.length) {
@@ -422,6 +439,20 @@
       }).then(function () {
         return load().then(function () { openRo(OPEN); Shell.refreshCount(); });
       }).catch(function (e) { say(e.message, 'err'); });
+    });
+
+    var saveMoney = $('saveMoney');
+    if (saveMoney) saveMoney.addEventListener('click', function () {
+      var body = {}, n = 0;
+      var a = $('m_amount'), d = $('m_deduct'), hr = $('m_hours');
+      if (a.value !== a.dataset.was) { body.amountCents = Math.round(Number(a.value || 0) * 100); n++; }
+      if (d.value !== d.dataset.was) { body.deductibleCents = Math.round(Number(d.value || 0) * 100); n++; }
+      if (hr.value !== hr.dataset.was) { body.laborHours = Number(hr.value || 0); n++; }
+      if (!n) return say('Nothing changed.', 'ok');
+
+      api('/api/ro/' + OPEN + '/money', { method: 'PATCH', body: JSON.stringify(body) })
+        .then(function () { return load().then(function () { openRo(OPEN); }); })
+        .catch(function (e) { say(e.message, 'err'); });
     });
 
     var saveDates = $('saveDates');

@@ -255,6 +255,43 @@ export async function registerRepairOrders(app: FastifyInstance): Promise<void> 
    * that arrived Friday and got written up Monday, a delivery logged late —
    * so they are editable rather than derived from the status history.
    */
+  /** Money and promise fields the counter corrects on the file. */
+  app.patch('/api/ro/:id/money', async (req, reply) => {
+    const ctx = requireCompany(req, reply);
+    if (!ctx) return;
+    if (!ctx.caps.money) return reply.code(403).send({ error: 'Not permitted' });
+
+    const id = Number((req.params as { id: string }).id);
+    const b = req.body as { amountCents?: number; deductibleCents?: number; laborHours?: number };
+
+    const sets: string[] = [];
+    const vals: unknown[] = [];
+    const notes: string[] = [];
+    const dollars = (c: number) => '$' + (c / 100).toLocaleString('en-US');
+
+    if (b.amountCents !== undefined) {
+      sets.push('amount_cents = ?'); vals.push(Math.max(0, Math.round(b.amountCents)));
+      notes.push('Amount set to ' + dollars(Math.max(0, Math.round(b.amountCents))));
+    }
+    if (b.deductibleCents !== undefined) {
+      sets.push('deductible_cents = ?'); vals.push(Math.max(0, Math.round(b.deductibleCents)));
+      notes.push('Deductible set to ' + dollars(Math.max(0, Math.round(b.deductibleCents))));
+    }
+    if (b.laborHours !== undefined) {
+      sets.push('labor_hours = ?'); vals.push(Math.max(0, Number(b.laborHours)));
+      notes.push('Labour hours set to ' + Number(b.laborHours));
+    }
+    if (!sets.length) return reply.code(400).send({ error: 'Nothing to change' });
+
+    vals.push(id);
+    await texec(ctx.company!.id, `UPDATE repair_orders SET ${sets.join(', ')} WHERE id = ?`, vals);
+    await texec(ctx.company!.id,
+      `INSERT INTO ro_notes (ro_id, kind, body, user_id, user_name) VALUES (?, 'auto', ?, ?, ?)`,
+      [id, notes.join('. ') + '.', ctx.user.id, ctx.user.name]
+    );
+    return { ok: true };
+  });
+
   app.patch('/api/ro/:id/dates', async (req, reply) => {
     const ctx = requireCompany(req, reply);
     if (!ctx) return;

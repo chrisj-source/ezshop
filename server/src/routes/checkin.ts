@@ -167,11 +167,12 @@ export async function registerCheckin(app: FastifyInstance): Promise<void> {
       const [r] = await c.query<ResultSetHeader>(
         `INSERT INTO repair_orders
            (ro_number, client_id, vehicle_id, insurer_client_id, ro_type, repair_path,
-            status_slot, status_since, claim_number, date_of_loss, created_by)
-         VALUES (?, ?, ?, ?, ?, ?, 'intake.arrived', NOW(), ?, ?, ?)`,
+            status_slot, status_since, claim_number, date_of_loss, amount_cents, created_by)
+         VALUES (?, ?, ?, ?, ?, ?, 'intake.arrived', NOW(), ?, ?, ?, ?)`,
         [roNumber, clientId, vehicleId, insurerId,
          isWholesale ? 'wholesale' : 'repair', pathMap[jobType] ?? 'undecided',
-         fields.claimNumber || null, fields.dateOfLoss || null, ctx.user.id]
+         fields.claimNumber || null, fields.dateOfLoss || null,
+         Number(fields.amountCents) > 0 ? Number(fields.amountCents) : 0, ctx.user.id]
       );
       const id = r.insertId;
 
