@@ -1,0 +1,602 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1c2740">
+<title>Reports — Easy Shop</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/shell.css">
+<style>
+  .pane { padding:0 18px 44px; }
+  .tabs { display:flex; gap:2px; padding:0 18px 12px; flex:none; flex-wrap:wrap; }
+  .tab { font:500 11.5px var(--font); color:var(--dim); background:transparent;
+         border:1px solid var(--line); border-radius:4px; padding:8px 13px; }
+  .tab:hover { color:var(--text); }
+  .tab.sel { color:var(--acc); border-color:var(--acc); background:rgba(217,164,65,.09); }
+  .tab .n { font-variant-numeric:tabular-nums; opacity:.7; margin-left:5px; }
+  .bignum { display:flex; gap:34px; flex-wrap:wrap; margin-top:4px; }
+  .bn-v { font:500 26px/1 var(--font); font-variant-numeric:tabular-nums; letter-spacing:-.01em; }
+  .bn-k { font:400 9.5px var(--font); letter-spacing:.06em; text-transform:uppercase;
+          color:var(--dim); margin-top:5px; }
+  .bn-n { font:400 10px var(--font); color:var(--dim); margin-top:3px; }
+  .bar { display:flex; align-items:center; gap:10px; }
+  .bartrack { flex:1; height:6px; background:var(--whisper); border-radius:3px; overflow:hidden; min-width:60px; }
+  .barfill { height:100%; background:var(--acc); border-radius:3px; }
+  .spark { display:flex; align-items:flex-end; gap:3px; height:46px; margin-top:8px; }
+  .sparkbar { flex:1; background:var(--acc); border-radius:2px 2px 0 0; min-height:2px; opacity:.75; }
+  .sparkbar:hover { opacity:1; }
+  .sparklabels { display:flex; gap:3px; margin-top:5px; }
+  .sparklabels div { flex:1; font:400 8.5px var(--font); color:var(--dim); text-align:center;
+                     overflow:hidden; white-space:nowrap; }
+  .printhide { }
+  @media print {
+    .bar, .tabs, .filters, .printhide, #nav, #bell { display:none !important; }
+    body { background:#fff; color:#000; overflow:visible; height:auto; }
+    main { overflow:visible; }
+    table, td, th { color:#000 !important; }
+    .sec { color:#000 !important; }
+  }
+  @media (max-width:900px) { .pane { padding:0 14px 44px; } }
+</style>
+</head>
+<body>
+
+<div class="bar">
+  <div class="brand"><div class="mark">ES</div><div class="word">Easy Shop</div></div>
+  <div class="vr"></div>
+  <div class="co" id="coName">—</div>
+  <div id="nav"></div>
+  <div class="spacer"></div>
+  <div id="bell"></div>
+  <div class="who" id="who">—</div>
+  <button class="ghostbtn" id="signout">Sign out</button>
+</div>
+<div class="hairline"></div>
+
+<div class="head">
+  <h1 id="title">Reports</h1>
+  <div class="headmeta" id="headmeta">Loading…</div>
+</div>
+
+<div class="filters">
+  <select id="fWindow"></select>
+  <input type="date" id="fFrom" hidden>
+  <input type="date" id="fTo" hidden>
+  <button class="btn btn-ghost" id="refresh">Refresh</button>
+  <button class="btn btn-ghost" id="print">Print</button>
+</div>
+
+<div class="tabs" id="tabs"></div>
+
+<main><div class="pane" id="pane"><div class="empty">Loading…</div></div></main>
+
+<script src="/shell.js"></script>
+<script>
+(function () {
+  var api = Shell.api, esc = Shell.esc;
+  var ME = null, META = null, TAB = 'production', WINDOW = 'mtd';
+
+  function $(id) { return document.getElementById(id); }
+  function money(c) {
+    if (c == null) return '—';
+    return '$' + Math.round(c / 100).toLocaleString('en-US');
+  }
+  function money2(c) {
+    if (c == null) return '—';
+    return '$' + (c / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+  function num(v, dp) {
+    if (v == null) return '—';
+    return Number(v).toLocaleString('en-US', { maximumFractionDigits: dp == null ? 1 : dp });
+  }
+  function hrs(h) {
+    if (h == null) return '—';
+    return h < 48 ? Math.round(h) + 'h' : Math.round(h / 24) + 'd';
+  }
+  function shortDate(v) {
+    return v ? new Date(v).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '—';
+  }
+
+  api('/api/me').then(function (me) {
+    ME = me;
+    if (!me.company) { location.href = '/'; return null; }
+    if (me.features.indexOf('reports') < 0) {
+      document.body.innerHTML = '<div class="empty">Reports are not switched on for this shop.</div>';
+      return null;
+    }
+    if (!me.caps.viewReports) {
+      document.body.innerHTML = '<div class="empty">Reports are for the owner, accounting, ' +
+        'estimating and production.<br><a href="/board.html">Back to the board</a></div>';
+      return null;
+    }
+    Shell.mount({ me: me, active: 'reports' });
+    return api('/api/reports/meta');
+  }).then(function (m) {
+    if (!m) return;
+    META = m;
+    $('fWindow').innerHTML = m.windows.map(function (w) {
+      return '<option value="' + w.key + '"' + (w.key === WINDOW ? ' selected' : '') + '>' +
+        esc(w.label) + '</option>';
+    }).join('');
+    renderTabs();
+    load();
+  }).catch(function (e) { if (e.message !== 'signed out') console.error(e); });
+
+  function visible() {
+    return META.reports.filter(function (r) {
+      return !r.money || ME.caps.viewMoneyReports;
+    });
+  }
+
+  function renderTabs() {
+    $('tabs').innerHTML = visible().map(function (r) {
+      return '<button class="tab' + (r.key === TAB ? ' sel' : '') + '" data-tab="' + r.key + '" ' +
+        'title="' + esc(r.note) + '">' + esc(r.label) + '</button>';
+    }).join('');
+    Array.prototype.forEach.call($('tabs').children, function (b) {
+      b.addEventListener('click', function () { TAB = b.dataset.tab; renderTabs(); load(); });
+    });
+  }
+
+  function qs() {
+    var s = 'window=' + WINDOW;
+    if (WINDOW === 'custom') s += '&from=' + ($('fFrom').value || '') + '&to=' + ($('fTo').value || '');
+    return s;
+  }
+
+  function load() {
+    var r = visible().filter(function (x) { return x.key === TAB; })[0];
+    $('title').textContent = r ? r.label : 'Reports';
+    $('pane').innerHTML = '<div class="empty">Loading…</div>';
+
+    api('/api/reports/' + TAB + '?' + qs()).then(function (d) {
+      if (d.window) {
+        $('headmeta').textContent = d.window.label +
+          (d.window.openOnly ? '' : ' · ' + d.window.from + ' to ' + d.window.to) +
+          (r ? ' · ' + r.note : '');
+      } else {
+        $('headmeta').textContent = r ? r.note : '';
+      }
+      ({
+        production: production, cycle: cycle, technician: technician, status: status,
+        revenue: revenue, salesperson: salesperson, approval: approval,
+        clients: clients, leads: leads
+      }[TAB] || function () {
+        $('pane').innerHTML = '<div class="empty">Not built yet.</div>';
+      })(d);
+    }).catch(function (e) {
+      $('pane').innerHTML = '<div class="empty">' + esc(e.message) + '</div>';
+    });
+  }
+
+  function bignums(items) {
+    return '<div class="bignum">' + items.map(function (i) {
+      return '<div><div class="bn-v"' + (i.tone ? ' style="color:' + i.tone + '"' : '') + '>' +
+        esc(i.v) + '</div><div class="bn-k">' + esc(i.k) + '</div>' +
+        (i.n ? '<div class="bn-n">' + esc(i.n) + '</div>' : '') + '</div>';
+    }).join('') + '</div>';
+  }
+
+  function table(cols, rows) {
+    return '<table><thead><tr>' + cols.map(function (c) {
+      return '<th' + (c.num ? ' class="num"' : '') + '>' + esc(c.t) + '</th>';
+    }).join('') + '</tr></thead><tbody>' + rows.map(function (r) {
+      return '<tr>' + r.map(function (cell, i) {
+        return '<td' + (cols[i].num ? ' class="num"' : '') + '>' + cell + '</td>';
+      }).join('') + '</tr>';
+    }).join('') + '</tbody></table>';
+  }
+
+  function bar(value, max) {
+    var pct = max > 0 ? Math.round((value / max) * 100) : 0;
+    return '<div class="bar"><div class="bartrack"><div class="barfill" style="width:' + pct + '%"></div></div></div>';
+  }
+
+  /* --------------------------------------------------------- production */
+
+  function production(d) {
+    var maxLane = Math.max.apply(null, d.byLane.map(function (l) { return Number(l.files); }).concat([1]));
+    var h = [];
+
+    h.push(bignums([
+      { v: d.totals.files, k: 'files in window' },
+      { v: d.totals.openFiles, k: 'still open' },
+      { v: d.totals.delivered, k: 'delivered' },
+      { v: num(d.totals.hours), k: 'labour hours' },
+      { v: d.totals.avgDays == null ? '—' : d.totals.avgDays, k: 'avg days in shop' }
+    ]));
+
+    h.push('<div class="sec">Where the work is</div>');
+    h.push(table(
+      [{ t: 'Lane' }, { t: 'Files', num: true }, { t: '' }, { t: 'On hold', num: true },
+       { t: 'Stalled', num: true }, { t: 'Hours', num: true }, { t: 'Avg days', num: true }],
+      d.byLane.map(function (l) {
+        return [
+          esc(l.lane),
+          Number(l.files),
+          bar(Number(l.files), maxLane),
+          Number(l.on_hold) ? '<span style="color:var(--stopped)">' + l.on_hold + '</span>' : '0',
+          Number(l.stalled) ? '<span style="color:var(--stopped)">' + l.stalled + '</span>' : '0',
+          num(l.hours),
+          num(l.avg_days)
+        ];
+      })
+    ));
+
+    h.push('<div class="sec">Not moving</div>');
+    if (!d.blocked.length) {
+      h.push('<div class="sub">Nothing is on hold or past its red threshold.</div>');
+    } else {
+      h.push(table(
+        [{ t: 'RO' }, { t: 'Vehicle' }, { t: 'Status' }, { t: 'Why' },
+         { t: 'In status', num: true }, { t: 'Days in shop', num: true }],
+        d.blocked.map(function (b) {
+          var why = b.on_hold ? 'On hold' + (b.hold_reason ? ' — ' + b.hold_reason : '')
+            : Number(b.parts_waiting) ? b.parts_waiting + ' part' + (b.parts_waiting === 1 ? '' : 's') + ' out'
+            : 'Past red';
+          return [
+            '<a href="/board.html?ro=' + b.id + '">' + esc(b.ro_number) + '</a>',
+            esc(b.vehicle || b.customer_name || '—'),
+            esc(b.status_label || '—'),
+            '<span style="color:var(--stopped)">' + esc(why) + '</span>',
+            hrs(b.hours_in_status),
+            b.days_in_shop
+          ];
+        })
+      ));
+    }
+
+    $('pane').innerHTML = h.join('');
+  }
+
+  /* --------------------------------------------------------- cycle time */
+
+  function cycle(d) {
+    var h = [];
+    h.push(bignums([
+      { v: d.totals.files, k: 'files' },
+      { v: d.totals.avgDays == null ? '—' : d.totals.avgDays, k: 'avg days in shop' },
+      { v: d.totals.avgTouchHours == null ? '—' : d.totals.avgTouchHours, k: 'avg flagged hours' },
+      { v: d.totals.daysPerHour == null ? '—' : d.totals.daysPerHour, k: 'days per flagged hour',
+        n: 'lower is tighter' }
+    ]));
+
+    h.push('<div class="sec">Where the time goes</div>');
+    h.push('<div class="sub" style="margin-bottom:8px">Average hours a file sits in each status before it ' +
+      'moves. Statuses marked as not counting toward cycle are the ones you have decided are ' +
+      'someone else\u2019s clock.</div>');
+    h.push(table(
+      [{ t: 'Status' }, { t: 'Visits', num: true }, { t: 'Avg', num: true },
+       { t: 'Worst', num: true }, { t: 'Counts to cycle' }],
+      d.byStatus.map(function (s) {
+        return [
+          esc(s.status_label || '—'),
+          Number(s.visits),
+          hrs(s.avg_hours),
+          hrs(s.worst_hours),
+          Number(s.counts_toward_cycle) ? 'Yes' : '<span style="color:var(--dim)">No</span>'
+        ];
+      })
+    ));
+
+    if (d.byPath.length) {
+      h.push('<div class="sec">By repair path</div>');
+      h.push(table(
+        [{ t: 'Path' }, { t: 'Files', num: true }, { t: 'Avg days', num: true }, { t: 'Avg hours', num: true }],
+        d.byPath.map(function (p) {
+          return [esc(p.repair_path), Number(p.files), num(p.avg_days), num(p.avg_hours)];
+        })
+      ));
+    }
+
+    h.push('<div class="sec">Longest in the shop</div>');
+    h.push(table(
+      [{ t: 'RO' }, { t: 'Vehicle' }, { t: 'Opened' }, { t: 'Days', num: true },
+       { t: 'Since approval', num: true }, { t: 'Hours', num: true }],
+      d.files.slice(0, 40).map(function (f) {
+        return [
+          '<a href="/board.html?ro=' + f.id + '">' + esc(f.ro_number) + '</a>',
+          esc(f.vehicle || f.customer_name || '—'),
+          shortDate(f.opened_at),
+          f.days_in_shop,
+          f.days_since_approval == null ? '—' : f.days_since_approval,
+          num(f.labor_hours)
+        ];
+      })
+    ));
+
+    $('pane').innerHTML = h.join('');
+  }
+
+  /* --------------------------------------------------------- technician */
+
+  function technician(d) {
+    var h = [];
+    var maxH = Math.max.apply(null, d.technicians.map(function (t) { return t.flagged_hours; }).concat([1]));
+
+    h.push('<div class="sub">Flagged hours are the hours on the estimates a technician is assigned to. ' +
+      'Clocked hours come later, from a time clock — until then efficiency is the rate you set per person ' +
+      'in Admin.</div>');
+
+    h.push('<div class="sec">By technician</div>');
+    h.push(table(
+      [{ t: 'Name' }, { t: 'Position' }, { t: 'Files', num: true }, { t: 'Open', num: true },
+       { t: 'Flagged hours', num: true }, { t: '' }, { t: 'Hours per file', num: true },
+       { t: 'Avg days', num: true }, { t: 'Efficiency', num: true }],
+      d.technicians.map(function (t) {
+        return [
+          esc(t.name),
+          esc(t.position_label || t.position_key || '—'),
+          Number(t.files),
+          Number(t.open_files),
+          num(t.flagged_hours),
+          bar(t.flagged_hours, maxH),
+          t.hours_per_file == null ? '—' : t.hours_per_file,
+          t.avg_days == null ? '—' : t.avg_days,
+          t.efficiency == null ? '—' : Number(t.efficiency).toFixed(2)
+        ];
+      })
+    ));
+
+    if (d.rework.length) {
+      h.push('<div class="sec">Rework moves</div>');
+      h.push('<div class="sub" style="margin-bottom:8px">Status changes flagged as rework — a file going ' +
+        'backwards through a lane.</div>');
+      h.push(table([{ t: 'Name' }, { t: 'Moves', num: true }],
+        d.rework.map(function (r) { return [esc(r.name), Number(r.rework_moves)]; })));
+    }
+
+    $('pane').innerHTML = h.join('');
+  }
+
+  /* ------------------------------------------------------------- status */
+
+  function status(d) {
+    var h = [];
+    var max = Math.max.apply(null, d.statuses.map(function (s) { return Number(s.files); }).concat([1]));
+
+    h.push('<div class="sec">Open files by status</div>');
+    h.push(table(
+      [{ t: 'Status' }, { t: 'Group' }, { t: 'Owner' }, { t: 'Files', num: true }, { t: '' },
+       { t: 'Avg age', num: true }, { t: 'Worst', num: true }, { t: 'Over red', num: true }],
+      d.statuses.map(function (s) {
+        return [
+          esc(s.label),
+          '<span class="sub">' + esc(s.group_label) + '</span>',
+          '<span class="sub">' + esc(s.owner_role) + '</span>',
+          Number(s.files),
+          bar(Number(s.files), max),
+          hrs(s.avg_hours),
+          hrs(s.worst_hours),
+          Number(s.over_red) ? '<span style="color:var(--stopped)">' + s.over_red + '</span>' : '0'
+        ];
+      })
+    ));
+
+    h.push('<div class="sec">By who owns it</div>');
+    h.push(table([{ t: 'Owner' }, { t: 'Files', num: true }, { t: 'Over red', num: true }],
+      d.byOwner.map(function (o) {
+        return [
+          esc(o.owner_role),
+          Number(o.files),
+          Number(o.over_red) ? '<span style="color:var(--stopped)">' + o.over_red + '</span>' : '0'
+        ];
+      })));
+
+    $('pane').innerHTML = h.join('');
+  }
+
+  /* ------------------------------------------------------------ revenue */
+
+  function revenue(d) {
+    var t = d.totals, h = [];
+
+    h.push(bignums([
+      { v: money(t.grossCents), k: 'gross' },
+      { v: money(t.grossProfitCents), k: 'after parts and sublet' },
+      { v: money(t.avgTicketCents), k: 'average ticket' },
+      { v: num(t.hours, 0), k: 'labour hours' },
+      { v: t.effectiveRateCents == null ? '—' : money2(t.effectiveRateCents), k: 'per flagged hour' },
+      { v: t.files, k: 'files' }
+    ]));
+
+    h.push('<div class="sec">What it is made of</div>');
+    var parts = [
+      { k: 'Parts', v: t.partsCents },
+      { k: 'Sublet', v: t.subletCents },
+      { k: 'Everything else', v: Math.max(0, t.grossCents - t.partsCents - t.subletCents) }
+    ];
+    h.push(table([{ t: 'Bucket' }, { t: 'Amount', num: true }, { t: '' }, { t: 'Share', num: true }],
+      parts.map(function (p) {
+        return [
+          esc(p.k), money(p.v), bar(p.v, t.grossCents || 1),
+          (t.grossCents ? Math.round((p.v / t.grossCents) * 100) : 0) + '%'
+        ];
+      })));
+
+    h.push('<div class="sec">By file type</div>');
+    h.push(table([{ t: 'Type' }, { t: 'Files', num: true }, { t: 'Gross', num: true }, { t: 'Avg ticket', num: true }],
+      d.byType.map(function (r) {
+        return [esc(r.ro_type), Number(r.files), money(r.gross_cents), money(r.avg_ticket)];
+      })));
+
+    if (d.byMonth.length) {
+      var maxM = Math.max.apply(null, d.byMonth.map(function (m) { return Number(m.gross_cents); }).concat([1]));
+      h.push('<div class="sec">Twelve months</div>');
+      h.push('<div class="spark">' + d.byMonth.map(function (m) {
+        var pct = Math.max(2, Math.round((Number(m.gross_cents) / maxM) * 100));
+        return '<div class="sparkbar" style="height:' + pct + '%" title="' + esc(m.month) + ' · ' +
+          money(m.gross_cents) + '"></div>';
+      }).join('') + '</div>' +
+      '<div class="sparklabels">' + d.byMonth.map(function (m) {
+        return '<div>' + esc(m.month.slice(5)) + '</div>';
+      }).join('') + '</div>');
+    }
+
+    h.push('<div class="sec">Supplements</div>');
+    h.push(bignums([
+      { v: d.supplements.n, k: 'supplements' },
+      { v: money(d.supplements.requestedCents), k: 'requested' },
+      { v: money(d.supplements.approvedCents), k: 'approved' },
+      { v: d.supplements.avgDaysToDecide == null ? '—' : d.supplements.avgDaysToDecide,
+        k: 'avg days to decide' }
+    ]));
+
+    $('pane').innerHTML = h.join('');
+  }
+
+  /* -------------------------------------------------------- salesperson */
+
+  function salesperson(d) {
+    var h = [];
+    var max = Math.max.apply(null, d.salespeople.map(function (s) { return Number(s.gross_cents); }).concat([1]));
+
+    h.push('<div class="sec">Files written</div>');
+    h.push(table(
+      [{ t: 'Name' }, { t: 'Files', num: true }, { t: 'Wholesale', num: true }, { t: 'Open', num: true },
+       { t: 'Gross', num: true }, { t: '' }, { t: 'Avg ticket', num: true }, { t: 'Commission' }],
+      d.salespeople.map(function (s) {
+        return [
+          esc(s.name), Number(s.files), Number(s.wholesale_files), Number(s.open_files),
+          money(s.gross_cents), bar(Number(s.gross_cents), max), money(s.avg_ticket),
+          s.commission_rate == null ? '—' : Number(s.commission_rate) + '%'
+        ];
+      })
+    ));
+
+    if (d.leads.length) {
+      h.push('<div class="sec">Leads worked</div>');
+      h.push(table([{ t: 'Name' }, { t: 'Leads', num: true }, { t: 'Won', num: true },
+        { t: 'Lost', num: true }, { t: 'Close rate', num: true }],
+        d.leads.map(function (l) {
+          var settled = Number(l.won) + Number(l.lost);
+          return [
+            esc(l.name), Number(l.leads), Number(l.won), Number(l.lost),
+            settled ? Math.round((Number(l.won) / settled) * 100) + '%' : '—'
+          ];
+        })));
+    }
+
+    $('pane').innerHTML = h.join('');
+  }
+
+  /* ----------------------------------------------------------- approval */
+
+  function approval(d) {
+    var h = [];
+    var total = d.days.reduce(function (a, x) { return a + Number(x.gross_cents); }, 0);
+    var files = d.days.reduce(function (a, x) { return a + Number(x.files); }, 0);
+
+    h.push(bignums([
+      { v: files, k: 'files approved' },
+      { v: money(total), k: 'approved value' },
+      { v: d.waiting.length, k: 'still waiting', tone: d.waiting.length ? 'var(--blocked)' : '' }
+    ]));
+
+    h.push('<div class="sec">Approved by day</div>');
+    if (!d.days.length) h.push('<div class="sub">Nothing approved in this window.</div>');
+    else {
+      var max = Math.max.apply(null, d.days.map(function (x) { return Number(x.gross_cents); }).concat([1]));
+      h.push(table([{ t: 'Day' }, { t: 'Files', num: true }, { t: 'Value', num: true },
+        { t: '' }, { t: 'Hours', num: true }],
+        d.days.map(function (x) {
+          return [
+            shortDate(x.day), Number(x.files), money(x.gross_cents),
+            bar(Number(x.gross_cents), max), num(x.hours)
+          ];
+        })));
+    }
+
+    h.push('<div class="sec">Waiting on approval</div>');
+    if (!d.waiting.length) h.push('<div class="sub">Nothing is waiting.</div>');
+    else h.push(table([{ t: 'RO' }, { t: 'Customer' }, { t: 'Insurer' }, { t: 'Status' },
+      { t: 'Days', num: true }, { t: 'Value', num: true }],
+      d.waiting.map(function (w) {
+        return [
+          '<a href="/board.html?ro=' + w.id + '">' + esc(w.ro_number) + '</a>',
+          esc(w.customer_name || '—'), esc(w.insurer_name || '—'), esc(w.status_label || '—'),
+          '<span style="color:' + (w.days_in_shop > 5 ? 'var(--stopped)' : 'inherit') + '">' +
+            w.days_in_shop + '</span>',
+          money(w.amount_cents)
+        ];
+      })));
+
+    $('pane').innerHTML = h.join('');
+  }
+
+  /* ------------------------------------------------------------ clients */
+
+  function clients(d) {
+    var max = Math.max.apply(null, d.clients.map(function (c) { return Number(c.gross_cents); }).concat([1]));
+    var wholesale = d.clients.filter(function (c) { return c.kind === 'wholesale'; });
+    var h = [];
+
+    h.push(bignums([
+      { v: d.clients.length, k: 'clients with work' },
+      { v: wholesale.length, k: 'wholesale accounts' },
+      { v: money(d.clients.reduce(function (a, c) { return a + Number(c.gross_cents); }, 0)), k: 'total' }
+    ]));
+
+    h.push('<div class="sec">By client</div>');
+    h.push(table(
+      [{ t: 'Client' }, { t: 'Type' }, { t: 'Files', num: true }, { t: 'Open', num: true },
+       { t: 'Gross', num: true }, { t: '' }, { t: 'Avg ticket', num: true }, { t: 'Avg days', num: true }],
+      d.clients.map(function (c) {
+        return [
+          esc(c.name),
+          '<span class="sub">' + esc(c.wholesale_type || c.kind) + (c.terms ? ' · ' + esc(c.terms) : '') + '</span>',
+          Number(c.files), Number(c.open_files),
+          money(c.gross_cents), bar(Number(c.gross_cents), max),
+          money(c.avg_ticket), num(c.avg_days)
+        ];
+      })
+    ));
+
+    $('pane').innerHTML = h.join('');
+  }
+
+  /* -------------------------------------------------------------- leads */
+
+  function leads(d) {
+    var h = [];
+    var max = Math.max.apply(null, d.bySource.map(function (s) { return Number(s.leads); }).concat([1]));
+
+    h.push('<div class="sec">By source</div>');
+    h.push(table([{ t: 'Source' }, { t: 'Leads', num: true }, { t: '' }, { t: 'Won', num: true },
+      { t: 'Lost', num: true }, { t: 'Close rate', num: true }, { t: 'Avg first reply', num: true }],
+      d.bySource.map(function (s) {
+        var settled = Number(s.won) + Number(s.lost);
+        return [
+          esc(s.source), Number(s.leads), bar(Number(s.leads), max),
+          Number(s.won), Number(s.lost),
+          settled ? Math.round((Number(s.won) / settled) * 100) + '%' : '—',
+          s.avg_reply_hours == null ? '—' : hrs(s.avg_reply_hours)
+        ];
+      })));
+
+    h.push('<div class="sec">Why they were lost</div>');
+    if (!d.lostReasons.length) h.push('<div class="sub">Nothing lost in this window.</div>');
+    else h.push(table([{ t: 'Reason' }, { t: 'Count', num: true }],
+      d.lostReasons.map(function (r) { return [esc(r.reason), Number(r.n)]; })));
+
+    $('pane').innerHTML = h.join('');
+  }
+
+  /* ------------------------------------------------------------- wiring */
+
+  $('fWindow').addEventListener('change', function () {
+    WINDOW = this.value;
+    var custom = WINDOW === 'custom';
+    $('fFrom').hidden = !custom;
+    $('fTo').hidden = !custom;
+    if (!custom) load();
+  });
+  $('fFrom').addEventListener('change', load);
+  $('fTo').addEventListener('change', load);
+  $('refresh').addEventListener('click', load);
+  $('print').addEventListener('click', function () { window.print(); });
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,388 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
+<meta name="theme-color" content="#1c2740">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Sales — Easy Shop</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/shell.css">
+<style>
+  body { overflow:auto; }
+  .phone { max-width:520px; margin:0 auto; width:100%; }
+  .step { padding:18px 16px 0; }
+  .steptitle { font:500 17px var(--font); }
+  .stepnote { font:400 12px var(--font); color:var(--dim); margin-top:5px; line-height:1.5; }
+  .crumbs { display:flex; gap:6px; padding:14px 16px 0; }
+  .crumb { flex:1; height:3px; border-radius:2px; background:var(--line); }
+  .crumb.done { background:var(--acc); }
+  .fields { display:grid; gap:13px; margin-top:16px; }
+  .fields.two { grid-template-columns:1fr 1fr; }
+  .fields input, .fields select { width:100%; padding:11px 12px; font-size:14px; min-height:46px; }
+  .shots { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-top:14px; }
+  .thumb { position:relative; aspect-ratio:1; border-radius:5px; overflow:hidden; background:var(--surf); }
+  .thumb img { width:100%; height:100%; object-fit:cover; }
+  .thumb button {
+    position:absolute; top:3px; right:3px; width:24px; height:24px; border-radius:50%;
+    background:rgba(11,16,25,.8); border:none; color:#fff; font-size:14px; line-height:1;
+  }
+  .addshot {
+    aspect-ratio:1; border:1px dashed var(--line); border-radius:5px; background:transparent;
+    color:var(--dim); font:400 11px var(--font); display:grid; place-items:center; text-align:center;
+  }
+  .addshot:hover { border-color:var(--acc); color:var(--acc); }
+  .dayrow { display:grid; gap:8px; margin-top:14px; }
+  .daybtn {
+    display:flex; align-items:center; gap:12px; background:transparent; text-align:left;
+    border:1px solid var(--line); border-radius:6px; padding:13px 14px; color:var(--text);
+    min-height:56px;
+  }
+  .daybtn:hover:not(:disabled), .daybtn.sel { border-color:var(--acc); }
+  .daybtn.sel { background:rgba(217,164,65,.08); }
+  .daybtn:disabled { opacity:.4; }
+  .dayl { font:500 13.5px var(--font); }
+  .dayn { font:400 10.5px var(--font); color:var(--dim); margin-top:2px; }
+  .dayslots { margin-left:auto; font:500 12px var(--font); font-variant-numeric:tabular-nums; }
+  .selfdrive {
+    border:1px solid var(--move); border-radius:6px; padding:13px 14px; margin-top:14px;
+    display:flex; gap:12px; align-items:flex-start;
+  }
+  .footbar {
+    position:sticky; bottom:0; background:var(--bg); border-top:1px solid var(--line);
+    padding:12px 16px calc(12px + var(--safe-b)); display:flex; gap:10px; margin-top:22px;
+  }
+  .footbar .btn { flex:1; min-height:48px; font-size:13px; }
+  .done { padding:56px 20px; text-align:center; }
+  .donenum { font:600 24px var(--font); font-variant-numeric:tabular-nums; margin:10px 0 6px; }
+  .hint { font:400 11px var(--font); color:var(--dim); margin-top:6px; line-height:1.5; }
+  .mineRow {
+    display:flex; align-items:center; gap:10px; padding:12px 16px;
+    border-bottom:1px solid var(--whisper);
+  }
+  .state { font:500 9px var(--font); letter-spacing:.07em; text-transform:uppercase;
+           padding:3px 7px; border-radius:3px; white-space:nowrap; }
+  .tabbar { display:flex; gap:2px; padding:12px 16px 0; }
+  .tabbar button {
+    flex:1; font:500 12px var(--font); color:var(--dim); background:transparent;
+    border:1px solid var(--line); border-radius:4px; padding:10px; min-height:44px;
+  }
+  .tabbar button.sel { color:var(--acc); border-color:var(--acc); background:rgba(217,164,65,.09); }
+</style>
+</head>
+<body>
+
+<div class="bar">
+  <div class="brand"><div class="mark">ES</div><div class="word">Easy Shop</div></div>
+  <div class="vr"></div>
+  <div class="co" id="coName">—</div>
+  <div class="spacer"></div>
+  <div id="bell"></div>
+  <button class="ghostbtn" id="signout">Sign out</button>
+</div>
+
+<div class="phone">
+  <div class="tabbar">
+    <button id="tabNew" class="sel">Write one</button>
+    <button id="tabMine">Mine</button>
+  </div>
+  <div class="crumbs" id="crumbs"></div>
+  <div id="stage"></div>
+</div>
+
+<script src="/photos.js"></script>
+<script src="/shell.js"></script>
+<script>
+(function () {
+  var api = Shell.api, esc = Shell.esc;
+  var ME = null, STEP = 0, SHOTS = [], CAP = null, VIEW = 'new';
+  var D = {
+    firstName: '', lastName: '', phone: '', email: '',
+    vehicleText: '', note: '', dropDay: '', selfDeliver: false
+  };
+
+  var STEPS = ['Who', 'Contract', 'Drop off', 'Done'];
+
+  function $(id) { return document.getElementById(id); }
+
+  api('/api/me').then(function (me) {
+    ME = me;
+    if (!me.company) { location.href = '/'; return null; }
+    if (me.features.indexOf('msales') < 0) {
+      document.body.innerHTML = '<div class="empty">The sales app is not switched on for this shop.</div>';
+      return null;
+    }
+    Shell.mount({ me: me, active: 'sales' });
+    return api('/api/sales/capacity?days=10');
+  }).then(function (c) {
+    if (!c) return;
+    CAP = c;
+    render();
+  }).catch(function (e) { if (e.message !== 'signed out') console.error(e); });
+
+  function render() {
+    if (VIEW === 'mine') return renderMine();
+
+    $('crumbs').innerHTML = STEPS.slice(0, 3).map(function (_, i) {
+      return '<div class="crumb' + (i <= STEP ? ' done' : '') + '"></div>';
+    }).join('');
+
+    var h = '';
+
+    if (STEP === 0) {
+      h += '<div class="step"><div class="steptitle">Who is it?</div>' +
+        '<div class="stepnote">Name and phone are enough. This becomes a lead the shop can see ' +
+        'straight away.</div>' +
+        '<div class="fields two">' +
+        f('firstName', 'First name') + f('lastName', 'Last name') +
+        '</div><div class="fields">' +
+        f('phone', 'Phone', 'tel') +
+        f('vehicleText', 'Vehicle') +
+        '</div>' +
+        '<div class="fields"><div><label class="fl" for="note">What is wrong with it</label>' +
+        '<textarea id="note" placeholder="Hail on the hood, roof and both quarters">' +
+        esc(D.note) + '</textarea></div></div>' +
+        '</div>' + foot(null, 'Contract photo');
+    }
+
+    if (STEP === 1) {
+      h += '<div class="step"><div class="steptitle">Photograph the contract</div>' +
+        '<div class="stepnote">The signed authorization. It files against the lead and follows the ' +
+        'car onto its repair order.</div>' +
+        '<div class="shots">' +
+        SHOTS.map(function (s, i) {
+          return '<div class="thumb"><img src="' + s.url + '" alt="">' +
+            '<button data-rm="' + i + '" aria-label="Remove">&times;</button></div>';
+        }).join('') +
+        '<button class="addshot" id="addShot">Add<br>photo</button></div>' +
+        '<input type="file" id="shotInput" accept="image/*" capture="environment" multiple hidden>' +
+        '<div class="hint">' + SHOTS.length + ' photo' + (SHOTS.length === 1 ? '' : 's') +
+        ' attached. Photos are shrunk on the phone before they upload.</div>' +
+        '</div>' + foot('Back', 'Drop off');
+    }
+
+    if (STEP === 2) {
+      h += '<div class="step"><div class="steptitle">When can it come in?</div>' +
+        '<div class="stepnote">These are the days the shop still has room to take a drop. ' +
+        'Full days are greyed out — do not promise them.</div>';
+
+      if (!CAP.capacity) {
+        h += '<div class="hint">No daily drop limit is set, so any day works. ' +
+          'The owner sets limits in Admin › Settings.</div>';
+      }
+
+      h += '<div class="dayrow">' + CAP.days.map(function (d) {
+        var disabled = d.closed || (CAP.capacity > 0 && d.open <= 0);
+        return '<button class="daybtn' + (D.dropDay === d.day ? ' sel' : '') + '" data-day="' + d.day + '"' +
+          (disabled ? ' disabled' : '') + '>' +
+          '<div><div class="dayl">' + esc(d.label) + '</div>' +
+          '<div class="dayn">' + (d.closed ? 'Closed' :
+            CAP.capacity > 0 ? d.used + ' of ' + d.cap + ' booked' : 'no limit') + '</div></div>' +
+          '<div class="dayslots" style="color:' + (disabled ? 'var(--dim)' :
+            d.open <= 1 && CAP.capacity > 0 ? 'var(--blocked)' : 'var(--done)') + '">' +
+          (d.closed ? '—' : CAP.capacity > 0 ? d.open + ' left' : 'open') + '</div></button>';
+      }).join('') + '</div>';
+
+      h += '<div class="selfdrive"><input type="checkbox" id="selfDeliver"' +
+        (D.selfDeliver ? ' checked' : '') + ' style="margin-top:2px">' +
+        '<div><div style="font:500 12.5px var(--font)">I will bring it in myself</div>' +
+        '<div class="hint" style="margin-top:3px">Use this when nothing suits the customer, or the ' +
+        'car cannot be driven. No drop slot is taken.</div></div></div>';
+
+      h += '<div class="msg" id="msg"></div></div>' +
+        '<div class="footbar"><button class="btn btn-ghost" data-back="1">Back</button>' +
+        '<button class="btn btn-solid" id="submit">Write the opportunity</button></div>';
+    }
+
+    $('stage').innerHTML = h;
+    wire();
+  }
+
+  function f(key, label, type) {
+    return '<div><label class="fl" for="' + key + '">' + esc(label) + '</label>' +
+      '<input id="' + key + '" type="' + (type || 'text') + '" value="' + esc(D[key]) + '"></div>';
+  }
+  function foot(back, next) {
+    return '<div class="footbar">' +
+      (back ? '<button class="btn btn-ghost" data-back="1">' + esc(back) + '</button>' : '') +
+      '<button class="btn btn-solid" id="next">' + esc(next) + '</button></div>';
+  }
+
+  function collect() {
+    ['firstName', 'lastName', 'phone', 'email', 'vehicleText', 'note'].forEach(function (k) {
+      var el = document.getElementById(k);
+      if (el) D[k] = el.value;
+    });
+    var self = $('selfDeliver');
+    if (self) D.selfDeliver = self.checked;
+  }
+
+  function wire() {
+    var next = $('next');
+    if (next) next.addEventListener('click', function () {
+      collect();
+      if (STEP === 0) {
+        if (!D.lastName.trim() && !D.firstName.trim()) return alert('A name is required.');
+        if (!D.phone.trim()) return alert('A phone number is required.');
+      }
+      STEP++; render();
+    });
+
+    Array.prototype.forEach.call(document.querySelectorAll('[data-back]'), function (b) {
+      b.addEventListener('click', function () { collect(); STEP--; render(); });
+    });
+
+    var add = $('addShot');
+    if (add) {
+      add.addEventListener('click', function () { $('shotInput').click(); });
+      $('shotInput').addEventListener('change', function (e) {
+        Array.prototype.forEach.call(e.target.files, function (file) {
+          SHOTS.push({ file: file, url: URL.createObjectURL(file) });
+        });
+        render();
+      });
+    }
+    Array.prototype.forEach.call(document.querySelectorAll('[data-rm]'), function (b) {
+      b.addEventListener('click', function () {
+        SHOTS.splice(Number(b.dataset.rm), 1);
+        render();
+      });
+    });
+
+    Array.prototype.forEach.call(document.querySelectorAll('[data-day]'), function (b) {
+      b.addEventListener('click', function () {
+        collect();
+        D.dropDay = D.dropDay === b.dataset.day ? '' : b.dataset.day;
+        D.selfDeliver = false;
+        render();
+      });
+    });
+
+    var self = $('selfDeliver');
+    if (self) self.addEventListener('change', function () {
+      D.selfDeliver = self.checked;
+      if (self.checked) D.dropDay = '';
+      render();
+    });
+
+    var sub = $('submit');
+    if (sub) sub.addEventListener('click', submit);
+  }
+
+  function submit() {
+    collect();
+    var btn = $('submit'), msg = $('msg');
+
+    if (!D.dropDay && !D.selfDeliver) {
+      msg.textContent = 'Pick a day, or tick that you are bringing it in yourself.';
+      msg.className = 'msg err';
+      return;
+    }
+
+    btn.disabled = true;
+    msg.textContent = SHOTS.length ? 'Resizing photos…' : 'Sending…';
+    msg.className = 'msg ok';
+
+    var fd = new FormData();
+    ['firstName', 'lastName', 'phone', 'email', 'vehicleText', 'note'].forEach(function (k) {
+      if (D[k]) fd.append(k, D[k]);
+    });
+    if (D.dropDay) fd.append('dropDay', D.dropDay);
+    if (D.selfDeliver) fd.append('selfDeliver', '1');
+
+    Photos.prepareAll(SHOTS.map(function (s) { return s.file; })).then(function (items) {
+      items.forEach(function (it, i) { Photos.appendTo(fd, i, it.file, it.prepared); });
+      return fetch('/api/sales/opportunity', { method: 'POST', body: fd });
+    }).then(function (r) {
+      return r.json().then(function (j) { return { ok: r.ok, j: j }; });
+    }).then(function (res) {
+      btn.disabled = false;
+      if (!res.ok) { msg.textContent = res.j.error; msg.className = 'msg err'; return; }
+
+      SHOTS.forEach(function (s) { URL.revokeObjectURL(s.url); });
+      $('crumbs').innerHTML = '';
+      $('stage').innerHTML = '<div class="done">' +
+        '<div class="f-l">Written</div>' +
+        '<div class="donenum">' + esc(res.j.leadNumber) + '</div>' +
+        '<div class="stepnote">' +
+        (res.j.appointmentId
+          ? 'Drop off booked for ' + esc(D.dropDay) + '. The shop has it.'
+          : 'You are bringing it in. The shop has the lead.') +
+        (res.j.photos ? '<br>' + res.j.photos + ' photo' + (res.j.photos === 1 ? '' : 's') + ' filed.' : '') +
+        '</div>' +
+        '<div class="row" style="justify-content:center;margin-top:22px">' +
+        '<button class="btn" id="again">Write another</button>' +
+        '<button class="btn btn-ghost" id="goMine">See mine</button></div></div>';
+
+      $('again').addEventListener('click', function () {
+        D = { firstName: '', lastName: '', phone: '', email: '', vehicleText: '', note: '',
+              dropDay: '', selfDeliver: false };
+        SHOTS = [];
+        STEP = 0;
+        api('/api/sales/capacity?days=10').then(function (c) { CAP = c; render(); });
+      });
+      $('goMine').addEventListener('click', function () { VIEW = 'mine'; syncTabs(); render(); });
+    }).catch(function () {
+      btn.disabled = false;
+      msg.textContent = 'Could not reach the server.';
+      msg.className = 'msg err';
+    });
+  }
+
+  /* ---------------------------------------------------------------- mine */
+
+  function renderMine() {
+    $('crumbs').innerHTML = '';
+    $('stage').innerHTML = '<div class="empty">Loading…</div>';
+
+    api('/api/sales/mine').then(function (d) {
+      var TONE = {
+        'new': 'var(--acc)', contacted: 'var(--move)', estimate_sent: 'var(--move)',
+        appraisal_booked: 'var(--move)', won: 'var(--done)', lost: 'var(--dim)'
+      };
+
+      var h = '<div class="kpis" style="border-bottom:1px solid var(--whisper)">' +
+        '<div><div class="kpi-v">' + d.summary.written + '</div>' +
+        '<div class="kpi-k">written, 30 days</div></div>' +
+        '<div><div class="kpi-v" style="color:var(--done)">' + d.summary.won + '</div>' +
+        '<div class="kpi-k">won</div></div>' +
+        '<div><div class="kpi-v">' + d.summary.lost + '</div><div class="kpi-k">lost</div></div>' +
+        '</div>';
+
+      if (!d.opportunities.length) {
+        h += '<div class="empty">Nothing written yet.</div>';
+      } else {
+        h += d.opportunities.map(function (o) {
+          var name = [o.first_name, o.last_name].filter(Boolean).join(' ') || 'Unnamed';
+          return '<div class="mineRow">' +
+            '<div style="flex:1;min-width:0">' +
+            '<div style="font:500 13px var(--font)">' + esc(name) + '</div>' +
+            '<div class="hint" style="margin-top:2px">' + esc([
+              o.lead_number, o.vehicle_text, o.phone,
+              o.drop_at ? 'drops ' + new Date(o.drop_at).toLocaleDateString('en-US',
+                { month: 'short', day: 'numeric' }) : null,
+              o.photos ? o.photos + ' photo' + (o.photos === 1 ? '' : 's') : null
+            ].filter(Boolean).join(' · ')) + '</div></div>' +
+            '<span class="state" style="color:' + TONE[o.state] + ';border:1px solid ' + TONE[o.state] +
+            '">' + esc(String(o.state).replace(/_/g, ' ')) + '</span>' +
+            '</div>';
+        }).join('');
+      }
+
+      $('stage').innerHTML = h;
+    }).catch(function (e) {
+      $('stage').innerHTML = '<div class="empty">' + esc(e.message) + '</div>';
+    });
+  }
+
+  function syncTabs() {
+    $('tabNew').className = VIEW === 'new' ? 'sel' : '';
+    $('tabMine').className = VIEW === 'mine' ? 'sel' : '';
+  }
+
+  $('tabNew').addEventListener('click', function () { VIEW = 'new'; syncTabs(); render(); });
+  $('tabMine').addEventListener('click', function () { VIEW = 'mine'; syncTabs(); render(); });
+})();
+</script>
+</body>
+</html>

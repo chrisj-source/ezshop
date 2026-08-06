@@ -14,6 +14,8 @@ window.Shell = (function () {
     { key: 'leads',    href: '/leads.html',    label: 'Leads',    feature: 'leads',   cap: 'manageLeads' },
     { key: 'schedule', href: '/schedule.html', label: 'Schedule', feature: 'sched' },
     { key: 'import',   href: '/import.html',   label: 'Import',   feature: 'ems',     cap: 'acceptImports' },
+    { key: 'reports',  href: '/reports.html',  label: 'Reports',  feature: 'reports', cap: 'viewReports' },
+    { key: 'sales',    href: '/sales.html',    label: 'Sales',    feature: 'msales',  cap: 'manageLeads' },
     { key: 'checkin',  href: '/checkin.html',  label: 'Check-in', feature: 'mcheck' },
     { key: 'admin',    href: '/admin.html',    label: 'Admin',    feature: 'board',   cap: 'admin' }
   ];
