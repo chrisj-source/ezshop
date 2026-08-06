@@ -78,8 +78,8 @@
     padding:12px 16px calc(12px + var(--safe-b)); display:flex; gap:10px; margin-top:22px;
   }
   .footbar .btn { flex:1; min-height:48px; font-size:13px; }
-  .done { padding:56px 20px; text-align:center; }
-  .donero { font:600 26px var(--font); font-variant-numeric:tabular-nums; margin:10px 0 6px; }
+  .finished { padding:56px 20px; text-align:center; }
+  .finishedro { font:600 26px var(--font); font-variant-numeric:tabular-nums; margin:10px 0 6px; }
   .hint { font:400 11px var(--font); color:var(--dim); margin-top:6px; line-height:1.5; }
   .warn { color:var(--stopped); }
 </style>
@@ -855,9 +855,9 @@
         btn.disabled = false;
         if (!res.ok) { msg.textContent = res.j.error; msg.className = 'msg err'; return; }
         PHOTOS.forEach(function (p) { URL.revokeObjectURL(p.url); });
-        $('stage').innerHTML = '<div class="done">' +
+        $('stage').innerHTML = '<div class="finished">' +
           '<div class="f-l">Checked in</div>' +
-          '<div class="donero">' + esc(res.j.roNumber) + '</div>' +
+          '<div class="finishedro">' + esc(res.j.roNumber) + '</div>' +
           '<div class="stepnote">' + res.j.photos + ' photo' + (res.j.photos === 1 ? '' : 's') +
           ' filed. The car is on the board at Vehicle Arrived.</div>' +
           '<div class="row" style="justify-content:center;margin-top:22px">' +
