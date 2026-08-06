@@ -156,6 +156,7 @@
       return null;
     }
     Shell.mount({ me: me, active: 'checkin' });
+    if (CAN_SCAN) loadZXing().catch(function () {});
     return Promise.all([
       api('/api/next-ro-number').catch(function () { return {}; }),
       api('/api/clients?kind=wholesale').catch(function () { return { clients: [] }; })
@@ -550,7 +551,8 @@
       '<div class="scanwrap"><video id="cam" playsinline autoplay muted></video>' +
       '<div class="reticle"></div></div>' +
       '<div class="scanbar">' +
-      '<button class="btn btn-solid" id="grabFrame">Read it now</button>' +
+      '<button class="btn btn-solid" id="grabFrame">' +
+      (ZXING ? 'Read it now' : 'Loading reader…') + '</button>' +
       '<button class="btn btn-ghost" id="stopCam">Stop</button>' +
       '<button class="btn btn-ghost" id="torch" hidden>Light</button>' +
       '</div><div class="hint" id="scanHint">Starting the camera…</div>';
@@ -559,7 +561,13 @@
       stopCamera();
       $('scanArea').innerHTML = '';
     });
-    $('grabFrame').addEventListener('click', function () { readNow(false); });
+    $('grabFrame').addEventListener('click', function () { readNow(); });
+    if (!ZXING) {
+      loadZXing().then(function () {
+        var g = $('grabFrame');
+        if (g) g.textContent = 'Read it now';
+      }).catch(function () {});
+    }
 
     var v = $('cam');
     v.setAttribute('playsinline', '');
@@ -592,6 +600,19 @@
     }).then(function () {
       STREAM = ($('cam') && $('cam').srcObject) || null;
       offerTorch();
+      var g = $('grabFrame');
+      if (g) g.textContent = 'Read it now';
+
+      // Poll the cropped, upscaled reticle — this is what actually catches
+      // dense VIN barcodes; the library's own loop reads the whole frame.
+      SCAN_TIMER = setInterval(function () {
+        var v = $('cam');
+        if (!v || !v.videoWidth || !ZXING) return;
+        var text = zxingDecode(frameCanvas(v, [0.07, 0.36, 0.86, 0.28], 2, false), false);
+        if (!text) return;
+        var vin = pickVin([text]);
+        if (vin) accept(vin);
+      }, 600);
     }).catch(function (err) {
       var name = err && err.name;
       var why = name === 'NotAllowedError'
@@ -625,46 +646,128 @@
     });
   }
 
-  /** Manual capture, for when continuous scanning will not lock on. */
-  function readNow(quiet) {
+  /**
+   * Decode a canvas with ZXing's low-level reader. BrowserMultiFormatReader
+   * does not expose decodeFromCanvas on every build, so this goes straight to
+   * MultiFormatReader, which is present in all of them.
+   */
+  function zxingDecode(canvas, invert) {
+    var Z = ZXING;
+    if (!Z || !Z.MultiFormatReader) return null;
+
+    var hints = new Map();
+    hints.set(Z.DecodeHintType.TRY_HARDER, true);
+    hints.set(Z.DecodeHintType.POSSIBLE_FORMATS, [
+      Z.BarcodeFormat.CODE_39, Z.BarcodeFormat.CODE_128, Z.BarcodeFormat.CODE_93,
+      Z.BarcodeFormat.DATA_MATRIX, Z.BarcodeFormat.PDF_417, Z.BarcodeFormat.QR_CODE,
+      Z.BarcodeFormat.ITF
+    ]);
+
+    var reader = new Z.MultiFormatReader();
+    reader.setHints(hints);
+
+    try {
+      var src = new Z.HTMLCanvasElementLuminanceSource(canvas);
+      if (invert && src.invert) src = src.invert();
+      var bmp = new Z.BinaryBitmap(new Z.HybridBinarizer(src));
+      var res = reader.decode(bmp);
+      return res ? res.getText() : null;
+    } catch (err) {
+      return null;   // NotFoundException is the normal miss
+    }
+  }
+
+  /** Copy a region of the video into a canvas, optionally scaled or turned. */
+  function frameCanvas(v, region, scale, rotate) {
+    var sx = region ? v.videoWidth * region[0] : 0;
+    var sy = region ? v.videoHeight * region[1] : 0;
+    var sw = region ? v.videoWidth * region[2] : v.videoWidth;
+    var sh = region ? v.videoHeight * region[3] : v.videoHeight;
+    var k = scale || 1;
+
+    var canvas = document.createElement('canvas');
+    var ctx;
+    if (rotate) {
+      canvas.width = Math.round(sh * k);
+      canvas.height = Math.round(sw * k);
+      ctx = canvas.getContext('2d');
+      ctx.translate(canvas.width / 2, canvas.height / 2);
+      ctx.rotate(Math.PI / 2);
+      ctx.drawImage(v, sx, sy, sw, sh, -(sw * k) / 2, -(sh * k) / 2, sw * k, sh * k);
+    } else {
+      canvas.width = Math.round(sw * k);
+      canvas.height = Math.round(sh * k);
+      ctx = canvas.getContext('2d');
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(v, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+    }
+    return canvas;
+  }
+
+  /**
+   * Manual capture. VIN labels defeat a single straight read: they are dense
+   * Code 39, often printed vertically on a door jamb, and sometimes light on
+   * dark. So the frame is tried several ways before giving up.
+   */
+  function readNow() {
     var v = $('cam');
     if (!v || !v.videoWidth) { setHint('Camera is still starting.'); return; }
 
-    var canvas = document.createElement('canvas');
-    canvas.width = v.videoWidth;
-    canvas.height = v.videoHeight;
-    canvas.getContext('2d').drawImage(v, 0, 0);
+    if (!ZXING) {
+      setHint('Still loading the reader…');
+      loadZXing().then(function () { readNow(); })
+        .catch(function () { setHint('The reader could not download. Type the VIN below.'); });
+      return;
+    }
 
-    if (!quiet) setHint('Reading…');
+    setHint('Reading…');
 
-    var tried = false;
-    if (READER && READER.decodeFromCanvas) {
-      try {
-        var res = READER.decodeFromCanvas(canvas);
-        tried = true;
-        var vin = pickVin([res.getText()]);
-        if (vin) return accept(vin);
-        setHint('Read “' + String(res.getText()).slice(0, 28) + '” — not a VIN.');
-        return;
-      } catch (e) { tried = true; }
+    var RETICLE = [0.07, 0.36, 0.86, 0.28];
+    var attempts = [
+      [RETICLE, 2, false, false],
+      [RETICLE, 2, false, true],
+      [RETICLE, 3, false, false],
+      [null, 1, false, false],
+      [null, 1.5, false, false],
+      [RETICLE, 2, true, false],
+      [null, 1, true, false],
+      [RETICLE, 2, true, true]
+    ];
+
+    var seen = [];
+
+    for (var i = 0; i < attempts.length; i++) {
+      var a = attempts[i];
+      var canvas = frameCanvas(v, a[0], a[1], a[3]);
+      var text = zxingDecode(canvas, a[2]);
+      if (!text) continue;
+      seen.push(text);
+      var vin = pickVin([text]);
+      if (vin) { accept(vin); return; }
     }
 
     if ('BarcodeDetector' in window) {
       new window.BarcodeDetector({
         formats: ['code_39', 'code_128', 'data_matrix', 'pdf417', 'qr_code']
-      }).detect(canvas).then(function (found) {
+      }).detect(frameCanvas(v, null, 1, false)).then(function (found) {
         var vin = pickVin(found.map(function (x) { return x.rawValue; }));
         if (vin) return accept(vin);
-        setHint('Nothing readable. Move closer, hold steady, keep the label flat.');
-      }).catch(function () {
-        setHint('Nothing readable. Move closer, hold steady, keep the label flat.');
-      });
+        report(seen.concat(found.map(function (x) { return x.rawValue; })));
+      }).catch(function () { report(seen); });
       return;
     }
 
-    setHint(tried
-      ? 'Nothing readable in that frame. Move closer, hold steady, keep the label flat.'
-      : 'Reader not ready yet. Try again in a second.');
+    report(seen);
+  }
+
+  function report(seen) {
+    if (seen.length) {
+      setHint('Read “' + String(seen[0]).slice(0, 34) + '” — no VIN in it. ' +
+        'Try the door-jamb label rather than the windscreen.');
+    } else {
+      setHint('Nothing readable. Fill the box with the barcode, hold the phone 6–10 inches away, ' +
+        'keep the label flat, and use Light if the bay is dark.');
+    }
   }
 
   function setHint(t) { var h = $('scanHint'); if (h) h.textContent = t; }
