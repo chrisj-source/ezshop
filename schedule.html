@@ -1,0 +1,590 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1c2740">
+<title>Admin — Easy Shop</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/shell.css?v=5">
+<style>
+  .tabs { display:flex; gap:2px; padding:0 18px 12px; flex:none; flex-wrap:wrap; }
+  .tab {
+    font:500 11.5px var(--font); color:var(--dim); background:transparent;
+    border:1px solid var(--line); border-radius:4px; padding:8px 13px;
+  }
+  .tab:hover { color:var(--text); }
+  .tab.sel { color:var(--acc); border-color:var(--acc); background:rgba(217,164,65,.09); }
+  .pane { padding:0 18px 40px; }
+  .grouphead { display:flex; align-items:baseline; gap:10px; padding:18px 0 8px; }
+  .groupname { font:500 14px var(--font); }
+  .groupnote { font:400 10.5px var(--font); color:var(--dim); line-height:1.5; max-width:640px; }
+  .slot {
+    display:grid; grid-template-columns:1fr 200px 130px 90px 90px; gap:10px;
+    align-items:center; padding:9px 0; border-top:1px solid var(--whisper);
+  }
+  .slotid { font:400 9.5px var(--font); color:var(--dim); margin-top:2px; font-variant-numeric:tabular-nums; }
+  .slot input, .slot select { width:100%; }
+  .card { border:1px solid var(--line); border-radius:6px; padding:14px; margin-top:12px; }
+  .chips { display:flex; gap:7px; flex-wrap:wrap; margin-top:8px; }
+  .chip {
+    font:500 10.5px var(--font); padding:6px 11px; border-radius:14px;
+    border:1px solid var(--line); color:var(--dim); background:transparent;
+  }
+  .chip.on { border-color:var(--acc); color:var(--acc); background:rgba(217,164,65,.08); }
+  .evrow { display:grid; grid-template-columns:1fr 110px 90px; gap:10px; align-items:center;
+           padding:8px 0; border-top:1px solid var(--whisper); }
+  .peoplerow { display:grid; grid-template-columns:1fr 150px 130px 110px auto; gap:10px;
+               align-items:center; padding:10px 0; border-top:1px solid var(--whisper); }
+  .code { font:600 15px var(--font); letter-spacing:.16em; color:var(--acc); }
+  @media (max-width:900px) {
+    .slot { grid-template-columns:1fr 1fr; }
+    .peoplerow { grid-template-columns:1fr 1fr; }
+    .evrow { grid-template-columns:1fr auto; }
+    .pane { padding:0 14px 40px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="bar">
+  <div class="brand"><div class="mark">ES</div><div class="word">Easy Shop</div></div>
+  <div class="vr"></div>
+  <div class="co" id="coName">—</div>
+  <div id="nav"></div>
+  <div class="spacer"></div>
+  <div id="bell"></div>
+  <div class="who" id="who">—</div>
+  <button class="ghostbtn" id="signout">Sign out</button>
+</div>
+<div class="hairline"></div>
+
+<div class="head">
+  <h1>Admin</h1>
+  <div class="headmeta" id="headmeta">Loading…</div>
+</div>
+
+<div class="tabs" id="tabs" style="padding-top:14px"></div>
+
+<main><div class="pane" id="pane"><div class="empty">Loading…</div></div></main>
+
+<script src="/shell.js?v=5"></script>
+<script>
+(function () {
+  var api = Shell.api, esc = Shell.esc;
+  var ME = null, CFG = null, PEOPLE = null, GROUPS = null, ROLES = [];
+  var CTYPES = null;
+  var TAB = 'statuses';
+
+  var TABS = [
+    { k: 'statuses', t: 'Statuses' },
+    { k: 'lanes', t: 'Lanes' },
+    { k: 'people', t: 'People' },
+    { k: 'groups', t: 'Notification groups' },
+    { k: 'settings', t: 'Settings' },
+    { k: 'storage', t: 'Storage' }
+  ];
+
+  function $(id) { return document.getElementById(id); }
+  function hours(h) { return h == null ? '' : (h % 24 === 0 ? (h / 24) + 'd' : h + 'h'); }
+  function toHours(v) {
+    if (!v) return null;
+    var m = /^(\d+)\s*([hd])?$/i.exec(String(v).trim());
+    if (!m) return null;
+    return (m[2] || 'h').toLowerCase() === 'd' ? Number(m[1]) * 24 : Number(m[1]);
+  }
+
+  api('/api/me').then(function (me) {
+    ME = me;
+    if (!me.company) { location.href = '/'; return null; }
+    if (!me.caps.admin) {
+      document.body.innerHTML = '<div class="empty">Admin is for the owner.<br>' +
+        '<a href="/board.html">Back to the board</a></div>';
+      return null;
+    }
+    Shell.mount({ me: me, active: 'admin' });
+    return Promise.all([
+      api('/api/config'),
+      api('/api/config/people'),
+      api('/api/admin/notification-groups'),
+      api('/api/admin/roles'),
+      api('/api/client-types')
+    ]);
+  }).then(function (r) {
+    if (!r) return;
+    CFG = r[0]; PEOPLE = r[1]; GROUPS = r[2]; ROLES = r[3].roles;
+    CTYPES = r[4];
+    $('headmeta').textContent = CFG.statuses.length + ' statuses · ' + CFG.lanes.length +
+      ' lanes · ' + PEOPLE.people.length + ' people · ' +
+      GROUPS.groups.length + ' notification groups';
+    renderTabs();
+    render();
+  }).catch(function (e) { if (e.message !== 'signed out') console.error(e); });
+
+  function renderTabs() {
+    $('tabs').innerHTML = TABS.map(function (t) {
+      return '<button class="tab' + (t.k === TAB ? ' sel' : '') + '" data-tab="' + t.k + '">' +
+        esc(t.t) + '</button>';
+    }).join('');
+    Array.prototype.forEach.call($('tabs').children, function (b) {
+      b.addEventListener('click', function () { TAB = b.dataset.tab; renderTabs(); render(); });
+    });
+  }
+
+  function render() {
+    if (TAB === 'statuses') return renderStatuses();
+    if (TAB === 'lanes') return renderLanes();
+    if (TAB === 'people') return renderPeople();
+    if (TAB === 'groups') return renderGroups();
+    if (TAB === 'settings') return renderSettings();
+    if (TAB === 'storage') return renderStorage();
+  }
+
+  /* ------------------------------------------------------------ statuses */
+
+  function renderStatuses() {
+    var h = ['<div class="msg" id="msg"></div>'];
+    h.push('<div class="groupnote" style="padding-top:6px">Rename anything. The identifier under each ' +
+      'name never changes, so reports and notifications keep working. Clocks are in hours; ' +
+      'write <strong>2d</strong> for days.</div>');
+
+    CFG.groups.forEach(function (g) {
+      var slots = CFG.statuses.filter(function (s) { return s.group_id === g.group_id; });
+      if (!slots.length) return;
+
+      h.push('<div class="grouphead"><div class="groupname">' + esc(g.label) + '</div>' +
+        '<div class="groupnote">' + esc(g.note || '') + '</div></div>');
+
+      h.push('<div class="slot" style="border:none;padding-bottom:4px">' +
+        '<div class="f-l">Name shown in the shop</div><div class="f-l">Name shown to the customer</div>' +
+        '<div class="f-l">Owner</div><div class="f-l">Warn at</div><div class="f-l">Red at</div></div>');
+
+      slots.forEach(function (s) {
+        h.push('<div class="slot" data-slot="' + esc(s.slot_id) + '">' +
+          '<div><input class="s-label" value="' + esc(s.label) + '">' +
+          '<div class="slotid">' + esc(s.slot_id) + '</div></div>' +
+          '<input class="s-clabel" value="' + esc(s.customer_label || '') + '" placeholder="not shown">' +
+          '<input class="s-owner" value="' + esc(s.owner_role) + '">' +
+          '<input class="s-yellow" value="' + hours(s.age_yellow_hours) + '" placeholder="—">' +
+          '<input class="s-red" value="' + hours(s.age_red_hours) + '" placeholder="—">' +
+          '</div>');
+      });
+    });
+
+    h.push('<div class="row" style="margin-top:22px">' +
+      '<button class="btn btn-solid" id="saveStatuses">Save changes</button></div>');
+
+    $('pane').innerHTML = h.join('');
+
+    $('saveStatuses').addEventListener('click', function () {
+      var rows = Array.prototype.slice.call(document.querySelectorAll('[data-slot]'));
+      var changed = [];
+
+      rows.forEach(function (row) {
+        var slot = row.dataset.slot;
+        var was = CFG.statuses.filter(function (s) { return s.slot_id === slot; })[0];
+        var body = {};
+        var label = row.querySelector('.s-label').value.trim();
+        var clabel = row.querySelector('.s-clabel').value.trim();
+        var owner = row.querySelector('.s-owner').value.trim();
+        var y = toHours(row.querySelector('.s-yellow').value);
+        var rd = toHours(row.querySelector('.s-red').value);
+
+        if (label && label !== was.label) body.label = label;
+        if (clabel !== (was.customer_label || '')) body.customerLabel = clabel || null;
+        if (owner && owner !== was.owner_role) body.ownerRole = owner;
+        if (y !== was.age_yellow_hours) body.ageYellowHours = y;
+        if (rd !== was.age_red_hours) body.ageRedHours = rd;
+
+        if (Object.keys(body).length) changed.push({ slot: slot, body: body });
+      });
+
+      if (!changed.length) return say('Nothing changed.', 'ok');
+      say('Saving ' + changed.length + ' status' + (changed.length === 1 ? '' : 'es') + '…', 'ok');
+
+      Promise.all(changed.map(function (c) {
+        return api('/api/config/statuses/' + encodeURIComponent(c.slot), {
+          method: 'PATCH', body: JSON.stringify(c.body)
+        });
+      })).then(function () {
+        return api('/api/config').then(function (c) { CFG = c; renderStatuses(); say('Saved.', 'ok'); });
+      }).catch(function (e) { say(e.message, 'err'); });
+    });
+  }
+
+  /* --------------------------------------------------------------- lanes */
+
+  function renderLanes() {
+    var h = ['<div class="msg" id="msg"></div>'];
+    h.push('<div class="groupnote" style="padding-top:6px">A lane with its parts gate on will not let a ' +
+      'file start until every gating part is received. Switch a lane off and its statuses disappear ' +
+      'from the board.</div>');
+
+    CFG.lanes.forEach(function (l) {
+      h.push('<div class="card" data-lane="' + esc(l.lane_key) + '">' +
+        '<div class="row"><input class="l-label" value="' + esc(l.label) + '" style="width:180px">' +
+        '<span class="sub">' + esc(l.lane_key) + ' · owned by ' + esc(l.owner_role) + '</span>' +
+        '<div class="spacer"></div>' +
+        '<button class="chip' + (l.enabled ? ' on' : '') + '" data-en="' + esc(l.lane_key) + '">' +
+        (l.enabled ? 'On' : 'Off') + '</button></div>' +
+        '<div class="row" style="margin-top:11px"><span class="f-l">Parts gate</span>' +
+        ['yes', 'warn', 'no'].map(function (g) {
+          return '<button class="chip' + (l.parts_gate === g ? ' on' : '') +
+            '" data-gate="' + esc(l.lane_key) + '" data-val="' + g + '">' +
+            (g === 'yes' ? 'Block' : g === 'warn' ? 'Warn' : 'Ignore') + '</button>';
+        }).join('') + '</div></div>');
+    });
+
+    $('pane').innerHTML = h.join('');
+
+    Array.prototype.forEach.call(document.querySelectorAll('[data-gate]'), function (b) {
+      b.addEventListener('click', function () {
+        api('/api/config/lanes/' + b.dataset.gate, {
+          method: 'PATCH', body: JSON.stringify({ partsGate: b.dataset.val })
+        }).then(reloadConfig).catch(fail);
+      });
+    });
+    Array.prototype.forEach.call(document.querySelectorAll('[data-en]'), function (b) {
+      b.addEventListener('click', function () {
+        var lane = CFG.lanes.filter(function (l) { return l.lane_key === b.dataset.en; })[0];
+        api('/api/config/lanes/' + b.dataset.en, {
+          method: 'PATCH', body: JSON.stringify({ enabled: !lane.enabled })
+        }).then(reloadConfig).catch(fail);
+      });
+    });
+  }
+
+  /* -------------------------------------------------------------- people */
+
+  function renderPeople() {
+    var h = ['<div class="msg" id="msg"></div>'];
+    h.push('<div class="card"><div class="groupname">Add someone</div>' +
+      '<div class="grid3" style="margin-top:12px">' +
+      '<div><label class="fl">Name</label><input id="nName"></div>' +
+      '<div><label class="fl">Email (optional)</label><input id="nEmail" type="email"></div>' +
+      '<div><label class="fl">Role</label><select id="nRole">' +
+      ROLES.map(function (r) { return '<option value="' + esc(r.key) + '">' + esc(r.label) + '</option>'; }).join('') +
+      '</select></div>' +
+      '<div><label class="fl">Position</label><select id="nPos"><option value="">None</option>' +
+      CFG.positions.map(function (p) {
+        return '<option value="' + esc(p.position_key) + '">' + esc(p.label) + '</option>';
+      }).join('') + '</select></div>' +
+      '<div><label class="fl">Employee code</label><input id="nCode"></div>' +
+      '<div style="align-self:end"><button class="btn btn-solid" id="addPerson">Add</button></div>' +
+      '</div><div class="groupnote" style="margin-top:10px">Leave the email blank and they get a ' +
+      'sign-in code instead — good enough for testing on the floor. Add an email later and they can ' +
+      'set their own password.</div></div>');
+
+    h.push('<div class="grouphead"><div class="groupname">Everyone</div></div>');
+    h.push('<div class="peoplerow" style="border:none"><div class="f-l">Name</div>' +
+      '<div class="f-l">Role</div><div class="f-l">Position</div><div class="f-l">Last in</div>' +
+      '<div class="f-l">Access</div></div>');
+
+    PEOPLE.people.forEach(function (p) {
+      h.push('<div class="peoplerow" data-user="' + p.id + '">' +
+        '<div><div class="log-b">' + esc(p.name) + '</div>' +
+        '<div class="sub">' + esc(p.email || 'code sign-in only') + '</div></div>' +
+        '<select class="p-role">' + ROLES.map(function (r) {
+          return '<option value="' + esc(r.key) + '"' + (r.key === p.role ? ' selected' : '') + '>' +
+            esc(r.label) + '</option>';
+        }).join('') + '</select>' +
+        '<select class="p-pos"><option value="">None</option>' + CFG.positions.map(function (x) {
+          return '<option value="' + esc(x.position_key) + '"' +
+            (x.position_key === p.position_key ? ' selected' : '') + '>' + esc(x.label) + '</option>';
+        }).join('') + '</select>' +
+        '<div class="sub">' + (p.last_login_at ? Shell.when(p.last_login_at) : 'never') + '</div>' +
+        '<div class="row"><button class="btn btn-ghost" data-code="' + p.id +
+        '" style="padding:5px 9px;font-size:10.5px">New code</button>' +
+        '<button class="btn btn-ghost" data-reset="' + p.id +
+        '" style="padding:5px 9px;font-size:10.5px">Reset password</button></div>' +
+        '</div>');
+    });
+
+    h.push('<div class="row" style="margin-top:20px">' +
+      '<button class="btn btn-solid" id="savePeople">Save roles and positions</button></div>');
+
+    $('pane').innerHTML = h.join('');
+
+    $('addPerson').addEventListener('click', function () {
+      var name = $('nName').value.trim();
+      if (!name) return say('A name is required.', 'err');
+      api('/api/admin/people', {
+        method: 'POST',
+        body: JSON.stringify({
+          name: name,
+          email: $('nEmail').value.trim() || undefined,
+          useCode: !$('nEmail').value.trim(),
+          role: $('nRole').value,
+          positionKey: $('nPos').value || undefined,
+          employeeCode: $('nCode').value.trim() || undefined
+        })
+      }).then(function (r) {
+        var extra = (r.loginCode || r.code) ? ' Sign-in code: ' + (r.loginCode || r.code)
+          : r.tempPassword ? ' Temporary password: ' + r.tempPassword : '';
+        say('Added.' + extra, 'ok');
+        return reloadPeople();
+      }).catch(fail);
+    });
+
+    $('savePeople').addEventListener('click', function () {
+      var rows = Array.prototype.slice.call(document.querySelectorAll('[data-user]'));
+      var jobs = [];
+      rows.forEach(function (row) {
+        var id = Number(row.dataset.user);
+        var was = PEOPLE.people.filter(function (p) { return p.id === id; })[0];
+        var role = row.querySelector('.p-role').value;
+        var pos = row.querySelector('.p-pos').value;
+        var body = {};
+        if (role !== was.role) body.role = role;
+        if (pos !== (was.position_key || '')) body.positionKey = pos || null;
+        if (Object.keys(body).length) jobs.push({ id: id, body: body });
+      });
+      if (!jobs.length) return say('Nothing changed.', 'ok');
+      Promise.all(jobs.map(function (j) {
+        return api('/api/admin/people/' + j.id, { method: 'PATCH', body: JSON.stringify(j.body) });
+      })).then(function () { say('Saved.', 'ok'); return reloadPeople(); }).catch(fail);
+    });
+
+    Array.prototype.forEach.call(document.querySelectorAll('[data-code]'), function (b) {
+      b.addEventListener('click', function () {
+        api('/api/admin/people/' + b.dataset.code + '/code', { method: 'POST' })
+          .then(function (r) {
+            say('Sign-in code: ' + r.code + ' — write it down, it is shown once.', 'ok');
+          }).catch(fail);
+      });
+    });
+    Array.prototype.forEach.call(document.querySelectorAll('[data-reset]'), function (b) {
+      b.addEventListener('click', function () {
+        if (!confirm('Reset this password? They will be signed out everywhere.')) return;
+        api('/api/admin/people/' + b.dataset.reset + '/reset-password', { method: 'POST' })
+          .then(function (r) { say('Temporary password: ' + r.tempPassword, 'ok'); }).catch(fail);
+      });
+    });
+  }
+
+  /* -------------------------------------------------------------- groups */
+
+  function renderGroups() {
+    var h = ['<div class="msg" id="msg"></div>'];
+    h.push('<div class="groupnote" style="padding-top:6px">A group holds positions, named people, or ' +
+      'both. <strong>Owned</strong> scope means the group only hears about statuses its positions own — ' +
+      'that is what keeps the painter out of disassembly traffic. <strong>Any</strong> means everything.</div>');
+
+    GROUPS.groups.forEach(function (g) {
+      h.push('<div class="card" data-group="' + g.id + '">');
+      h.push('<div class="row"><input class="g-name" value="' + esc(g.name) + '" style="width:220px">' +
+        '<input class="g-desc" value="' + esc(g.description || '') + '" placeholder="What it is for" style="flex:1;min-width:180px">' +
+        '<button class="btn btn-danger" data-delgroup="' + g.id + '" style="padding:5px 10px;font-size:10.5px">Delete</button></div>');
+
+      h.push('<div class="f-l" style="margin-top:13px">Positions</div><div class="chips">' +
+        CFG.positions.map(function (p) {
+          var on = g.positions.indexOf(p.position_key) >= 0;
+          return '<button class="chip' + (on ? ' on' : '') + '" data-pos="' + esc(p.position_key) +
+            '" data-on="' + (on ? 1 : 0) + '">' + esc(p.label) + '</button>';
+        }).join('') + '</div>');
+
+      h.push('<div class="f-l" style="margin-top:13px">Named people</div><div class="chips">' +
+        GROUPS.staff.map(function (s) {
+          var on = g.users.indexOf(s.user_id) >= 0;
+          return '<button class="chip' + (on ? ' on' : '') + '" data-usr="' + s.user_id +
+            '" data-on="' + (on ? 1 : 0) + '">' + esc(s.display_name) + '</button>';
+        }).join('') + '</div>');
+
+      h.push('<div class="f-l" style="margin-top:15px">Events</div>');
+      GROUPS.events.forEach(function (ev) {
+        var sub = g.events.filter(function (s) { return s.event_key === ev.key; })[0];
+        var on = sub && sub.enabled;
+        h.push('<div class="evrow" data-ev="' + esc(ev.key) + '">' +
+          '<div><div class="log-b">' + esc(ev.label) + '</div>' +
+          (ev.key === 'sms.reply' ? '<div class="sub">Needs SMS, which is not switched on.</div>' : '') +
+          '</div>' +
+          '<select class="ev-scope"' + (on ? '' : ' disabled') + '>' +
+          '<option value="owned"' + (sub && sub.scope === 'owned' ? ' selected' : '') + '>Owned only</option>' +
+          '<option value="any"' + (sub && sub.scope === 'any' ? ' selected' : '') + '>Anything</option>' +
+          '</select>' +
+          '<button class="chip' + (on ? ' on' : '') + '" data-evon="' + (on ? 1 : 0) + '">' +
+          (on ? 'On' : 'Off') + '</button></div>');
+      });
+
+      h.push('<div class="row" style="margin-top:14px">' +
+        '<button class="btn btn-solid" data-savegroup="' + g.id + '" style="padding:6px 13px">Save group</button></div>');
+      h.push('</div>');
+    });
+
+    h.push('<div class="card"><div class="groupname">New group</div>' +
+      '<div class="row" style="margin-top:11px">' +
+      '<input id="gName" placeholder="Name, e.g. Paint bench" style="width:220px">' +
+      '<input id="gDesc" placeholder="What it is for" style="flex:1;min-width:180px">' +
+      '<button class="btn btn-solid" id="addGroup">Create</button></div></div>');
+
+    $('pane').innerHTML = h.join('');
+
+    Array.prototype.forEach.call(document.querySelectorAll('.chip[data-pos], .chip[data-usr]'), function (b) {
+      b.addEventListener('click', function () {
+        var on = b.dataset.on !== '1';
+        b.dataset.on = on ? '1' : '0';
+        b.classList.toggle('on', on);
+      });
+    });
+
+    Array.prototype.forEach.call(document.querySelectorAll('.chip[data-evon]'), function (b) {
+      b.addEventListener('click', function () {
+        var on = b.dataset.evon !== '1';
+        b.dataset.evon = on ? '1' : '0';
+        b.classList.toggle('on', on);
+        b.textContent = on ? 'On' : 'Off';
+        b.closest('.evrow').querySelector('.ev-scope').disabled = !on;
+      });
+    });
+
+    Array.prototype.forEach.call(document.querySelectorAll('[data-savegroup]'), function (b) {
+      b.addEventListener('click', function () {
+        var card = b.closest('[data-group]');
+        var body = {
+          name: card.querySelector('.g-name').value.trim(),
+          description: card.querySelector('.g-desc').value.trim(),
+          positions: Array.prototype.slice.call(card.querySelectorAll('.chip[data-pos]'))
+            .filter(function (c) { return c.dataset.on === '1'; }).map(function (c) { return c.dataset.pos; }),
+          users: Array.prototype.slice.call(card.querySelectorAll('.chip[data-usr]'))
+            .filter(function (c) { return c.dataset.on === '1'; }).map(function (c) { return Number(c.dataset.usr); }),
+          events: Array.prototype.slice.call(card.querySelectorAll('.evrow')).map(function (row) {
+            return {
+              key: row.dataset.ev,
+              enabled: row.querySelector('.chip[data-evon]').dataset.evon === '1',
+              scope: row.querySelector('.ev-scope').value
+            };
+          })
+        };
+        api('/api/admin/notification-groups/' + b.dataset.savegroup, {
+          method: 'PUT', body: JSON.stringify(body)
+        }).then(function () { say('Saved.', 'ok'); return reloadGroups(); }).catch(fail);
+      });
+    });
+
+    Array.prototype.forEach.call(document.querySelectorAll('[data-delgroup]'), function (b) {
+      b.addEventListener('click', function () {
+        if (!confirm('Delete this group? Nobody in it will be notified any more.')) return;
+        api('/api/admin/notification-groups/' + b.dataset.delgroup, { method: 'DELETE' })
+          .then(reloadGroups).catch(fail);
+      });
+    });
+
+    $('addGroup').addEventListener('click', function () {
+      var name = $('gName').value.trim();
+      if (!name) return say('A name is required.', 'err');
+      api('/api/admin/notification-groups', {
+        method: 'POST', body: JSON.stringify({ name: name, description: $('gDesc').value.trim() })
+      }).then(reloadGroups).catch(fail);
+    });
+  }
+
+  /* ------------------------------------------------------------ settings */
+
+  function renderSettings() {
+    var s = CFG.settings;
+    var h = ['<div class="msg" id="msg"></div>'];
+
+    h.push('<div class="card"><div class="groupname">Who sees what</div>' +
+      '<div class="row" style="margin-top:12px"><div style="flex:1">' +
+      '<div class="log-b">Technicians see only their own files</div>' +
+      '<div class="groupnote">On: a tech sees only cars assigned to them. Off: every tech sees the ' +
+      'whole board. Estimators, production, front office and the owner always see everything.</div>' +
+      '</div><button class="chip' + (s.tech_sees_own_only !== '0' ? ' on' : '') + '" id="techOwn" ' +
+      'data-on="' + (s.tech_sees_own_only !== '0' ? 1 : 0) + '">' +
+      (s.tech_sees_own_only !== '0' ? 'On' : 'Off') + '</button></div></div>');
+
+    h.push('<div class="card"><div class="groupname">Scheduler capacity</div>' +
+      '<div class="groupnote">How many of each per day. The owner can always overbook.</div>' +
+      '<div class="grid3" style="margin-top:12px">' +
+      ['drop', 'pickup', 'return', 'estimate', 'appraiser'].map(function (k) {
+        return '<div><label class="fl">' + k + 's per day</label>' +
+          '<input type="number" min="0" id="cap_' + k + '" value="' + esc(s['cap_' + k] || '0') + '"></div>';
+      }).join('') + '</div></div>');
+
+    h.push('<div class="row" style="margin-top:18px">' +
+      '<button class="btn btn-solid" id="saveSettings">Save settings</button></div>');
+
+    $('pane').innerHTML = h.join('');
+
+    $('techOwn').addEventListener('click', function () {
+      var b = $('techOwn'), on = b.dataset.on !== '1';
+      b.dataset.on = on ? '1' : '0';
+      b.classList.toggle('on', on);
+      b.textContent = on ? 'On' : 'Off';
+    });
+
+    $('saveSettings').addEventListener('click', function () {
+      var body = { tech_sees_own_only: $('techOwn').dataset.on === '1' ? '1' : '0' };
+      ['drop', 'pickup', 'return', 'estimate', 'appraiser'].forEach(function (k) {
+        body['cap_' + k] = $('cap_' + k).value || '0';
+      });
+      api('/api/config/settings', { method: 'PATCH', body: JSON.stringify(body) })
+        .then(function () { say('Saved.', 'ok'); return reloadConfig(); }).catch(fail);
+    });
+  }
+
+  /* ------------------------------------------------------------- storage */
+
+  function renderStorage() {
+    $('pane').innerHTML = '<div class="empty">Loading…</div>';
+
+    api('/api/storage').then(function (d) {
+      function bytes(n) {
+        if (!n) return '0 B';
+        if (n < 1024 * 1024) return Math.round(n / 1024) + ' KB';
+        if (n < 1024 * 1024 * 1024) return (n / 1024 / 1024).toFixed(1) + ' MB';
+        return (n / 1024 / 1024 / 1024).toFixed(2) + ' GB';
+      }
+
+      var h = ['<div class="msg" id="msg"></div>'];
+      h.push('<div class="groupnote" style="padding-top:6px">Photos are shrunk on the phone before they ' +
+        'upload — a 2048px version to keep and a small thumbnail for grids — so a car with two hundred ' +
+        'photos costs about 80 MB rather than 800.</div>');
+
+      h.push('<div class="kpis" style="padding:16px 0;border-bottom:1px solid var(--whisper)">' +
+        '<div><div class="kpi-v">' + bytes(d.bytes) + '</div><div class="kpi-k">on disk</div></div>' +
+        '<div><div class="kpi-v">' + d.files.toLocaleString('en-US') + '</div>' +
+        '<div class="kpi-k">files</div></div>' +
+        '<div><div class="kpi-v">' + d.images.toLocaleString('en-US') + '</div>' +
+        '<div class="kpi-k">photos</div></div>' +
+        '<div><div class="kpi-v">' + (d.files ? bytes(Math.round(d.bytes / d.files)) : '—') + '</div>' +
+        '<div class="kpi-k">average file</div></div></div>');
+
+      h.push('<div class="sec">By kind</div>');
+      var max = Math.max.apply(null, d.byType.map(function (t) { return Number(t.bytes); }).concat([1]));
+      h.push('<table><thead><tr><th>Kind</th><th class="num">Files</th>' +
+        '<th class="num">Size</th><th></th></tr></thead><tbody>' +
+        d.byType.map(function (t) {
+          var pct = Math.round((Number(t.bytes) / max) * 100);
+          return '<tr><td>' + esc(String(t.doc_type).replace(/_/g, ' ')) + '</td>' +
+            '<td class="num">' + t.n + '</td>' +
+            '<td class="num">' + bytes(Number(t.bytes)) + '</td>' +
+            '<td><div style="height:6px;background:var(--whisper);border-radius:3px">' +
+            '<div style="height:100%;width:' + pct + '%;background:var(--acc);border-radius:3px"></div>' +
+            '</div></td></tr>';
+        }).join('') + '</tbody></table>');
+
+      $('pane').innerHTML = h.join('');
+    }).catch(function (e) {
+      $('pane').innerHTML = '<div class="empty">' + esc(e.message) + '</div>';
+    });
+  }
+
+  /* ------------------------------------------------------------- helpers */
+
+  function say(t, k) {
+    var m = $('msg');
+    if (!m) return;
+    m.textContent = t;
+    m.className = 'msg ' + k;
+  }
+  function fail(e) { say(e.message, 'err'); }
+  function reloadConfig() { return api('/api/config').then(function (c) { CFG = c; render(); }); }
+  function reloadPeople() { return api('/api/config/people').then(function (p) { PEOPLE = p; renderPeople(); }); }
+  function reloadGroups() {
+    return api('/api/admin/notification-groups').then(function (g) { GROUPS = g; renderGroups(); });
+  }
+})();
+</script>
+</body>
+</html>

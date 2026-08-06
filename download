@@ -1,0 +1,26 @@
+NODE_ENV=production
+PORT=3000
+APP_URL=https://app.yourdomain.com
+
+# MariaDB — the application account (see README step 2)
+DB_HOST=127.0.0.1
+DB_PORT=3306
+DB_USER=es_app
+DB_PASSWORD=
+MASTER_DB=easyshop_master
+
+# Tenant database credentials resolve by secret_ref.
+# company_databases.secret_ref = 'DEFAULT' -> TENANT_SECRET_DEFAULT
+# Leave blank to reuse DB_PASSWORD (single-box setup; every tenant DB is owned
+# by the same MariaDB account). Set per-ref values when you split them out.
+TENANT_SECRET_DEFAULT=
+
+# openssl rand -hex 32
+COOKIE_SECRET=
+SESSION_DAYS=14
+
+# openssl rand -hex 32 — salts the EMS agent tokens
+EMS_AGENT_TOKEN_SALT=
+
+# Where uploaded documents and EMS files land
+STORAGE_DIR=/srv/easyshop-storage
