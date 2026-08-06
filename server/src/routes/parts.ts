@@ -21,11 +21,15 @@ export async function registerParts(app: FastifyInstance): Promise<void> {
     if (q.roId) { where.push('p.ro_id = ?'); params.push(Number(q.roId)); }
 
     const rows = await tq<RowDataPacket[]>(ctx.company!.id, `
-      SELECT p.*, v.name AS vendor_name, r.ro_number,
+      SELECT p.*, v.name AS vendor_name, r.ro_number, r.id AS ro_id,
+             r.opened_at, r.target_days,
+             DATEDIFF(NOW(), r.opened_at) AS days_in_shop,
              c.name AS customer_name,
              CONCAT_WS(' ', veh.year, veh.make, veh.model) AS vehicle,
-             s.label AS status_label,
-             DATEDIFF(CURDATE(), p.eta) AS days_late
+             veh.color,
+             s.label AS status_label, s.lane_key,
+             DATEDIFF(CURDATE(), p.eta) AS days_late,
+             DATEDIFF(NOW(), p.ordered_at) AS days_since_ordered
       FROM parts_lines p
       JOIN repair_orders r ON r.id = p.ro_id
       LEFT JOIN vendors v ON v.id = p.vendor_id
@@ -41,6 +45,8 @@ export async function registerParts(app: FastifyInstance): Promise<void> {
 
     const [summary] = await tq<RowDataPacket[]>(ctx.company!.id, `
       SELECT
+        COALESCE(SUM(p.price_cents * p.qty), 0) AS list_cents,
+        COALESCE(SUM(p.cost_cents * p.qty), 0) AS cost_cents,
         SUM(p.state = 'need') AS needed,
         SUM(p.state = 'ordered') AS ordered,
         SUM(p.state = 'backordered') AS backordered,
@@ -54,6 +60,8 @@ export async function registerParts(app: FastifyInstance): Promise<void> {
       parts: rows.map(r => scrubMoney(r as Record<string, unknown>, ctx.caps)),
       vendors,
       summary: {
+        listCents: ctx.caps.money ? Number(summary.list_cents ?? 0) : null,
+        costCents: ctx.caps.money ? Number(summary.cost_cents ?? 0) : null,
         needed: Number(summary.needed ?? 0),
         ordered: Number(summary.ordered ?? 0),
         backordered: Number(summary.backordered ?? 0),
@@ -72,17 +80,19 @@ export async function registerParts(app: FastifyInstance): Promise<void> {
     const roId = Number((req.params as { id: string }).id);
     const b = req.body as {
       description: string; partNumber?: string; partType?: string; qty?: number;
-      priceCents?: number; vendorId?: number; eta?: string; gating?: boolean; note?: string;
+      priceCents?: number; costCents?: number; vendorId?: number; eta?: string;
+      gating?: boolean; note?: string; poNumber?: string;
     };
     if (!b.description) return reply.code(400).send({ error: 'Description is required' });
 
     const res = await texec(ctx.company!.id, `
       INSERT INTO parts_lines
-        (ro_id, vendor_id, description, part_number, part_type, qty, price_cents, state, gating, eta, note)
-      VALUES (?, ?, ?, ?, ?, ?, ?, 'need', ?, ?, ?)`,
+        (ro_id, vendor_id, description, part_number, part_type, qty,
+         price_cents, cost_cents, po_number, state, gating, eta, note)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'need', ?, ?, ?)`,
       [roId, b.vendorId ?? null, b.description.slice(0, 255), b.partNumber ?? null,
-       b.partType ?? null, b.qty ?? 1, b.priceCents ?? 0,
-       b.gating === false ? 0 : 1, b.eta ?? null, b.note ?? null]
+       b.partType ?? null, b.qty ?? 1, b.priceCents ?? 0, b.costCents ?? 0,
+       b.poNumber ?? null, b.gating === false ? 0 : 1, b.eta ?? null, b.note ?? null]
     );
 
     return { ok: true, id: res.insertId };
@@ -110,6 +120,7 @@ export async function registerParts(app: FastifyInstance): Promise<void> {
     const map: Record<string, string> = {
       description: 'description', partNumber: 'part_number', partType: 'part_type',
       qty: 'qty', qtyReceived: 'qty_received', priceCents: 'price_cents',
+      costCents: 'cost_cents', poNumber: 'po_number', invoiceNo: 'invoice_no',
       vendorId: 'vendor_id', state: 'state', gating: 'gating',
       orderedAt: 'ordered_at', eta: 'eta', receivedAt: 'received_at', note: 'note'
     };
@@ -160,7 +171,8 @@ export async function registerParts(app: FastifyInstance): Promise<void> {
     // Recompute the file's parts cost so the board's totals stay honest.
     await texec(cid, `
       UPDATE repair_orders r SET r.parts_cost_cents = (
-        SELECT COALESCE(SUM(p.price_cents * p.qty), 0) FROM parts_lines p
+        SELECT COALESCE(SUM(IF(p.cost_cents > 0, p.cost_cents, p.price_cents) * p.qty), 0)
+        FROM parts_lines p
         WHERE p.ro_id = r.id AND p.state <> 'not_needed'
       ) WHERE r.id = ?`, [before.ro_id]);
 
@@ -181,15 +193,17 @@ export async function registerParts(app: FastifyInstance): Promise<void> {
     if (!ctx) return;
     if (!ctx.caps.manageParts) return reply.code(403).send({ error: 'Not permitted' });
 
-    const { ids, vendorId, eta } = req.body as { ids: number[]; vendorId?: number; eta?: string };
+    const { ids, vendorId, eta, poNumber } = req.body as
+      { ids: number[]; vendorId?: number; eta?: string; poNumber?: string };
     if (!ids?.length) return reply.code(400).send({ error: 'Nothing selected' });
 
     await texec(ctx.company!.id, `
       UPDATE parts_lines
       SET state = 'ordered', ordered_at = CURDATE(),
-          vendor_id = COALESCE(?, vendor_id), eta = COALESCE(?, eta)
+          vendor_id = COALESCE(?, vendor_id), eta = COALESCE(?, eta),
+          po_number = COALESCE(?, po_number)
       WHERE id IN (?)`,
-      [vendorId ?? null, eta ?? null, ids]
+      [vendorId ?? null, eta ?? null, poNumber ?? null, ids]
     );
 
     return { ok: true, count: ids.length };

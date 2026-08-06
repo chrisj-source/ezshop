@@ -8,40 +8,110 @@
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/shell.css">
 <style>
-  .pane { padding:0 18px 40px; }
-  .week { display:grid; grid-template-columns:repeat(7,1fr); gap:1px; background:var(--line); border:1px solid var(--line); border-radius:6px; overflow:hidden; }
-  .day { background:var(--bg); min-height:200px; display:flex; flex-direction:column; }
-  .day.closed { background:rgba(231,234,242,.03); }
-  .day.today .dayhead { background:rgba(217,164,65,.12); }
-  .dayhead { padding:8px 10px; border-bottom:1px solid var(--whisper); }
-  .dayname { font:600 8.5px var(--font); letter-spacing:.12em; text-transform:uppercase; color:var(--acc2); }
-  .daynum { font:500 15px var(--font); font-variant-numeric:tabular-nums; margin-top:2px; }
-  .daycap { font:400 9.5px var(--font); color:var(--dim); margin-top:3px; line-height:1.4; }
-  .daycap .full { color:var(--stopped); }
-  .daybody { flex:1; padding:6px; display:flex; flex-direction:column; gap:4px; }
+  .navrow { display:flex; align-items:center; gap:10px; padding:11px 18px; flex:none; }
+  .arrow {
+    width:26px; height:26px; display:grid; place-items:center;
+    font:400 14px var(--font); color:var(--muted);
+    border:1px solid var(--line); border-radius:4px; background:transparent;
+  }
+  .arrow:hover { border-color:var(--acc); color:var(--text); }
+  .weeklabel { font:500 13px var(--font); white-space:nowrap; }
+  .vdiv { width:1px; height:16px; background:var(--line); }
+  .typefilter {
+    font:400 11px var(--font); padding:5px 10px; border-radius:4px; background:transparent;
+    border:1px solid var(--line); color:var(--muted); display:flex; align-items:center; gap:6px;
+  }
+  .typefilter.sel { color:var(--text); background:var(--chip); border-color:var(--acc); }
+  .tdot { width:7px; height:7px; border-radius:50%; flex:none; }
+
+  .summaryrow {
+    display:flex; align-items:baseline; gap:14px; padding:0 18px 10px; flex:none;
+    font:400 11px var(--font); color:var(--dim);
+  }
+
+  /* Six columns — the shop is shut one day, so the week reads as six. */
+  .week {
+    flex:1; min-height:0; display:grid; grid-template-columns:repeat(6,1fr);
+    gap:8px; padding:0 14px 14px;
+  }
+  .daycol {
+    display:flex; flex-direction:column; min-height:0;
+    border:1px solid var(--line); border-radius:6px; overflow:hidden;
+  }
+  .daycol.today { background:var(--chip); }
+  .dayhead { padding:9px 10px 8px; border-bottom:1px solid var(--whisper); flex:none; }
+  .dayname {
+    white-space:nowrap; font:600 9.5px var(--font); letter-spacing:.12em; text-transform:uppercase;
+  }
+  .daydate {
+    white-space:nowrap; font:400 10.5px var(--font); font-variant-numeric:tabular-nums; color:var(--dim);
+  }
+  .todaytag {
+    margin-left:auto; font:600 8px var(--font); letter-spacing:.12em;
+    text-transform:uppercase; color:var(--acc);
+  }
+  .daycounts { display:flex; align-items:center; gap:9px; margin-top:6px; height:14px; }
+  .daycount { display:flex; align-items:center; gap:4px; }
+  .daycount span.n { font:400 10px var(--font); font-variant-numeric:tabular-nums; }
+  .daybody {
+    flex:1; min-height:0; overflow-y:auto; padding:8px;
+    display:flex; flex-direction:column; gap:6px;
+  }
   .appt {
-    border-left:3px solid var(--dim); background:var(--whisper); border-radius:3px;
-    padding:5px 7px; cursor:pointer; text-align:left; border-top:none; border-right:none; border-bottom:none;
-    color:var(--text); width:100%;
+    border:1px solid var(--line); border-radius:5px; padding:8px 9px;
+    background:var(--surf); text-align:left; color:var(--text); width:100%;
   }
-  .appt:hover { background:rgba(217,164,65,.1); }
-  .apptt { font:500 11px var(--font); }
-  .apptm { font:400 9.5px var(--font); color:var(--dim); margin-top:1px; }
-  .addday {
-    background:none; border:1px dashed var(--line); border-radius:3px; color:var(--dim);
-    font:400 10px var(--font); padding:5px; margin-top:auto;
+  .appt:hover { border-color:var(--acc); }
+  .appt.past { opacity:.62; }
+  .apptime { font:500 11px var(--font); font-variant-numeric:tabular-nums; }
+  .apptype { font:500 8px var(--font); letter-spacing:.1em; text-transform:uppercase; }
+  .apwho {
+    font:400 11.5px var(--font); white-space:nowrap; overflow:hidden;
+    text-overflow:ellipsis; margin-top:4px;
   }
-  .addday:hover { border-color:var(--acc); color:var(--acc); }
-  .legend { display:flex; gap:14px; flex-wrap:wrap; padding:12px 18px 0; }
-  .legitem { display:flex; align-items:center; gap:6px; font:400 10.5px var(--font); color:var(--dim); }
-  .swatch { width:10px; height:10px; border-radius:2px; }
-  .capbar { display:flex; gap:20px; flex-wrap:wrap; padding:0 18px 14px; }
-  .capcell { font:400 10.5px var(--font); color:var(--dim); }
-  .capcell strong { color:var(--text); font-weight:500; font-variant-numeric:tabular-nums; }
-  @media (max-width:900px) {
+  .apveh {
+    font:400 10.5px var(--font); color:var(--muted); white-space:nowrap;
+    overflow:hidden; text-overflow:ellipsis; margin-top:2px;
+  }
+  .aprow { display:flex; align-items:center; gap:6px; margin-top:5px; }
+  .apro {
+    white-space:nowrap; font:400 9.5px var(--font); font-variant-numeric:tabular-nums;
+    border-radius:3px; padding:1px 5px;
+  }
+  .aprem { margin-left:auto; white-space:nowrap; font:400 9.5px var(--font); color:var(--dim); }
+  .apx {
+    background:none; border:none; color:var(--dim); font-size:13px; line-height:1;
+    padding:0 2px; margin-left:auto;
+  }
+  .apx:hover { color:var(--text); }
+  .daynone { font:400 10.5px var(--font); color:var(--dim); padding:4px 2px; }
+
+  /* Booking form: month picker beside the fields, as the mockup lays it out. */
+  .bookgrid { display:grid; grid-template-columns:246px 1fr; gap:16px; }
+  .calhead { display:flex; align-items:center; gap:8px; margin-bottom:8px; }
+  .calnav {
+    width:22px; height:22px; display:grid; place-items:center; background:transparent;
+    border:1px solid var(--line); border-radius:4px; color:var(--muted); font-size:12px;
+  }
+  .calgrid { display:grid; grid-template-columns:repeat(7,1fr); gap:2px; }
+  .calwd {
+    font:600 8px var(--font); letter-spacing:.1em; text-transform:uppercase;
+    color:var(--dim); text-align:center; padding-bottom:3px;
+  }
+  .calcell {
+    aspect-ratio:1; display:grid; place-items:center; border-radius:4px; background:transparent;
+    border:1px solid transparent; font:400 11px var(--font); font-variant-numeric:tabular-nums;
+    color:var(--muted);
+  }
+  .calcell:hover:not(:disabled) { border-color:var(--acc); color:var(--text); }
+  .calcell.sel { background:var(--acc); color:var(--bg); border-color:var(--acc); }
+  .calcell.full { color:var(--stopped); }
+  .calcell:disabled { color:var(--line); }
+  .capline { font:400 11px/1.5 var(--font); border-radius:5px; padding:8px 10px; margin-top:12px; }
+  @media (max-width:1000px) {
     .week { grid-template-columns:1fr; }
-    .day { min-height:0; }
-    .pane { padding:0 14px 40px; }
+    .daycol { min-height:0; }
+    .bookgrid { grid-template-columns:1fr; }
   }
 </style>
 </head>
@@ -59,28 +129,26 @@
 </div>
 <div class="hairline"></div>
 
-<div class="head">
-  <h1>Schedule</h1>
-  <div class="headmeta" id="headmeta">Loading…</div>
-</div>
-
-<div class="filters">
-  <button class="btn btn-ghost" id="prev">Previous week</button>
-  <button class="btn btn-ghost" id="thisWeek">This week</button>
-  <button class="btn btn-ghost" id="next">Next week</button>
-  <input type="date" id="jump">
-  <button class="btn" id="book">Book something</button>
-</div>
-
-<div class="legend" id="legend"></div>
-<div class="capbar" id="capbar"></div>
-
-<main>
-  <div class="pane">
-    <div class="week" id="week"></div>
-    <div class="msg" id="msg"></div>
+<div class="navrow">
+  <div style="display:flex;align-items:center;gap:2px">
+    <button class="arrow" id="prev">‹</button>
+    <button class="arrow" id="next">›</button>
   </div>
-</main>
+  <div class="weeklabel" id="weekLabel">—</div>
+  <button class="btn btn-ghost" id="thisWeek">This week</button>
+  <div class="vdiv"></div>
+  <div style="display:flex;gap:6px" id="typeFilters"></div>
+  <div class="spacer"></div>
+  <button class="btn btn-ghost" id="limitsBtn" hidden>Day limits</button>
+  <button class="btn" id="bookBtn">Book</button>
+</div>
+
+<div class="summaryrow">
+  <div id="weekSummary">Loading…</div>
+  <div id="closedNote"></div>
+</div>
+
+<div class="week" id="week"></div>
 
 <div class="scrim" id="scrim"></div>
 <aside class="drawer" id="drawer" aria-hidden="true">
@@ -98,13 +166,14 @@
 <script>
 (function () {
   var api = Shell.api, esc = Shell.esc;
-  var ME = null, META = null, DATA = null, FROM = null;
+  var ME = null, META = null, DATA = null, FROM = null, TYPE = null;
+  var CAL_MONTH = null, PICKED = null, BOOK_KIND = null, OPENINGS = null;
 
   var TONE = {
     drop: 'var(--move)', pickup: 'var(--done)', return: 'var(--blocked)',
     estimate: 'var(--acc)', appraiser: 'var(--stopped)'
   };
-  var DAYS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+  var DAYNAMES = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
 
   function $(id) { return document.getElementById(id); }
   function iso(d) {
@@ -113,8 +182,7 @@
   function mondayOf(d) {
     var x = new Date(d);
     x.setHours(12, 0, 0, 0);
-    var diff = (x.getDay() + 6) % 7;
-    x.setDate(x.getDate() - diff);
+    x.setDate(x.getDate() - ((x.getDay() + 6) % 7));
     return x;
   }
   function timeOf(v) {
@@ -122,6 +190,9 @@
   }
   function kindLabel(k) {
     return (META.kinds.filter(function (x) { return x.key === k; })[0] || {}).label || k;
+  }
+  function capOf(k) {
+    return (META.kinds.filter(function (x) { return x.key === k; })[0] || {}).cap || 0;
   }
 
   api('/api/me').then(function (me) {
@@ -132,17 +203,31 @@
       return null;
     }
     Shell.mount({ me: me, active: 'schedule' });
+    if (me.caps.admin) $('limitsBtn').hidden = false;
     return api('/api/schedule-meta');
   }).then(function (m) {
     if (!m) return;
     META = m;
-    $('legend').innerHTML = m.kinds.map(function (k) {
-      return '<div class="legitem"><div class="swatch" style="background:' + TONE[k.key] + '"></div>' +
-        esc(k.label) + (k.cap ? ' · ' + k.cap + '/day' : ' · no limit') + '</div>';
-    }).join('');
+    renderFilters();
     FROM = iso(mondayOf(new Date()));
     return load();
   }).catch(function (e) { if (e.message !== 'signed out') console.error(e); });
+
+  function renderFilters() {
+    $('typeFilters').innerHTML = META.kinds.map(function (k) {
+      return '<button class="typefilter' + (TYPE === k.key ? ' sel' : '') + '" data-type="' + k.key +
+        '" title="' + (k.cap ? k.cap + ' a day' : 'no daily limit') + '">' +
+        '<span class="tdot" style="background:' + TONE[k.key] + '"></span>' + esc(k.label) + '</button>';
+    }).join('');
+
+    Array.prototype.forEach.call($('typeFilters').children, function (b) {
+      b.addEventListener('click', function () {
+        TYPE = TYPE === b.dataset.type ? null : b.dataset.type;
+        renderFilters();
+        render();
+      });
+    });
+  }
 
   function load() {
     return api('/api/schedule?from=' + FROM + '&days=7').then(function (d) {
@@ -155,168 +240,319 @@
     var start = new Date(FROM + 'T12:00');
     var end = new Date(start); end.setDate(end.getDate() + 6);
 
-    $('headmeta').textContent =
-      start.toLocaleDateString('en-US', { month: 'long', day: 'numeric' }) + ' – ' +
-      end.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }) +
-      ' · ' + DATA.appointments.length + ' booked' +
-      (META.canOverbook ? ' · you can overbook a full day' : '');
+    $('weekLabel').textContent =
+      start.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + ' – ' +
+      end.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 
-    var totals = {};
-    DATA.appointments.forEach(function (a) { totals[a.kind] = (totals[a.kind] || 0) + 1; });
-    $('capbar').innerHTML = META.kinds.map(function (k) {
-      return '<div class="capcell">' + esc(k.label) + ' <strong>' + (totals[k.key] || 0) + '</strong>' +
-        (k.cap ? ' of ' + (k.cap * 7) + ' this week' : '') + '</div>';
-    }).join('');
+    var shown = DATA.appointments.filter(function (a) { return !TYPE || a.kind === TYPE; });
+    var counts = {};
+    shown.forEach(function (a) { counts[a.kind] = (counts[a.kind] || 0) + 1; });
+
+    $('weekSummary').textContent = shown.length + ' booked this week' +
+      (TYPE ? ' · ' + kindLabel(TYPE).toLowerCase() + 's only' : ' · ' +
+        META.kinds.filter(function (k) { return counts[k.key]; })
+          .map(function (k) { return counts[k.key] + ' ' + k.label.toLowerCase(); }).join(', '));
+
+    $('closedNote').textContent = META.closedDays.length
+      ? 'Closed ' + META.closedDays.join(' and ') + (ME.caps.admin ? ' · you can overbook a full day' : '')
+      : (ME.caps.admin ? 'You can overbook a full day' : '');
 
     var todayIso = iso(new Date());
+    var now = Date.now();
     var html = '';
 
     for (var i = 0; i < 7; i++) {
       var d = new Date(start);
       d.setDate(d.getDate() + i);
       var key = iso(d);
-      var weekday = DAYS[d.getDay()];
-      var isClosed = META.closedDays.indexOf(weekday) >= 0;
+      var weekday = DAYNAMES[d.getDay()];
+      if (META.closedDays.indexOf(weekday) >= 0) continue;
 
-      var mine = DATA.appointments.filter(function (a) { return iso(new Date(a.starts_at)) === key; });
+      var mine = shown.filter(function (a) { return iso(new Date(a.starts_at)) === key; });
       var used = DATA.used[key] || {};
+      var isToday = key === todayIso;
+      var past = new Date(key + 'T23:59') < new Date(todayIso + 'T00:00');
 
-      var capText = META.kinds.filter(function (k) { return k.cap > 0; }).map(function (k) {
-        var n = used[k.key] || 0;
-        var full = n >= k.cap;
-        return '<span class="' + (full ? 'full' : '') + '">' + k.label.charAt(0) + k.label.slice(1, 4).toLowerCase() +
-          ' ' + n + '/' + k.cap + '</span>';
-      }).join(' · ');
+      var countHtml = META.kinds.filter(function (k) { return used[k.key]; }).map(function (k) {
+        var full = k.cap > 0 && used[k.key] >= k.cap;
+        return '<div class="daycount" title="' + used[k.key] + ' of ' +
+          (k.cap || '∞') + ' ' + esc(k.label.toLowerCase()) + '">' +
+          '<span class="tdot" style="background:' + TONE[k.key] + '"></span>' +
+          '<span class="n" style="color:' + (full ? 'var(--stopped)' : 'var(--muted)') + '">' +
+          used[k.key] + (k.cap ? '/' + k.cap : '') + '</span></div>';
+      }).join('');
 
-      html += '<div class="day' + (isClosed ? ' closed' : '') + (key === todayIso ? ' today' : '') + '">' +
-        '<div class="dayhead"><div class="dayname">' + weekday.slice(0, 3).toUpperCase() + '</div>' +
-        '<div class="daynum">' + d.getDate() + '</div>' +
-        '<div class="daycap">' + (isClosed ? 'Closed' : capText || 'no limits') + '</div></div>' +
+      html += '<div class="daycol' + (isToday ? ' today' : '') + '">' +
+        '<div class="dayhead"><div style="display:flex;align-items:baseline;gap:7px">' +
+        '<div class="dayname" style="color:' + (past ? 'var(--dim)' : 'var(--text)') + '">' +
+        weekday.slice(0, 3).toUpperCase() + '</div>' +
+        '<div class="daydate">' + (d.getMonth() + 1) + '-' + d.getDate() + '</div>' +
+        (isToday ? '<div class="todaytag">Today</div>' : '') + '</div>' +
+        '<div class="daycounts">' + (countHtml ||
+          '<div style="font:400 10px var(--font);color:var(--dim)">nothing booked</div>') +
+        '</div></div>' +
+
         '<div class="daybody">' +
         mine.map(function (a) {
-          return '<button class="appt" data-appt="' + a.id + '" style="border-left-color:' + TONE[a.kind] + '">' +
-            '<div class="apptt">' + esc(a.customer_name) + '</div>' +
-            '<div class="apptm">' + timeOf(a.starts_at) + ' · ' + esc(kindLabel(a.kind)) +
-            (a.ro_number ? ' · ' + esc(a.ro_number) : '') + '</div></button>';
+          var isPast = new Date(a.starts_at).getTime() < now;
+          return '<div class="appt' + (isPast ? ' past' : '') + '" data-appt="' + a.id + '" ' +
+            'style="border-left:2px solid ' + TONE[a.kind] + '">' +
+            '<div style="display:flex;align-items:baseline;gap:7px">' +
+            '<div class="apptime">' + timeOf(a.starts_at) + '</div>' +
+            '<div class="apptype" style="color:' + TONE[a.kind] + '">' + esc(kindLabel(a.kind)) + '</div>' +
+            (a.lead_number
+              ? '<div class="apro" style="color:var(--acc);border:1px solid var(--acc)" ' +
+                'title="Raised a lead">Lead</div>' : '') +
+            '<button class="apx" data-cancel="' + a.id + '" title="Cancel">×</button></div>' +
+            '<div class="apwho">' + esc(a.customer_name) + '</div>' +
+            '<div class="apveh">' + esc(a.vehicle_text || a.ro_vehicle || '—') + '</div>' +
+            '<div class="aprow"><div class="apro" style="color:' +
+            (a.ro_number ? 'var(--muted)' : 'var(--dim)') + ';border:1px ' +
+            (a.ro_number ? 'solid' : 'dashed') + ' var(--line)">' +
+            (a.ro_number ? 'RO ' + esc(a.ro_number) : 'No RO yet') + '</div>' +
+            '<div class="aprem">' + (a.remind_1d || a.remind_12h ? 'texts on' : 'no texts') + '</div>' +
+            '</div></div>';
         }).join('') +
-        (isClosed ? '' : '<button class="addday" data-add="' + key + '">Book</button>') +
+        (mine.length ? '' : '<div class="daynone">' +
+          (TYPE ? 'nothing of this type' : 'no appointments') + '</div>') +
+        '<button class="btn btn-ghost" data-add="' + key + '" ' +
+        'style="margin-top:auto;font-size:10.5px;padding:5px">Book</button>' +
         '</div></div>';
     }
 
     $('week').innerHTML = html;
 
-    Array.prototype.forEach.call(document.querySelectorAll('[data-appt]'), function (b) {
-      b.addEventListener('click', function () { openAppt(Number(b.dataset.appt)); });
+    Array.prototype.forEach.call($('week').querySelectorAll('[data-appt]'), function (el) {
+      el.addEventListener('click', function (e) {
+        if (e.target.dataset.cancel) return;
+        openAppt(Number(el.dataset.appt));
+      });
     });
-    Array.prototype.forEach.call(document.querySelectorAll('[data-add]'), function (b) {
-      b.addEventListener('click', function () { openBooking(b.dataset.add); });
+    Array.prototype.forEach.call($('week').querySelectorAll('[data-cancel]'), function (b) {
+      b.addEventListener('click', function (e) {
+        e.stopPropagation();
+        if (!confirm('Cancel this appointment?')) return;
+        api('/api/schedule/' + b.dataset.cancel, { method: 'DELETE' }).then(load);
+      });
+    });
+    Array.prototype.forEach.call($('week').querySelectorAll('[data-add]'), function (b) {
+      b.addEventListener('click', function (e) {
+        e.stopPropagation();
+        openBooking(b.dataset.add);
+      });
     });
   }
 
-  /* ------------------------------------------------------------- booking */
+  /* -------------------------------------------------------------- booking */
 
   function openBooking(day) {
-    $('scrim').classList.add('open');
-    $('drawer').classList.add('open');
-    $('drawer').setAttribute('aria-hidden', 'false');
-    $('dTitle').textContent = 'Book something';
-    $('dSub').textContent = new Date(day + 'T12:00')
-      .toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+    PICKED = day || iso(new Date());
+    BOOK_KIND = null;
+    CAL_MONTH = new Date(PICKED + 'T12:00');
+    CAL_MONTH.setDate(1);
 
-    var used = DATA.used[day] || {};
+    show('Book an appointment', 'Pick the type, then a day with room');
+    $('dBody').innerHTML = '<div class="empty">Loading capacity…</div>';
 
-    $('dBody').innerHTML =
-      '<div class="sec">What</div>' +
-      '<div class="row">' + META.kinds.map(function (k) {
-        var n = used[k.key] || 0;
-        var full = k.cap > 0 && n >= k.cap;
-        return '<button class="btn btn-ghost" data-kind="' + k.key + '" style="padding:7px 12px">' +
-          esc(k.label) + (k.cap ? ' <span class="sub">' + n + '/' + k.cap + '</span>' : '') +
-          (full ? ' <span class="sub" style="color:var(--stopped)">full</span>' : '') + '</button>';
-      }).join('') + '</div>' +
-      '<div class="sec">Who</div>' +
-      '<div class="grid2">' +
-      '<div><label class="fl">Name</label><input id="bName"></div>' +
-      '<div><label class="fl">Phone</label><input id="bPhone" type="tel"></div>' +
-      '<div><label class="fl">Vehicle</label><input id="bVehicle" placeholder="2020 Silverado"></div>' +
-      '<div><label class="fl">Time</label><input id="bTime" type="time" value="09:00"></div>' +
+    api('/api/schedule/openings?kind=drop&days=45').then(function (o) {
+      OPENINGS = o;
+      renderBooking();
+    }).catch(function () { OPENINGS = { days: [] }; renderBooking(); });
+  }
+
+  function renderBooking() {
+    var h = [];
+
+    h.push('<div class="sec">What kind</div><div class="row">' +
+      META.kinds.map(function (k) {
+        return '<button class="typefilter' + (BOOK_KIND === k.key ? ' sel' : '') +
+          '" data-kind="' + k.key + '"><span class="tdot" style="background:' + TONE[k.key] +
+          '"></span>' + esc(k.label) + (k.cap ? ' · ' + k.cap + '/day' : '') + '</button>';
+      }).join('') + '</div>');
+
+    h.push('<div class="sec">When</div><div class="bookgrid"><div>' + calendar() + '</div><div>');
+
+    h.push('<div class="grid2">' +
+      '<div><label class="fl">Name</label><input id="bName" style="width:100%"></div>' +
+      '<div><label class="fl">Phone</label><input id="bPhone" type="tel" style="width:100%"></div>' +
+      '<div><label class="fl">Vehicle</label><input id="bVehicle" placeholder="2020 Silverado" style="width:100%"></div>' +
+      '<div><label class="fl">Time</label><input id="bTime" type="time" value="09:00" style="width:100%"></div>' +
       '</div>' +
       '<div style="margin-top:12px"><label class="fl">Note</label>' +
-      '<textarea id="bNote" placeholder="Hail damage, wants an estimate"></textarea></div>' +
-      '<div class="row" style="margin-top:14px">' +
-      '<button class="btn btn-solid" id="bSave" disabled>Pick a type first</button></div>' +
-      '<div class="msg" id="bMsg"></div>' +
-      '<div class="sub" style="margin-top:14px">An estimate appointment, or a drop for a car that is ' +
-      'not already on the board, raises a lead automatically.</div>';
+      '<textarea id="bNote" placeholder="Hail damage, wants an estimate"></textarea></div>');
 
-    var kind = null;
-    Array.prototype.forEach.call(document.querySelectorAll('[data-kind]'), function (b) {
+    h.push('<div class="capline" id="capLine"></div>');
+    h.push('</div></div>');
+
+    h.push('<div class="row" style="margin-top:16px">' +
+      '<button class="btn btn-solid" id="bSave" disabled>Pick a type and a day</button></div>' +
+      '<div class="msg" id="bMsg"></div>');
+
+    h.push('<div class="sub" style="margin-top:14px">An estimate appointment, or a drop for a car ' +
+      'that is not already on the board, raises a lead automatically.</div>');
+
+    $('dBody').innerHTML = h.join('');
+    wireBooking();
+  }
+
+  function calendar() {
+    var first = new Date(CAL_MONTH);
+    var monthLabel = first.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+    var lead = (first.getDay() + 6) % 7;
+    var daysIn = new Date(first.getFullYear(), first.getMonth() + 1, 0).getDate();
+    var byDay = {};
+    (OPENINGS.days || []).forEach(function (d) { byDay[d.day] = d; });
+
+    var h = '<div class="calhead"><button class="calnav" data-cal="-1">‹</button>' +
+      '<div style="font:500 12px var(--font);flex:1;text-align:center">' + esc(monthLabel) + '</div>' +
+      '<button class="calnav" data-cal="1">›</button></div>' +
+      '<div class="calgrid">' +
+      ['M', 'T', 'W', 'T', 'F', 'S', 'S'].map(function (w) {
+        return '<div class="calwd">' + w + '</div>';
+      }).join('') + '</div><div class="calgrid">';
+
+    for (var i = 0; i < lead; i++) h += '<div></div>';
+
+    var todayIso = iso(new Date());
+    for (var d = 1; d <= daysIn; d++) {
+      var date = new Date(first.getFullYear(), first.getMonth(), d, 12);
+      var key = iso(date);
+      var info = byDay[key];
+      var closed = META.closedDays.indexOf(DAYNAMES[date.getDay()]) >= 0;
+      var isPast = key < todayIso;
+      var full = info && info.cap > 0 && info.open <= 0;
+      var cls = 'calcell' + (key === PICKED ? ' sel' : '') + (full && !closed ? ' full' : '');
+      var title = closed ? 'Closed' : info
+        ? info.used + ' of ' + (info.cap || '∞') + ' drops booked'
+        : '';
+
+      h += '<button class="' + cls + '" data-day="' + key + '"' +
+        (closed || isPast ? ' disabled' : '') + ' title="' + esc(title) + '">' + d + '</button>';
+    }
+
+    return h + '</div>';
+  }
+
+  function wireBooking() {
+    Array.prototype.forEach.call($('dBody').querySelectorAll('[data-kind]'), function (b) {
       b.addEventListener('click', function () {
-        kind = b.dataset.kind;
-        Array.prototype.forEach.call(document.querySelectorAll('[data-kind]'), function (x) {
-          x.className = 'btn ' + (x.dataset.kind === kind ? '' : 'btn-ghost');
+        BOOK_KIND = b.dataset.kind;
+        api('/api/schedule/openings?kind=' + BOOK_KIND + '&days=45').then(function (o) {
+          OPENINGS = o;
+          renderBooking();
         });
-        $('bSave').disabled = false;
-        $('bSave').textContent = 'Book the ' + kindLabel(kind).toLowerCase();
       });
     });
 
-    $('bSave').addEventListener('click', function () { save(false); });
-
-    function save(override) {
-      var msg = $('bMsg');
-      var name = $('bName').value.trim();
-      if (!name) { msg.textContent = 'A name is required.'; msg.className = 'msg err'; return; }
-
-      api('/api/schedule', {
-        method: 'POST',
-        body: JSON.stringify({
-          kind: kind,
-          startsAt: day + 'T' + ($('bTime').value || '09:00'),
-          customerName: name,
-          phone: $('bPhone').value.trim() || undefined,
-          vehicleText: $('bVehicle').value.trim() || undefined,
-          note: $('bNote').value.trim() || undefined,
-          override: override
-        })
-      }).then(function (r) {
-        closeDrawer();
-        return load().then(function () {
-          var m = $('msg');
-          m.textContent = r.leadId ? 'Booked, and a lead was raised.' : 'Booked.';
-          m.className = 'msg ok';
-          setTimeout(function () { m.className = 'msg'; }, 4000);
-        });
-      }).catch(function (e) {
-        msg.className = 'msg err';
-        if (/full/i.test(e.message) && META.canOverbook) {
-          msg.innerHTML = esc(e.message) +
-            ' <button class="btn btn-ghost" id="ovr" style="padding:4px 9px;font-size:10.5px;margin-left:6px">' +
-            'Overbook anyway</button>';
-          $('ovr').addEventListener('click', function () { save(true); });
-        } else {
-          msg.textContent = e.message;
-        }
+    Array.prototype.forEach.call($('dBody').querySelectorAll('[data-cal]'), function (b) {
+      b.addEventListener('click', function () {
+        CAL_MONTH.setMonth(CAL_MONTH.getMonth() + Number(b.dataset.cal));
+        renderBooking();
       });
+    });
+
+    Array.prototype.forEach.call($('dBody').querySelectorAll('[data-day]'), function (b) {
+      b.addEventListener('click', function () { PICKED = b.dataset.day; renderBooking(); });
+    });
+
+    syncCapLine();
+
+    var save = $('bSave');
+    save.disabled = !(BOOK_KIND && PICKED);
+    if (BOOK_KIND && PICKED) {
+      save.textContent = 'Book the ' + kindLabel(BOOK_KIND).toLowerCase() + ' on ' + PICKED;
     }
+    save.addEventListener('click', function () { submit(false); });
   }
+
+  function syncCapLine() {
+    var el = $('capLine');
+    if (!el) return;
+
+    if (!BOOK_KIND) {
+      el.textContent = 'Pick a type to see what room is left.';
+      el.style.cssText = 'font:400 11px/1.5 var(--font);border-radius:5px;padding:8px 10px;' +
+        'color:var(--dim);border:1px dashed var(--line);margin-top:12px';
+      return;
+    }
+
+    var info = (OPENINGS.days || []).filter(function (d) { return d.day === PICKED; })[0];
+    var cap = capOf(BOOK_KIND);
+    var text, tone = 'var(--dim)', border = '1px dashed var(--line)';
+
+    if (!cap) {
+      text = 'No daily limit set for ' + kindLabel(BOOK_KIND).toLowerCase() + 's.';
+    } else if (!info) {
+      text = 'Capacity for that day is not loaded.';
+    } else if (info.closed) {
+      text = 'The shop is closed that day.';
+      tone = 'var(--stopped)'; border = '1px solid var(--stopped)';
+    } else if (info.open <= 0) {
+      text = info.used + ' of ' + cap + ' already booked — that day is full.' +
+        (ME.caps.admin ? ' You can overbook it.' : '');
+      tone = 'var(--acc)'; border = '1px solid var(--acc)';
+    } else {
+      text = info.used + ' of ' + cap + ' booked · ' + info.open + ' left that day.';
+    }
+
+    el.textContent = text;
+    el.style.cssText = 'font:400 11px/1.5 var(--font);border-radius:5px;padding:8px 10px;' +
+      'color:' + tone + ';border:' + border + ';margin-top:12px';
+  }
+
+  function submit(override) {
+    var msg = $('bMsg');
+    var name = $('bName').value.trim();
+    if (!name) { msg.textContent = 'A name is required.'; msg.className = 'msg err'; return; }
+
+    api('/api/schedule', {
+      method: 'POST',
+      body: JSON.stringify({
+        kind: BOOK_KIND,
+        startsAt: PICKED + 'T' + ($('bTime').value || '09:00'),
+        customerName: name,
+        phone: $('bPhone').value.trim() || undefined,
+        vehicleText: $('bVehicle').value.trim() || undefined,
+        note: $('bNote').value.trim() || undefined,
+        override: override
+      })
+    }).then(function (r) {
+      closeDrawer();
+      return load().then(function () {
+        var s = $('weekSummary');
+        var was = s.textContent;
+        s.textContent = r.leadId ? 'Booked, and a lead was raised.' : 'Booked.';
+        s.style.color = 'var(--done)';
+        setTimeout(function () { s.textContent = was; s.style.color = ''; }, 3500);
+      });
+    }).catch(function (e) {
+      msg.className = 'msg err';
+      if (/full/i.test(e.message) && ME.caps.admin) {
+        msg.innerHTML = esc(e.message) +
+          ' <button class="btn btn-ghost" id="ovr" style="padding:4px 9px;font-size:10.5px;margin-left:6px">' +
+          'Overbook anyway</button>';
+        $('ovr').addEventListener('click', function () { submit(true); });
+      } else {
+        msg.textContent = e.message;
+      }
+    });
+  }
+
+  /* ------------------------------------------------------- one appointment */
 
   function openAppt(id) {
     var a = DATA.appointments.filter(function (x) { return x.id === id; })[0];
     if (!a) return;
 
-    $('scrim').classList.add('open');
-    $('drawer').classList.add('open');
-    $('drawer').setAttribute('aria-hidden', 'false');
-    $('dTitle').textContent = a.customer_name;
-    $('dSub').textContent = kindLabel(a.kind) + ' · ' +
-      new Date(a.starts_at).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' }) +
-      ' at ' + timeOf(a.starts_at);
+    show(a.customer_name, kindLabel(a.kind) + ' · ' +
+      new Date(a.starts_at).toLocaleDateString('en-US',
+        { weekday: 'long', month: 'long', day: 'numeric' }) + ' at ' + timeOf(a.starts_at));
 
     var h = ['<div class="sec">Details</div><div class="grid2">'];
     [['Phone', a.phone], ['Vehicle', a.vehicle_text || a.ro_vehicle],
      ['Repair order', a.ro_number], ['Lead', a.lead_number],
-     ['Status', a.status_label], ['Note', a.note]].forEach(function (p) {
+     ['Status', a.status_label], ['Reminders', a.remind_1d || a.remind_12h ? 'on' : 'off'],
+     ['Note', a.note]].forEach(function (p) {
       h.push('<div><div class="f-l">' + esc(p[0]) + '</div><div class="f-v">' +
         esc(p[1] || '—') + '</div></div>');
     });
@@ -327,10 +563,9 @@
     if (a.lead_id) h.push('<div class="row" style="margin-top:9px">' +
       '<a class="btn btn-ghost" href="/leads.html">Go to leads</a></div>');
 
-    h.push('<div class="sec">Move it</div>' +
-      '<div class="row"><input type="date" id="mDate" value="' + iso(new Date(a.starts_at)) + '">' +
-      '<input type="time" id="mTime" value="' +
-      new Date(a.starts_at).toTimeString().slice(0, 5) + '">' +
+    h.push('<div class="sec">Move it</div><div class="row">' +
+      '<input type="date" id="mDate" value="' + iso(new Date(a.starts_at)) + '">' +
+      '<input type="time" id="mTime" value="' + new Date(a.starts_at).toTimeString().slice(0, 5) + '">' +
       '<button class="btn btn-ghost" id="mSave">Save</button></div>');
 
     h.push('<div class="row" style="margin-top:18px">' +
@@ -344,10 +579,7 @@
         method: 'PATCH',
         body: JSON.stringify({ startsAt: $('mDate').value + 'T' + ($('mTime').value || '09:00') })
       }).then(function () { closeDrawer(); return load(); })
-        .catch(function (e) {
-          $('aMsg').textContent = e.message;
-          $('aMsg').className = 'msg err';
-        });
+        .catch(function (e) { $('aMsg').textContent = e.message; $('aMsg').className = 'msg err'; });
     });
 
     $('cancelAppt').addEventListener('click', function () {
@@ -357,6 +589,79 @@
     });
   }
 
+  /* ----------------------------------------------------------- day limits */
+
+  function openLimits() {
+    show('Day limits', 'How many of each the shop can take in a day');
+
+    api('/api/config').then(function (cfg) {
+      var h = ['<div class="sec">How many per day</div>'];
+
+      META.kinds.forEach(function (k) {
+        h.push('<div style="display:grid;grid-template-columns:1fr 74px 1fr;gap:12px;' +
+          'align-items:center;height:38px;border-bottom:1px solid var(--whisper)">' +
+          '<div style="display:flex;align-items:center;gap:7px">' +
+          '<span class="tdot" style="background:' + TONE[k.key] + '"></span>' +
+          '<span style="font:400 12px var(--font)">' + esc(k.label) + '</span></div>' +
+          '<input type="number" min="0" id="cap_' + k.key + '" value="' +
+          esc(cfg.settings['cap_' + k.key] || '0') + '" style="width:100%">' +
+          '<div class="sub">' + (Number(cfg.settings['cap_' + k.key]) ? 'per day' : 'no limit') +
+          '</div></div>');
+      });
+
+      h.push('<div class="sec">Closed days</div><div class="row">' +
+        DAYNAMES.map(function (d) {
+          var on = META.closedDays.indexOf(d) >= 0;
+          return '<button class="typefilter' + (on ? ' sel' : '') + '" data-closed="' + d + '" ' +
+            'data-on="' + (on ? 1 : 0) + '">' + d.slice(0, 3).toUpperCase() + '</button>';
+        }).join('') + '</div>');
+
+      h.push('<div class="row" style="margin-top:18px">' +
+        '<button class="btn btn-solid" id="saveLimits">Save limits</button></div>' +
+        '<div class="msg" id="lMsg"></div>');
+
+      h.push('<div class="sub" style="margin-top:12px">The limit is enforced for everyone except the ' +
+        'owner, who is offered an overbook instead of a refusal.</div>');
+
+      $('dBody').innerHTML = h.join('');
+
+      Array.prototype.forEach.call($('dBody').querySelectorAll('[data-closed]'), function (b) {
+        b.addEventListener('click', function () {
+          var on = b.dataset.on !== '1';
+          b.dataset.on = on ? '1' : '0';
+          b.classList.toggle('sel', on);
+        });
+      });
+
+      $('saveLimits').addEventListener('click', function () {
+        var body = {};
+        META.kinds.forEach(function (k) { body['cap_' + k.key] = $('cap_' + k.key).value || '0'; });
+        body.closed_days = Array.prototype.slice.call($('dBody').querySelectorAll('[data-closed]'))
+          .filter(function (b) { return b.dataset.on === '1'; })
+          .map(function (b) { return b.dataset.closed; }).join(',');
+
+        api('/api/config/settings', { method: 'PATCH', body: JSON.stringify(body) })
+          .then(function () { return api('/api/schedule-meta'); })
+          .then(function (m) {
+            META = m;
+            closeDrawer();
+            renderFilters();
+            return load();
+          })
+          .catch(function (e) { $('lMsg').textContent = e.message; $('lMsg').className = 'msg err'; });
+      });
+    });
+  }
+
+  /* ------------------------------------------------------------- plumbing */
+
+  function show(title, sub) {
+    $('dTitle').textContent = title;
+    $('dSub').textContent = sub;
+    $('scrim').classList.add('open');
+    $('drawer').classList.add('open');
+    $('drawer').setAttribute('aria-hidden', 'false');
+  }
   function closeDrawer() {
     $('scrim').classList.remove('open');
     $('drawer').classList.remove('open');
@@ -373,10 +678,8 @@
   $('prev').addEventListener('click', function () { shift(-7); });
   $('next').addEventListener('click', function () { shift(7); });
   $('thisWeek').addEventListener('click', function () { FROM = iso(mondayOf(new Date())); load(); });
-  $('jump').addEventListener('change', function () {
-    if (this.value) { FROM = iso(mondayOf(new Date(this.value + 'T12:00'))); load(); }
-  });
-  $('book').addEventListener('click', function () { openBooking(iso(new Date())); });
+  $('bookBtn').addEventListener('click', function () { openBooking(iso(new Date())); });
+  $('limitsBtn').addEventListener('click', openLimits);
   $('scrim').addEventListener('click', closeDrawer);
   $('dClose').addEventListener('click', closeDrawer);
   document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeDrawer(); });

@@ -22,27 +22,28 @@ button { cursor:pointer; }
 
 /* ---------------------------------------------------------------- header */
 .bar {
-  display:flex; align-items:center; gap:14px; flex:none;
-  height:52px; padding:0 18px; background:var(--surf);
-  box-shadow:inset 0 -1px 0 rgba(231,234,242,.06);
+  display:flex; align-items:center; gap:16px; flex:none;
+  height:56px; padding:0 18px; background:var(--surf);
 }
 .brand { display:flex; align-items:center; gap:9px; }
 .mark {
   width:22px; height:22px; border:1px solid var(--acc); border-radius:4px;
   display:grid; place-items:center; font:600 9.5px var(--font); color:var(--acc); flex:none;
 }
-.word { font:600 13px var(--font); letter-spacing:.13em; text-transform:uppercase; }
+.word { font:600 14px var(--font); letter-spacing:.14em; text-transform:uppercase; }
 .vr { width:1px; height:18px; background:var(--line); flex:none; }
 .co {
-  font:500 12px var(--font); letter-spacing:.08em; text-transform:uppercase;
-  color:var(--acc2); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  font:400 12px var(--font); color:var(--muted);
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
 }
 #nav { display:flex; gap:2px; margin-left:8px; }
+#nav { gap:4px; }
 .navlink {
-  font:500 11.5px var(--font); color:var(--dim); padding:7px 11px; border-radius:4px;
+  font:400 12px var(--font); color:var(--muted); padding:16px 10px 15px;
+  border-bottom:2px solid transparent; border-radius:0;
 }
-.navlink:hover { color:var(--text); background:var(--whisper); }
-.navlink.sel { color:var(--acc); background:rgba(217,164,65,.1); }
+.navlink:hover { color:var(--text); }
+.navlink.sel { color:var(--text); border-bottom-color:var(--acc); }
 .spacer { margin-left:auto; }
 .who { font:400 11px var(--font); color:var(--dim); white-space:nowrap; }
 .ghostbtn {
@@ -119,27 +120,45 @@ h1 { font:500 18px var(--font); margin:0; }
 .sec::before {
   content:''; width:14px; height:1px; background:var(--acc); flex:none;
 }
+/* Label sits above the number. Pages emit value-then-label, so the cell is
+   reversed here rather than every caller being rewritten. */
 .kpis {
-  display:flex; gap:30px; padding:15px 18px 14px; flex:none; flex-wrap:wrap;
-  border-bottom:1px solid var(--whisper);
+  display:flex; align-items:stretch; flex:none; flex-wrap:wrap;
+  background:var(--surf);
+  border-top:1px solid var(--whisper); border-bottom:1px solid var(--whisper);
 }
-.kpi-v { font:500 20px/1 var(--font); font-variant-numeric:tabular-nums; letter-spacing:-.01em; }
+.kpis > div {
+  display:flex; flex-direction:column-reverse; justify-content:center;
+  padding:11px 18px; border-right:1px solid var(--whisper);
+}
+.kpis > div.kpi-tail {
+  flex:1; flex-direction:row; align-items:center; justify-content:flex-end;
+  gap:14px; border-right:none;
+}
+.kpi-v { font:500 16px/1 var(--font); font-variant-numeric:tabular-nums; }
 .kpi-k {
-  font:400 9.5px var(--font); letter-spacing:.06em; text-transform:uppercase;
-  color:var(--dim); margin-top:3px;
+  font:600 8.5px var(--font); letter-spacing:.13em; text-transform:uppercase;
+  color:var(--acc2); margin-bottom:5px;
 }
 .filters {
-  display:flex; align-items:center; gap:9px; padding:13px 18px; flex:none; flex-wrap:wrap;
-  border-bottom:1px solid var(--whisper);
+  display:flex; align-items:center; gap:9px; padding:11px 18px; flex:none; flex-wrap:wrap;
 }
+.filters .spacer { margin-left:auto; }
 
 select, input[type=search], input[type=text], input[type=tel], input[type=email],
 input[type=number], input[type=date], input[type=time], input[type=password], textarea {
   background:transparent; border:1px solid var(--line); border-radius:4px;
-  color:var(--text); font:400 12px var(--font); padding:8px 10px;
+  color:var(--text); font:400 11.5px var(--font); padding:6px 10px;
   transition:border-color .12s ease;
 }
+select { appearance:none; padding-right:24px;
+  background-image:linear-gradient(45deg,transparent 50%,currentColor 50%),
+                   linear-gradient(135deg,currentColor 50%,transparent 50%);
+  background-position:calc(100% - 13px) 52%, calc(100% - 9px) 52%;
+  background-size:4px 4px, 4px 4px; background-repeat:no-repeat; }
 select:hover, input:hover, textarea:hover { border-color:var(--muted); }
+.filters input[type=search] { min-width:200px; max-width:240px; }
+textarea { padding:8px 10px; font-size:12px; }
 select { cursor:pointer; }
 select option { background:var(--surf); color:var(--text); }
 textarea { resize:vertical; min-height:60px; width:100%; }
@@ -148,18 +167,72 @@ label.fl {
   text-transform:uppercase; color:var(--dim); margin-bottom:5px;
 }
 .btn {
-  font:500 11.5px var(--font); color:var(--acc); border:1px solid var(--acc);
-  border-radius:4px; padding:7px 14px; background:transparent;
+  font:400 11.5px var(--font); color:var(--acc); border:1px solid var(--acc);
+  border-radius:4px; padding:6px 12px; background:transparent;
 }
 .btn:hover { background:rgba(217,164,65,.12); }
 .btn-solid { color:var(--bg); background:var(--acc); }
 .btn-solid:hover { background:var(--acc2); border-color:var(--acc2); }
 .btn-solid:active { background:var(--acc); transform:translateY(1px); }
 .btn:active { transform:translateY(1px); }
-.btn-ghost { color:var(--dim); border-color:var(--line); }
-.btn-ghost:hover { color:var(--text); border-color:var(--muted); background:transparent; }
+.btn-ghost { color:var(--muted); border-color:var(--line); }
+.btn-ghost:hover { color:var(--text); border-color:var(--acc); background:transparent; }
 .btn-danger { color:var(--stopped); border-color:var(--stopped); }
 .btn:disabled { opacity:.45; cursor:default; }
+
+/* The board is a CSS grid, not a table: a left edge strip per row, two-line
+   cells, and per-column widths that can be dragged. */
+.gridhead, .gridrow {
+  display:grid; align-items:center; gap:12px; padding:0 18px;
+}
+.gridhead {
+  height:34px; position:sticky; top:0; z-index:2; background:var(--surf);
+}
+.gridhead > div {
+  font:600 8.5px var(--font); letter-spacing:.12em; text-transform:uppercase;
+  color:var(--acc2); position:relative; white-space:nowrap;
+  overflow:hidden; text-overflow:ellipsis;
+}
+.gridhead .hlabel { cursor:pointer; }
+.gridhead .hlabel:hover { color:var(--acc); }
+.gridhead .harrow { opacity:.55; margin-left:3px; font-size:8px; }
+.gridhead .hgrip { position:absolute; right:-9px; top:-9px; bottom:-9px; width:12px; cursor:col-resize; z-index:4; }
+.gridhead .hgrip:hover::after {
+  content:''; position:absolute; right:5px; top:11px; bottom:9px; width:1px; background:var(--acc);
+}
+.gridrow {
+  height:52px; border-bottom:1px solid var(--whisper); cursor:pointer;
+}
+.gridrow:hover { background:var(--surf); }
+.cellmain {
+  font:400 12px var(--font); color:var(--text);
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+.cellsub {
+  font:400 10px var(--font); font-variant-numeric:tabular-nums; color:var(--dim);
+  margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+.cellnum { font:500 12px var(--font); font-variant-numeric:tabular-nums; text-align:right; }
+.edge { width:2px; height:26px; border-radius:1px; }
+.pip {
+  width:21px; height:15px; border-radius:4px; display:grid; place-items:center;
+  font:600 9px var(--font); font-variant-numeric:tabular-nums; flex:none;
+}
+.track { height:2px; border-radius:1px; background:var(--whisper); margin-top:5px; }
+.trackfill { height:100%; border-radius:1px; }
+.segctl { display:flex; border:1px solid var(--line); border-radius:4px; overflow:hidden; }
+.segctl button {
+  font:400 11.5px var(--font); padding:6px 13px; background:transparent;
+  border:none; color:var(--dim); min-height:29px;
+}
+.segctl button.sel { background:var(--acc); color:var(--bg); }
+.segctl button:not(.sel):hover { color:var(--text); }
+
+.tailrow {
+  display:flex; align-items:center; justify-content:space-between;
+  padding:11px 18px; background:var(--surf);
+  font:400 11px var(--font); font-variant-numeric:tabular-nums; color:var(--dim);
+}
 
 table { width:100%; border-collapse:collapse; }
 th {

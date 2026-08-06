@@ -8,15 +8,63 @@
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/shell.css">
 <style>
-  .wrap { padding:0 18px 24px; }
-  .late { color:var(--stopped); }
-  .selectcol { width:34px; }
-  .bulkbar {
-    display:flex; align-items:center; gap:9px; padding:10px 18px;
-    background:var(--surf); border-top:1px solid var(--line); flex:none; flex-wrap:wrap;
+  .legend { display:flex; align-items:center; gap:14px; margin-left:8px; }
+  .legitem { display:flex; align-items:center; gap:6px; font:400 10.5px var(--font); color:var(--dim); }
+  .legswatch { width:14px; height:6px; border-radius:1px; }
+
+  /* RO-level grid, then part lines nested under it. */
+  .pgrid {
+    display:grid; grid-template-columns:16px 116px 236px 1fr 92px 84px 108px 104px 104px;
+    gap:12px; align-items:center; padding:0 18px;
   }
-  .bulkbar[hidden] { display:none; }
-  @media (max-width:760px) { .wrap { padding:0 0 24px; } }
+  .phead { height:32px; position:sticky; top:0; z-index:2; background:var(--surf); }
+  .phead > div {
+    font:600 8.5px var(--font); letter-spacing:.12em; text-transform:uppercase; color:var(--acc2);
+  }
+  .prow { height:56px; border-bottom:1px solid var(--whisper); cursor:pointer; }
+  .prow:hover { background:var(--surf); }
+  .caret { font:400 9px var(--font); color:var(--dim); transition:transform .12s ease; }
+  .caret.open { transform:rotate(90deg); color:var(--acc); }
+
+  .grouphead {
+    display:flex; align-items:center; gap:9px; padding:8px 18px; background:var(--surf);
+    border-top:1px solid var(--whisper); border-bottom:1px solid var(--whisper);
+  }
+  .gdot { width:8px; height:8px; border-radius:50%; flex:none; }
+  .gname { font:500 12px var(--font); letter-spacing:.06em; text-transform:uppercase; }
+
+  .segs { display:flex; gap:3px; flex:1; max-width:170px; }
+  .segbar { height:6px; border-radius:1px; }
+
+  /* Nested part lines. */
+  .lines { background:rgba(231,234,242,.03); border-bottom:1px solid var(--whisper); }
+  .lgrid {
+    display:grid; grid-template-columns:22px 1fr 120px 78px 54px 150px 96px 92px 88px;
+    gap:12px; align-items:center; padding:0 18px 0 34px; height:42px;
+    border-bottom:1px solid var(--whisper);
+  }
+  .lgrid:last-child { border-bottom:none; }
+  .lhead > div {
+    font:600 8px var(--font); letter-spacing:.11em; text-transform:uppercase; color:var(--dim);
+  }
+  .lhead { height:28px; }
+  .lstate {
+    justify-self:start; font:500 8.5px var(--font); letter-spacing:.08em; text-transform:uppercase;
+    padding:3px 7px; border-radius:3px; white-space:nowrap;
+  }
+  .linebtn {
+    font:400 10px var(--font); padding:4px 8px; border-radius:3px; background:transparent;
+    border:1px solid var(--line); color:var(--muted); white-space:nowrap;
+  }
+  .linebtn:hover { border-color:var(--acc); color:var(--acc); }
+  .locked { padding:64px 18px; display:flex; flex-direction:column; align-items:center; gap:8px; }
+
+  @media (max-width:1100px) {
+    .pgrid { grid-template-columns:16px 110px 1fr 92px 84px 96px; }
+    .pgrid > .hide-md, .prow > .hide-md { display:none; }
+    .lgrid { grid-template-columns:1fr 110px 54px 96px 88px; padding-left:24px; }
+    .lgrid > .hide-md { display:none; }
+  }
 </style>
 </head>
 <body>
@@ -33,72 +81,75 @@
 </div>
 <div class="hairline"></div>
 
-<div class="head">
-  <h1>Parts</h1>
-  <div class="headmeta" id="headmeta">Loading…</div>
+<div class="filters">
+  <input type="search" id="fSearch" placeholder="Search RO #, part #, vendor…">
+  <select id="fVendor"><option value="">Vendor: All</option></select>
+  <select id="fState"><option value="">Type: All</option></select>
+  <div class="legend" id="legend"></div>
+  <div class="spacer"></div>
+  <button class="btn btn-ghost" id="vendorsBtn">Vendors</button>
+  <a class="btn btn-ghost" href="/clients.html">Wholesale clients</a>
+  <button class="btn btn-ghost" id="printBtn">Print pull sheet</button>
+  <button class="btn" id="expandAll">Expand all</button>
 </div>
 
 <div class="kpis" id="kpis"></div>
 
-<div class="filters">
-  <select id="fState">
-    <option value="">Everything outstanding</option>
-    <option value="need">Needed</option>
-    <option value="ordered">Ordered</option>
-    <option value="partial">Partially received</option>
-    <option value="backordered">Backordered</option>
-    <option value="received">Received</option>
-  </select>
-  <input type="search" id="fSearch" placeholder="RO, part, vendor">
-  <label class="row" style="font:400 11.5px var(--font);color:var(--dim);gap:5px">
-    <input type="checkbox" id="fLate"> Late only
-  </label>
-  <button class="btn btn-ghost" id="refresh">Refresh</button>
-</div>
-
 <main>
-  <div class="wrap">
-    <table>
-      <thead><tr>
-        <th class="selectcol"><input type="checkbox" id="selAll"></th>
-        <th>RO</th><th>Part</th><th>Vendor</th><th>State</th>
-        <th class="num">Qty</th><th>ETA</th><th class="num" id="thCost">Cost</th>
-      </tr></thead>
-      <tbody id="tbody"></tbody>
-    </table>
-    <div class="empty" id="empty" hidden></div>
-  </div>
+  <div id="body"></div>
 </main>
 
-<div class="bulkbar" id="bulkbar" hidden>
-  <div style="font:500 11.5px var(--font)" id="bulkCount">0 selected</div>
-  <select id="bulkVendor" style="min-width:150px"><option value="">Vendor (unchanged)</option></select>
-  <input type="date" id="bulkEta">
-  <button class="btn" id="bulkOrder">Mark ordered</button>
-  <button class="btn btn-ghost" id="bulkReceive">Mark received</button>
-  <button class="btn btn-ghost" id="bulkClear">Clear</button>
-  <div class="msg" id="bulkMsg" style="margin:0"></div>
-</div>
+<div class="scrim" id="scrim"></div>
+<aside class="drawer" id="drawer" aria-hidden="true">
+  <div class="dhead">
+    <div style="min-width:0;flex:1">
+      <div style="font:500 16px var(--font)" id="dTitle">Vendors</div>
+      <div class="sub" id="dSub">Who you order from</div>
+    </div>
+    <button class="close" id="dClose" aria-label="Close">&times;</button>
+  </div>
+  <div class="dbody" id="dBody"></div>
+</aside>
 
 <script src="/shell.js"></script>
 <script>
 (function () {
   var api = Shell.api, esc = Shell.esc;
-  var ME = null, PARTS = [], VENDORS = [], SEL = {};
+  var ME = null, PARTS = [], VENDORS = [], OPEN = {}, ALL_OPEN = false;
 
-  function $(id) { return document.getElementById(id); }
-  function money(c) { return c == null ? '—' : '$' + (c / 100).toLocaleString('en-US', { maximumFractionDigits: 0 }); }
-  function shortDate(v) { return v ? new Date(v).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '—'; }
-
-  var STATE_TONE = {
+  /* One tone per part state, used by the legend, the segments and the chips. */
+  var TONE = {
     need: 'var(--dim)', ordered: 'var(--move)', partial: 'var(--blocked)',
     received: 'var(--done)', backordered: 'var(--stopped)',
-    returned: 'var(--dim)', not_needed: 'var(--dim)'
+    returned: 'var(--dim)', not_needed: 'var(--line)'
   };
-  var STATE_LABEL = {
+  var LABEL = {
     need: 'Needed', ordered: 'Ordered', partial: 'Partial', received: 'Received',
     backordered: 'Backordered', returned: 'Returned', not_needed: 'Not needed'
   };
+
+  /* RO-level rollup — how the shop actually talks about a file's parts. */
+  var GROUPS = [
+    { k: 'backordered', t: 'Backordered', tone: 'var(--stopped)',
+      note: 'a part is not coming when it was promised' },
+    { k: 'late', t: 'Past ETA', tone: 'var(--stopped)', note: 'ordered, ETA gone by' },
+    { k: 'need', t: 'To order', tone: 'var(--dim)', note: 'nothing ordered yet' },
+    { k: 'ordered', t: 'On order', tone: 'var(--move)', note: 'waiting on delivery' },
+    { k: 'received', t: 'All in', tone: 'var(--done)', note: 'every gating part is here' }
+  ];
+
+  function $(id) { return document.getElementById(id); }
+  function money(c) {
+    if (c == null) return '—';
+    return '$' + (c / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+  function money0(c) { return c == null ? '—' : '$' + Math.round(c / 100).toLocaleString('en-US'); }
+  function shopDate(v) {
+    if (!v) return '';
+    var d = new Date(v);
+    var p = function (n) { return String(n).padStart(2, '0'); };
+    return p(d.getMonth() + 1) + '-' + p(d.getDate()) + '-' + String(d.getFullYear()).slice(2);
+  }
 
   api('/api/me').then(function (me) {
     ME = me;
@@ -108,15 +159,35 @@
       return null;
     }
     Shell.mount({ me: me, active: 'parts' });
-    if (!me.caps.money) $('thCost').hidden = true;
+
+    if (!me.caps.manageParts) {
+      $('body').innerHTML = '<div class="locked">' +
+        '<div style="font:500 14px var(--font)">Parts ordering is restricted</div>' +
+        '<div style="font:400 12px var(--font);color:var(--dim)">' +
+        'The parts desk, estimating, production and the owner order parts. ' +
+        'You can still see what a file is waiting on from its repair order.</div></div>';
+      document.querySelector('.filters').hidden = true;
+      return null;
+    }
+
+    $('legend').innerHTML = ['need', 'ordered', 'backordered', 'received'].map(function (k) {
+      return '<div class="legitem"><div class="legswatch" style="background:' + TONE[k] + '"></div>' +
+        esc(LABEL[k]) + '</div>';
+    }).join('');
+
+    $('fState').innerHTML = '<option value="">Type: All</option>' +
+      ['need', 'ordered', 'partial', 'backordered', 'received'].map(function (k) {
+        return '<option value="' + k + '">' + esc(LABEL[k]) + '</option>';
+      }).join('');
+
     return load();
   }).catch(function (e) { if (e.message !== 'signed out') console.error(e); });
 
   function load() {
-    var st = $('fState').value;
-    return api('/api/parts' + (st ? '?state=' + st : '')).then(function (d) {
-      PARTS = d.parts; VENDORS = d.vendors;
-      $('bulkVendor').innerHTML = '<option value="">Vendor (unchanged)</option>' +
+    return api('/api/parts').then(function (d) {
+      PARTS = d.parts;
+      VENDORS = d.vendors;
+      $('fVendor').innerHTML = '<option value="">Vendor: All</option>' +
         VENDORS.map(function (v) { return '<option value="' + v.id + '">' + esc(v.name) + '</option>'; }).join('');
       renderKpis(d.summary);
       render();
@@ -124,109 +195,351 @@
   }
 
   function renderKpis(s) {
-    $('kpis').innerHTML = [
-      { v: s.needed, k: 'to order' }, { v: s.ordered, k: 'on order' },
-      { v: s.late, k: 'past ETA' }, { v: s.backordered, k: 'backordered' },
-      { v: s.filesWaiting, k: 'files waiting' }
-    ].map(function (i) {
-      return '<div><div class="kpi-v"' + (i.k === 'past ETA' && i.v > 0 ? ' style="color:var(--stopped)"' : '') +
-        '>' + esc(i.v) + '</div><div class="kpi-k">' + esc(i.k) + '</div></div>';
-    }).join('');
+    var files = byRo();
+    var cells = [
+      { v: files.length, k: 'Files waiting' },
+      { v: s.needed, k: 'To order' },
+      { v: s.ordered, k: 'On order' },
+      { v: s.backordered, k: 'Back ordered', tone: s.backordered ? 'var(--stopped)' : '' },
+      { v: s.late, k: 'Past ETA', tone: s.late ? 'var(--stopped)' : '' }
+    ];
+
+    if (ME.caps.money && s.listCents != null) {
+      var gp = s.listCents ? Math.round(((s.listCents - s.costCents) / s.listCents) * 100) : 0;
+      cells.push(
+        { v: money0(s.listCents), k: 'List' },
+        { v: money0(s.costCents), k: 'Cost' },
+        { v: gp + '%', k: 'GP', tone: gp < 15 ? 'var(--blocked)' : '' }
+      );
+    }
+
+    $('kpis').innerHTML = cells.map(function (i) {
+      return '<div><div class="kpi-v"' + (i.tone ? ' style="color:' + i.tone + '"' : '') + '>' +
+        esc(i.v) + '</div><div class="kpi-k">' + esc(i.k) + '</div></div>';
+    }).join('') + '<div class="kpi-tail"></div>';
   }
 
-  function filtered() {
-    var q = $('fSearch').value.trim().toLowerCase(), lateOnly = $('fLate').checked;
+  /* -------------------------------------------------------- grouping */
+
+  function filteredLines() {
+    var q = $('fSearch').value.trim().toLowerCase();
+    var vend = $('fVendor').value;
+    var st = $('fState').value;
+
     return PARTS.filter(function (p) {
-      if (lateOnly && !(p.days_late > 0 && p.state !== 'received')) return false;
-      if (q && [p.ro_number, p.description, p.part_number, p.vendor_name, p.customer_name]
+      if (st && p.state !== st) return false;
+      if (vend && String(p.vendor_id) !== vend) return false;
+      if (q && [p.ro_number, p.description, p.part_number, p.vendor_name, p.customer_name, p.vehicle]
         .join(' ').toLowerCase().indexOf(q) < 0) return false;
       return true;
     });
   }
 
-  function render() {
-    var rows = filtered();
-    $('headmeta').textContent = rows.length + ' part line' + (rows.length === 1 ? '' : 's');
+  /** Collapse the part lines into one entry per repair order. */
+  function byRo() {
+    var map = {};
+    filteredLines().forEach(function (p) {
+      var key = p.ro_id;
+      if (!map[key]) {
+        map[key] = {
+          roId: p.ro_id, ro: p.ro_number, vehicle: p.vehicle, color: p.color,
+          customer: p.customer_name, status: p.status_label,
+          openedAt: p.opened_at, daysInShop: p.days_in_shop, targetDays: p.target_days,
+          lines: []
+        };
+      }
+      map[key].lines.push(p);
+    });
 
-    if (!rows.length) {
-      $('tbody').innerHTML = '';
-      $('empty').hidden = false;
-      $('empty').textContent = PARTS.length ? 'Nothing matches those filters.'
-        : 'No parts on any open file yet. Add them from a repair order.';
+    return Object.keys(map).map(function (k) {
+      var f = map[k];
+      var gating = f.lines.filter(function (l) { return Number(l.gating) === 1; });
+      var counts = {};
+      f.lines.forEach(function (l) { counts[l.state] = (counts[l.state] || 0) + 1; });
+
+      var late = f.lines.filter(function (l) {
+        return Number(l.days_late) > 0 && l.state !== 'received';
+      });
+      var etas = f.lines.map(function (l) { return l.eta; }).filter(Boolean).sort();
+      var ordered = f.lines.map(function (l) { return l.days_since_ordered; })
+        .filter(function (v) { return v != null; });
+
+      f.counts = counts;
+      f.gatingOpen = gating.filter(function (l) {
+        return ['need', 'ordered', 'partial', 'backordered'].indexOf(l.state) >= 0;
+      }).length;
+      f.late = late.length;
+      f.worstEta = etas.length ? etas[etas.length - 1] : null;
+      f.sinceOrdered = ordered.length ? Math.max.apply(null, ordered) : null;
+      f.listCents = f.lines.reduce(function (a, l) {
+        return a + Number(l.price_cents || 0) * Number(l.qty || 1);
+      }, 0);
+      f.costCents = f.lines.reduce(function (a, l) {
+        return a + Number(l.cost_cents || 0) * Number(l.qty || 1);
+      }, 0);
+      f.received = f.lines.filter(function (l) { return l.state === 'received'; }).length;
+
+      f.group = counts.backordered ? 'backordered'
+        : late.length ? 'late'
+        : counts.need ? 'need'
+        : (counts.ordered || counts.partial) ? 'ordered'
+        : 'received';
+
+      return f;
+    }).sort(function (a, b) {
+      return Number(b.daysInShop || 0) - Number(a.daysInShop || 0);
+    });
+  }
+
+  function segsFor(f) {
+    var total = f.lines.length || 1;
+    var order = ['received', 'partial', 'ordered', 'backordered', 'need'];
+    return order.filter(function (k) { return f.counts[k]; }).map(function (k) {
+      return '<div class="segbar" style="flex:' + f.counts[k] + ';background:' + TONE[k] + '" ' +
+        'title="' + f.counts[k] + ' ' + esc(LABEL[k].toLowerCase()) + '"></div>';
+    }).join('');
+  }
+
+  function summaryFor(f) {
+    var bits = [];
+    if (f.counts.need) bits.push(f.counts.need + ' to order');
+    if (f.counts.ordered) bits.push(f.counts.ordered + ' on order');
+    if (f.counts.partial) bits.push(f.counts.partial + ' partial');
+    if (f.counts.backordered) bits.push(f.counts.backordered + ' backordered');
+    if (!bits.length) bits.push('all ' + f.lines.length + ' in');
+    return bits.join(' · ');
+  }
+
+  /* ---------------------------------------------------------- render */
+
+  function render() {
+    var files = byRo();
+
+    if (!files.length) {
+      $('body').innerHTML = '<div class="empty">' +
+        (PARTS.length ? 'Nothing matches those filters.'
+          : 'No parts on any open file yet.<br>Add them from a repair order, or accept an estimate ' +
+            'on the Import screen — the lines come across with it.') + '</div>';
       return;
     }
-    $('empty').hidden = true;
 
-    $('tbody').innerHTML = rows.map(function (p) {
-      var late = p.days_late > 0 && p.state !== 'received';
-      return '<tr data-id="' + p.id + '">' +
-        '<td><input type="checkbox" class="cb" data-id="' + p.id + '"' + (SEL[p.id] ? ' checked' : '') + '></td>' +
-        '<td><a href="/board.html?ro=' + p.ro_id + '" class="log-b">' + esc(p.ro_number) + '</a>' +
-        '<div class="sub">' + esc(p.vehicle || p.customer_name || '') + '</div></td>' +
-        '<td>' + esc(p.description) + '<div class="sub">' +
-        esc([p.part_number, p.part_type].filter(Boolean).join(' · ')) + '</div></td>' +
-        '<td>' + esc(p.vendor_name || '—') + '</td>' +
-        '<td><span class="pill"><span class="dot" style="background:' + STATE_TONE[p.state] + '"></span>' +
-        esc(STATE_LABEL[p.state] || p.state) + '</span></td>' +
-        '<td class="num">' + p.qty_received + '/' + p.qty + '</td>' +
-        '<td' + (late ? ' class="late"' : '') + '>' + shortDate(p.eta) +
-        (late ? '<div class="sub late">' + p.days_late + 'd late</div>' : '') + '</td>' +
-        (ME.caps.money ? '<td class="num">' + money(p.price_cents * p.qty) + '</td>' : '') +
-        '</tr>';
-    }).join('');
+    var head = '<div class="pgrid phead"><div></div>' +
+      '<div>RO #</div><div>Vehicle</div><div>Parts status</div>' +
+      '<div class="hide-md">Back order</div><div>In shop</div>' +
+      '<div class="hide-md">Since ordered</div>' +
+      (ME.caps.money ? '<div style="text-align:right">List</div>' : '<div></div>') +
+      (ME.caps.money ? '<div class="hide-md" style="text-align:right">Cost</div>'
+        : '<div class="hide-md" style="text-align:right">Received</div>') + '</div>';
 
-    Array.prototype.forEach.call($('tbody').querySelectorAll('.cb'), function (cb) {
-      cb.addEventListener('change', function () {
-        if (cb.checked) SEL[cb.dataset.id] = true; else delete SEL[cb.dataset.id];
-        syncBulk();
+    var html = head;
+
+    GROUPS.forEach(function (g) {
+      var mine = files.filter(function (f) { return f.group === g.k; });
+      if (!mine.length) return;
+
+      html += '<div><div class="grouphead">' +
+        '<div class="gdot" style="background:' + g.tone + '"></div>' +
+        '<div class="gname">' + esc(g.t) + '</div>' +
+        '<div class="sub">' + mine.length + '</div>' +
+        '<div class="sub" style="margin-left:auto">' + esc(g.note) + '</div></div>';
+
+      mine.forEach(function (f) {
+        var isOpen = ALL_OPEN || OPEN[f.roId];
+        var over = f.targetDays != null && f.daysInShop > f.targetDays;
+
+        html += '<div class="pgrid prow" data-ro="' + f.roId + '">' +
+          '<div class="caret' + (isOpen ? ' open' : '') + '">\\u25B6</div>' +
+
+          '<div><div style="font:500 12px var(--font);font-variant-numeric:tabular-nums">' +
+          esc(f.ro) + '</div><div class="cellsub">in ' + shopDate(f.openedAt) + '</div></div>' +
+
+          '<div style="min-width:0"><div class="cellmain" title="' + esc(f.vehicle || '') + '">' +
+          esc(f.vehicle || '—') + '</div><div class="cellsub">' +
+          esc(f.customer || f.color || '—') + '</div></div>' +
+
+          '<div style="min-width:0"><div style="display:flex;align-items:center;gap:8px">' +
+          '<div style="font:400 11.5px var(--font);white-space:nowrap">' + esc(summaryFor(f)) + '</div>' +
+          '<div class="segs">' + segsFor(f) + '</div></div>' +
+          '<div class="cellsub">' + esc(f.status || '') + '</div></div>' +
+
+          '<div class="hide-md">' + (f.counts.backordered
+            ? '<div style="font:500 11.5px var(--font);color:var(--stopped)">' +
+              f.counts.backordered + ' line' + (f.counts.backordered === 1 ? '' : 's') + '</div>'
+            : f.late
+              ? '<div style="font:500 11.5px var(--font);color:var(--stopped)">' + f.late + ' past ETA</div>'
+              : '<div class="cellsub" style="margin:0">—</div>') +
+          '<div class="cellsub">' + (f.worstEta ? 'ETA ' + shopDate(f.worstEta) : '') + '</div></div>' +
+
+          '<div><div style="display:flex;align-items:baseline;gap:4px">' +
+          '<span style="font:500 15px/1 var(--font);font-variant-numeric:tabular-nums;color:' +
+          (over ? 'var(--stopped)' : 'var(--text)') + '">' + f.daysInShop + '</span>' +
+          '<span class="cellsub" style="margin:0">' + (f.targetDays ? 'of ' + f.targetDays : '') +
+          '</span></div></div>' +
+
+          '<div class="hide-md">' + (f.sinceOrdered == null
+            ? '<div class="cellsub" style="margin:0">nothing ordered</div>'
+            : '<div style="font:500 12px var(--font);font-variant-numeric:tabular-nums">' +
+              f.sinceOrdered + 'd</div>') + '</div>' +
+
+          (ME.caps.money
+            ? '<div class="cellnum">' + money(f.listCents) + '</div>'
+            : '<div></div>') +
+
+          (ME.caps.money
+            ? '<div class="hide-md"><div class="cellnum">' + money(f.costCents) + '</div>' +
+              '<div class="cellsub" style="text-align:right">' +
+              (f.listCents ? Math.round(((f.listCents - f.costCents) / f.listCents) * 100) + '% GP'
+                : f.received + ' of ' + f.lines.length) + '</div></div>'
+            : '<div class="hide-md cellnum">' + f.received + ' of ' + f.lines.length + '</div>') +
+          '</div>';
+
+        if (isOpen) html += lineTable(f);
+      });
+
+      html += '</div>';
+    });
+
+    $('body').innerHTML = html;
+
+    Array.prototype.forEach.call($('body').querySelectorAll('[data-ro]'), function (el) {
+      el.addEventListener('click', function () {
+        var id = el.dataset.ro;
+        if (ALL_OPEN) {
+          // Collapsing one out of "expand all" turns the flag off and keeps the rest open.
+          ALL_OPEN = false;
+          byRo().forEach(function (f) { OPEN[f.roId] = true; });
+        }
+        OPEN[id] = !OPEN[id];
+        render();
       });
     });
-    syncBulk();
+
+    wireLines();
   }
 
-  function syncBulk() {
-    var n = Object.keys(SEL).length;
-    $('bulkbar').hidden = n === 0;
-    $('bulkCount').textContent = n + ' selected';
+  function lineTable(f) {
+    var h = '<div class="lines">' +
+      '<div class="lgrid lhead"><div>Line</div><div>Part</div><div class="hide-md">Number</div>' +
+      '<div class="hide-md">Type</div><div>Qty</div><div>Vendor</div><div>ETA</div>' +
+      (ME.caps.money ? '<div style="text-align:right">Price / cost</div>' : '<div></div>') +
+      '<div>State</div></div>';
+
+    f.lines.forEach(function (l) {
+      var late = Number(l.days_late) > 0 && l.state !== 'received';
+      h += '<div class="lgrid">' +
+        '<div class="cellsub" style="margin:0">' + (l.line_no || '·') + '</div>' +
+        '<div class="cellmain" title="' + esc(l.description) + '">' + esc(l.description) + '</div>' +
+        '<div class="cellsub hide-md" style="margin:0">' + esc(l.part_number || '—') + '</div>' +
+        '<div class="cellsub hide-md" style="margin:0">' + esc(l.part_type || '—') + '</div>' +
+        '<div class="cellsub" style="margin:0">' + l.qty_received + '/' + l.qty + '</div>' +
+        '<div><div class="cellsub" style="margin:0">' + esc(l.vendor_name || '—') + '</div>' +
+        (l.po_number ? '<div class="cellsub">PO ' + esc(l.po_number) + '</div>' : '') + '</div>' +
+        '<div class="cellsub" style="margin:0' + (late ? ';color:var(--stopped)' : '') + '">' +
+        (l.eta ? shopDate(l.eta) : '—') + (late ? ' · ' + l.days_late + 'd' : '') + '</div>' +
+        (ME.caps.money
+          ? '<div><div class="cellnum" style="font-weight:400">' + money(l.price_cents) + '</div>' +
+            '<div class="cellsub" style="text-align:right">' +
+            (Number(l.cost_cents) ? money(l.cost_cents) : 'no cost') + '</div></div>'
+          : '<div></div>') +
+        '<div style="display:flex;align-items:center;gap:6px">' +
+        '<span class="lstate" style="color:' + TONE[l.state] + ';border:1px solid ' + TONE[l.state] + '">' +
+        esc(LABEL[l.state] || l.state) + '</span>' +
+        (l.state !== 'received'
+          ? '<button class="linebtn" data-recv="' + l.id + '">Received</button>'
+          : '') +
+        (l.state === 'need'
+          ? '<button class="linebtn" data-order="' + l.id + '">Order</button>'
+          : '') +
+        '</div></div>';
+    });
+
+    return h + '</div>';
   }
 
-  function bulk(state) {
-    var ids = Object.keys(SEL).map(Number);
-    if (!ids.length) return;
-    var msg = $('bulkMsg');
+  function wireLines() {
+    Array.prototype.forEach.call($('body').querySelectorAll('[data-recv]'), function (b) {
+      b.addEventListener('click', function (e) {
+        e.stopPropagation();
+        api('/api/parts/' + b.dataset.recv, {
+          method: 'PATCH', body: JSON.stringify({ state: 'received' })
+        }).then(load).then(function () { Shell.refreshCount(); });
+      });
+    });
 
-    if (state === 'ordered') {
-      api('/api/parts/bulk-order', {
-        method: 'POST',
-        body: JSON.stringify({
-          ids: ids,
-          vendorId: $('bulkVendor').value ? Number($('bulkVendor').value) : undefined,
-          eta: $('bulkEta').value || undefined
-        })
-      }).then(done).catch(fail);
-    } else {
-      Promise.all(ids.map(function (id) {
-        return api('/api/parts/' + id, { method: 'PATCH', body: JSON.stringify({ state: state }) });
-      })).then(done).catch(fail);
-    }
-
-    function done() { SEL = {}; msg.className = 'msg'; load(); Shell.refreshCount(); }
-    function fail(e) { msg.textContent = e.message; msg.className = 'msg err'; }
+    Array.prototype.forEach.call($('body').querySelectorAll('[data-order]'), function (b) {
+      b.addEventListener('click', function (e) {
+        e.stopPropagation();
+        api('/api/parts/' + b.dataset.order, {
+          method: 'PATCH', body: JSON.stringify({ state: 'ordered' })
+        }).then(load);
+      });
+    });
   }
 
-  $('fState').addEventListener('change', function () { SEL = {}; load(); });
+  /* --------------------------------------------------------- vendors */
+
+  function openVendors() {
+    $('scrim').classList.add('open');
+    $('drawer').classList.add('open');
+    $('drawer').setAttribute('aria-hidden', 'false');
+
+    var h = ['<div class="sec">Add a vendor</div>',
+      '<div class="row"><input id="vName" placeholder="Dealer, aftermarket or recycler" ' +
+      'style="flex:1;min-width:160px">' +
+      '<select id="vKind"><option value="OEM">OEM</option><option value="Aftermarket">Aftermarket</option>' +
+      '<option value="Recycled">Recycled</option><option value="Glass">Glass</option>' +
+      '<option value="Other">Other</option></select>' +
+      '<button class="btn btn-ghost" id="vAdd">Add</button></div>',
+      '<div class="msg" id="vMsg"></div>',
+      '<div class="sec">' + VENDORS.length + ' vendor' + (VENDORS.length === 1 ? '' : 's') + '</div>'];
+
+    if (!VENDORS.length) h.push('<div class="sub">None yet.</div>');
+    VENDORS.forEach(function (v) {
+      var lines = PARTS.filter(function (p) { return p.vendor_id === v.id; }).length;
+      h.push('<div class="log"><div class="log-b">' + esc(v.name) + '</div>' +
+        '<div class="log-m">' + esc([v.kind, v.phone].filter(Boolean).join(' · ') || 'no details') +
+        ' · ' + lines + ' open line' + (lines === 1 ? '' : 's') + '</div></div>');
+    });
+
+    $('dBody').innerHTML = h.join('');
+
+    $('vAdd').addEventListener('click', function () {
+      var name = $('vName').value.trim();
+      if (!name) {
+        $('vMsg').textContent = 'A name is required.';
+        $('vMsg').className = 'msg err';
+        return;
+      }
+      api('/api/vendors', {
+        method: 'POST', body: JSON.stringify({ name: name, kind: $('vKind').value })
+      }).then(function () { return load(); }).then(openVendors)
+        .catch(function (e) {
+          $('vMsg').textContent = e.message;
+          $('vMsg').className = 'msg err';
+        });
+    });
+  }
+
+  function closeDrawer() {
+    $('scrim').classList.remove('open');
+    $('drawer').classList.remove('open');
+    $('drawer').setAttribute('aria-hidden', 'true');
+  }
+
   $('fSearch').addEventListener('input', render);
-  $('fLate').addEventListener('change', render);
-  $('refresh').addEventListener('click', function () { load(); });
-  $('selAll').addEventListener('change', function () {
-    var on = $('selAll').checked;
-    SEL = {};
-    if (on) filtered().forEach(function (p) { SEL[p.id] = true; });
+  $('fVendor').addEventListener('change', render);
+  $('fState').addEventListener('change', render);
+  $('vendorsBtn').addEventListener('click', openVendors);
+  $('printBtn').addEventListener('click', function () { ALL_OPEN = true; render(); window.print(); });
+  $('expandAll').addEventListener('click', function () {
+    ALL_OPEN = !ALL_OPEN;
+    if (!ALL_OPEN) OPEN = {};
+    $('expandAll').textContent = ALL_OPEN ? 'Collapse all' : 'Expand all';
     render();
   });
-  $('bulkOrder').addEventListener('click', function () { bulk('ordered'); });
-  $('bulkReceive').addEventListener('click', function () { bulk('received'); });
-  $('bulkClear').addEventListener('click', function () { SEL = {}; render(); });
+  $('scrim').addEventListener('click', closeDrawer);
+  $('dClose').addEventListener('click', closeDrawer);
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeDrawer(); });
 })();
 </script>
 </body>

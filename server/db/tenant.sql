@@ -327,7 +327,10 @@ CREATE TABLE parts_lines (
   part_type       ENUM('oem','aftermarket','used','recycled','reconditioned') NULL,
   qty             INT           NOT NULL DEFAULT 1,
   qty_received    INT           NOT NULL DEFAULT 0,
-  price_cents     BIGINT        NOT NULL DEFAULT 0,
+  price_cents     BIGINT        NOT NULL DEFAULT 0 COMMENT 'what the estimate pays',
+  cost_cents      BIGINT        NOT NULL DEFAULT 0 COMMENT 'what the shop pays the vendor',
+  po_number       VARCHAR(48)   NULL,
+  invoice_no      VARCHAR(48)   NULL,
   state           ENUM('need','ordered','partial','received','backordered','returned','not_needed')
                     NOT NULL DEFAULT 'need',
   gating          TINYINT(1)    NOT NULL DEFAULT 1 COMMENT 'holds the parts gate',

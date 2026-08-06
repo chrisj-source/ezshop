@@ -345,6 +345,13 @@ export async function registerReports(app: FastifyInstance): Promise<void> {
     const gross = Number(tot.gross_cents ?? 0);
     const cost = Number(tot.parts_cents ?? 0) + Number(tot.sublet_cents ?? 0);
 
+    // Parts margin from real vendor cost, not inferred from the estimate.
+    const [pm] = await tq<RowDataPacket[]>(ctx.company!.id, `
+      SELECT COALESCE(SUM(p.price_cents * p.qty), 0) AS list_cents,
+             COALESCE(SUM(p.cost_cents * p.qty), 0) AS cost_cents
+      FROM parts_lines p JOIN repair_orders r ON r.id = p.ro_id
+      WHERE ${s.sql} AND p.state <> 'not_needed'`, s.params);
+
     return {
       window: r,
       totals: {
@@ -356,7 +363,12 @@ export async function registerReports(app: FastifyInstance): Promise<void> {
         hours: Number(tot.hours ?? 0),
         avgTicketCents: tot.avg_ticket === null ? 0 : Math.round(Number(tot.avg_ticket)),
         grossProfitCents: gross - cost,
-        effectiveRateCents: Number(tot.hours) ? Math.round((gross - cost) / Number(tot.hours)) : null
+        effectiveRateCents: Number(tot.hours) ? Math.round((gross - cost) / Number(tot.hours)) : null,
+        partsListCents: Number(pm.list_cents ?? 0),
+        partsCostCents: Number(pm.cost_cents ?? 0),
+        partsMarginPct: Number(pm.list_cents)
+          ? Math.round(((Number(pm.list_cents) - Number(pm.cost_cents)) / Number(pm.list_cents)) * 100)
+          : null
       },
       byType, byMonth,
       supplements: {

@@ -8,19 +8,112 @@
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/shell.css">
 <style>
-  .pane { padding:0 18px 40px; }
-  .leadrow {
-    display:grid; grid-template-columns:1fr 160px 150px 130px 110px; gap:12px; align-items:center;
-    padding:11px 0; border-top:1px solid var(--whisper); cursor:pointer;
+  /* Title block: heading left, response clock and the action on the right. */
+  .titlerow { display:flex; align-items:flex-end; gap:22px; padding:16px 18px 0; flex:none; }
+  .titlerow h1 { font:500 18px var(--font); margin:0; }
+  .titlemeta { font:400 11.5px var(--font); color:var(--dim); margin-top:4px; }
+  .clocklbl {
+    font:600 8.5px var(--font); letter-spacing:.12em; text-transform:uppercase; color:var(--acc2);
   }
+  .clocknote { font:400 11.5px var(--font); color:var(--muted); }
+
+  /* KPIs here carry a caption under the label, unlike the board's band. */
+  .leadkpis { display:flex; gap:26px; padding:16px 18px 14px; flex:none; flex-wrap:wrap; }
+  .lk-v { font:500 19px/1 var(--font); font-variant-numeric:tabular-nums; }
+  .lk-k {
+    font:400 9.5px var(--font); letter-spacing:.06em; text-transform:uppercase;
+    color:var(--dim); margin-top:3px;
+  }
+  .lk-n { font:400 10px var(--font); color:var(--dim); margin-top:2px; }
+
+  /* State tabs with counts. */
+  .tabrow { display:flex; align-items:center; gap:8px; padding:0 18px 12px; flex:none; flex-wrap:wrap; }
+  .statetab {
+    display:flex; align-items:center; gap:6px; font:400 11px var(--font);
+    padding:5px 10px; border-radius:4px; background:transparent;
+    border:1px solid var(--line); color:var(--muted);
+  }
+  .statetab.sel { color:var(--text); background:var(--chip); border-color:var(--acc); }
+  .statetab .c { font:400 10px var(--font); font-variant-numeric:tabular-nums; color:var(--dim); }
+  .tabdiv { width:1px; height:16px; background:var(--line); margin:0 4px; }
+
+  /* Split: list left, detail panel pinned right. */
+  .split { flex:1; min-height:0; display:grid; grid-template-columns:1fr 356px; }
+  .listcol { overflow-y:auto; padding:0 0 20px; }
+  .leadgrid {
+    display:grid; grid-template-columns:3px 1.6fr 1.35fr 1fr .9fr 1fr 62px;
+    gap:13px; align-items:center; padding:0 18px;
+  }
+  .leadhead { height:26px; background:var(--surf); position:sticky; top:0; z-index:2; }
+  .leadhead > div {
+    font:600 8.5px var(--font); letter-spacing:.12em; text-transform:uppercase; color:var(--acc2);
+  }
+  .leadrow { height:46px; border-bottom:1px solid var(--whisper); cursor:pointer; }
   .leadrow:hover { background:var(--whisper); }
-  .state { font:500 9px var(--font); letter-spacing:.07em; text-transform:uppercase;
-           padding:3px 7px; border-radius:3px; white-space:nowrap; }
-  .newcard { border:1px solid var(--line); border-radius:6px; padding:14px; margin-top:6px; }
-  .cold { color:var(--stopped); }
-  @media (max-width:900px) {
-    .leadrow { grid-template-columns:1fr auto; }
-    .pane { padding:0 14px 40px; }
+  .leadrow.sel { background:var(--whisper); }
+  .ledge { width:3px; height:24px; border-radius:1px; }
+  .lname {
+    font:500 12px var(--font); color:var(--text);
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  }
+  .lsub {
+    font:400 10px var(--font); color:var(--dim);
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  }
+  .lcell {
+    font:400 11px var(--font); color:var(--muted);
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  }
+  .lstate {
+    justify-self:start; max-width:100%; box-sizing:border-box; white-space:nowrap;
+    overflow:hidden; text-overflow:ellipsis;
+    font:500 8.5px var(--font); letter-spacing:.09em; text-transform:uppercase;
+    padding:3px 7px; border-radius:3px;
+  }
+  .lage { font:400 11px var(--font); font-variant-numeric:tabular-nums; color:var(--dim); }
+  .lage.stale { color:var(--stopped); }
+
+  .detcol {
+    border-left:1px solid var(--whisper); overflow-y:auto;
+    background:var(--surf); padding:15px 16px;
+  }
+  .dethead {
+    font:600 8.5px var(--font); letter-spacing:.12em; text-transform:uppercase; color:var(--acc2);
+    padding-bottom:9px; border-bottom:1px solid var(--whisper);
+  }
+  .detname { font:500 14px var(--font); margin:12px 0 2px; }
+  .detsub { font:400 11px var(--font); color:var(--dim); margin-bottom:13px; }
+  .detrow {
+    display:grid; grid-template-columns:104px 1fr; gap:10px; align-items:baseline;
+    padding:6px 0; border-bottom:1px solid var(--whisper);
+  }
+  .detk { font:400 10px var(--font); letter-spacing:.04em; color:var(--dim); }
+  .detv { font:400 11.5px/1.5 var(--font); color:var(--text); }
+  .detlbl {
+    font:600 8.5px var(--font); letter-spacing:.12em; text-transform:uppercase;
+    color:var(--acc2); margin-bottom:6px;
+  }
+  .detsel {
+    width:100%; box-sizing:border-box; appearance:none; background:transparent;
+    border:1px solid var(--line); border-radius:4px; color:var(--text);
+    font:400 11.5px var(--font); padding:8px 10px; cursor:pointer;
+  }
+  .winbtn {
+    display:block; width:100%; margin-top:14px; text-align:center; cursor:pointer;
+    font:500 12px var(--font); color:var(--bg); background:var(--acc);
+    border:1px solid var(--acc); border-radius:5px; padding:10px;
+  }
+  .winbtn:hover { background:var(--acc2); border-color:var(--acc2); }
+  .logline { padding:8px 0; border-bottom:1px solid var(--whisper); }
+  .logb { font:400 11px/1.5 var(--font); }
+  .logm { font:400 9.5px var(--font); color:var(--dim); margin-top:2px; }
+
+  @media (max-width:980px) {
+    .split { grid-template-columns:1fr; }
+    .detcol { border-left:none; border-top:1px solid var(--line); }
+    .leadgrid { grid-template-columns:3px 1.5fr 1fr 70px 54px; }
+    .leadgrid > .hide-sm, .leadrow > .hide-sm { display:none; }
+    .titlerow { flex-wrap:wrap; }
   }
 </style>
 </head>
@@ -38,85 +131,68 @@
 </div>
 <div class="hairline"></div>
 
-<div class="head">
-  <h1>Leads</h1>
-  <div class="headmeta" id="headmeta">Loading…</div>
+<div class="titlerow">
+  <div>
+    <h1>Leads</h1>
+    <div class="titlemeta" id="headmeta">Loading…</div>
+  </div>
+  <div style="margin-left:auto;display:flex;align-items:center;gap:9px">
+    <div class="clocklbl">Response clock</div>
+    <div class="clocknote">a lead unanswered past a day turns red</div>
+    <button class="btn" id="newLead">New lead</button>
+  </div>
 </div>
 
-<div class="kpis" id="kpis"></div>
+<div class="leadkpis" id="kpis"></div>
 
-<div class="filters">
-  <select id="fState"><option value="">Open leads</option></select>
-  <input type="search" id="fSearch" placeholder="Name, phone, vehicle">
-  <label class="row" style="font:400 11.5px var(--font);color:var(--dim);gap:5px">
-    <input type="checkbox" id="fMine"> Mine only
-  </label>
-  <label class="row" style="font:400 11.5px var(--font);color:var(--dim);gap:5px">
-    <input type="checkbox" id="fSettled"> Include won and lost
-  </label>
-  <button class="btn btn-ghost" id="refresh">Refresh</button>
-  <button class="btn" id="newLead">New lead</button>
-</div>
+<div class="tabrow" id="tabs"></div>
 
-<main>
-  <div class="pane">
-    <div id="newBox" hidden>
-      <div class="newcard">
-        <div style="font:500 14px var(--font)">New lead</div>
-        <div class="grid3" style="margin-top:12px">
-          <div><label class="fl">First name</label><input id="nFirst"></div>
-          <div><label class="fl">Last name</label><input id="nLast"></div>
-          <div><label class="fl">Phone</label><input id="nPhone" type="tel"></div>
-          <div><label class="fl">Email</label><input id="nEmail" type="email"></div>
-          <div><label class="fl">Vehicle</label><input id="nVehicle" placeholder="2020 Silverado"></div>
-          <div><label class="fl">Source</label><select id="nSource"></select></div>
-        </div>
-        <div style="margin-top:12px">
-          <label class="fl">What they want</label>
-          <textarea id="nNote" placeholder="Hail on the hood and roof, wants a quote"></textarea>
-        </div>
-        <div class="row" style="margin-top:12px">
-          <button class="btn btn-solid" id="saveLead">Create lead</button>
-          <button class="btn btn-ghost" id="cancelLead">Cancel</button>
-        </div>
-        <div class="msg" id="nMsg"></div>
-      </div>
+<div class="split">
+  <div class="listcol">
+    <div class="leadgrid leadhead">
+      <div></div>
+      <div>Customer</div>
+      <div>Vehicle</div>
+      <div class="hide-sm">Source</div>
+      <div class="hide-sm">Owner</div>
+      <div>State</div>
+      <div>Age</div>
     </div>
-
     <div id="list"></div>
   </div>
-</main>
-
-<div class="scrim" id="scrim"></div>
-<aside class="drawer" id="drawer" aria-hidden="true">
-  <div class="dhead">
-    <div style="min-width:0;flex:1">
-      <div style="font:500 16px var(--font)" id="dTitle">—</div>
-      <div class="sub" id="dSub">—</div>
-    </div>
-    <button class="close" id="dClose" aria-label="Close">&times;</button>
+  <div class="detcol">
+    <div class="dethead" id="detHead">Lead</div>
+    <div id="detBody"></div>
   </div>
-  <div class="dbody" id="dBody"></div>
-</aside>
+</div>
 
 <script src="/shell.js"></script>
 <script>
 (function () {
   var api = Shell.api, esc = Shell.esc;
-  var ME = null, LEADS = [], META = null, STAFF = [], OPEN = null;
+  var ME = null, META = null, LEADS = [], STAFF = [], SEL = null, TAB = 'working', SRC = 'All sources';
+  var ADDING = false;
 
-  function $(id) { return document.getElementById(id); }
-  function when(v) {
-    if (!v) return '—';
-    var d = new Date(v);
-    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + ' ' +
-           d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
-  }
   var TONE = {
     'new': 'var(--acc)', contacted: 'var(--move)', estimate_sent: 'var(--move)',
-    appraisal_booked: 'var(--move)', won: 'var(--done)', lost: 'var(--dim)'
+    appraisal_booked: 'var(--blocked)', won: 'var(--done)', lost: 'var(--stopped)'
   };
-  function label(k) { return (META.states.filter(function (s) { return s.key === k; })[0] || {}).label || k; }
+
+  function $(id) { return document.getElementById(id); }
+  function label(k) {
+    return (META.states.filter(function (s) { return s.key === k; })[0] || {}).label || k;
+  }
+  function stamp(v) {
+    if (!v) return '—';
+    var d = new Date(v);
+    var p = function (n) { return String(n).padStart(2, '0'); };
+    return p(d.getMonth() + 1) + '-' + p(d.getDate()) + '-' + String(d.getFullYear()).slice(2) + ' ' +
+      d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+  }
+  function ageText(h) {
+    var d = Math.floor(Number(h || 0) / 24);
+    return d === 0 ? 'today' : d + 'd';
+  }
 
   api('/api/me').then(function (me) {
     ME = me;
@@ -130,257 +206,329 @@
   }).then(function (m) {
     if (!m) return;
     META = m;
-    $('fState').innerHTML = '<option value="">Open leads</option>' +
-      m.states.map(function (s) { return '<option value="' + s.key + '">' + esc(s.label) + '</option>'; }).join('');
-    $('nSource').innerHTML = m.sources.map(function (s) {
-      return '<option value="' + esc(s) + '">' + esc(s) + '</option>';
-    }).join('');
     return load();
   }).catch(function (e) { if (e.message !== 'signed out') console.error(e); });
 
   function load() {
-    var qs = [];
-    if ($('fState').value) qs.push('state=' + $('fState').value);
-    if ($('fMine').checked) qs.push('mine=1');
-    if ($('fSettled').checked) qs.push('settled=1');
-
-    return api('/api/leads' + (qs.length ? '?' + qs.join('&') : '')).then(function (d) {
+    return api('/api/leads?settled=1').then(function (d) {
       LEADS = d.leads;
       STAFF = d.staff;
-      var s = d.summary;
-      $('kpis').innerHTML = [
-        { v: s.fresh, k: 'new', hot: s.fresh > 0 },
-        { v: s.unanswered, k: 'unanswered', bad: s.unanswered > 0 },
-        { v: s.avgReplyHours == null ? '—' : s.avgReplyHours + 'h', k: 'avg first reply' },
-        { v: s.closeRate == null ? '—' : s.closeRate + '%', k: 'close rate' },
-        { v: s.won, k: 'won, 90 days' },
-        { v: s.lost, k: 'lost, 90 days' }
-      ].map(function (i) {
-        var color = i.bad ? 'var(--stopped)' : i.hot ? 'var(--acc)' : '';
-        return '<div><div class="kpi-v"' + (color ? ' style="color:' + color + '"' : '') + '>' +
-          esc(i.v) + '</div><div class="kpi-k">' + esc(i.k) + '</div></div>';
-      }).join('');
+      renderKpis(d.summary);
+      renderTabs();
       render();
+      renderDetail();
     });
   }
 
+  function counts() {
+    var open = LEADS.filter(function (l) { return l.state !== 'won' && l.state !== 'lost'; });
+    return {
+      working: open.length,
+      'new': LEADS.filter(function (l) { return l.state === 'new'; }).length,
+      won: LEADS.filter(function (l) { return l.state === 'won'; }).length,
+      lost: LEADS.filter(function (l) { return l.state === 'lost'; }).length,
+      all: LEADS.length
+    };
+  }
+
+  function renderKpis(s) {
+    var c = counts();
+    var settled = c.won + c.lost;
+    $('kpis').innerHTML = [
+      { v: s.unanswered, k: 'Unanswered', n: 'nobody has replied yet',
+        tone: s.unanswered ? 'var(--stopped)' : '' },
+      { v: s.avgReplyHours == null ? '—' : s.avgReplyHours + ' hr', k: 'Avg first reply',
+        n: 'across answered leads' },
+      { v: s.closeRate == null ? '—' : s.closeRate + '%', k: 'Close rate',
+        n: c.won + ' won of ' + settled + ' settled' },
+      { v: LEADS.filter(function (l) {
+          return l.source === 'scheduler' || l.source === 'sales app';
+        }).length, k: 'Raised by the system', n: 'calendar and sales app' }
+    ].map(function (i) {
+      return '<div><div class="lk-v"' + (i.tone ? ' style="color:' + i.tone + '"' : '') + '>' +
+        esc(i.v) + '</div><div class="lk-k">' + esc(i.k) + '</div>' +
+        '<div class="lk-n">' + esc(i.n) + '</div></div>';
+    }).join('');
+  }
+
+  function renderTabs() {
+    var c = counts();
+    var tabs = [
+      { k: 'working', t: 'Working', c: c.working },
+      { k: 'new', t: 'New', c: c['new'] },
+      { k: 'won', t: 'Won', c: c.won },
+      { k: 'lost', t: 'Lost', c: c.lost },
+      { k: 'all', t: 'All', c: c.all }
+    ];
+
+    $('tabs').innerHTML = tabs.map(function (t) {
+      return '<button class="statetab' + (t.k === TAB ? ' sel' : '') + '" data-tab="' + t.k + '">' +
+        esc(t.t) + '<span class="c">' + t.c + '</span></button>';
+    }).join('') +
+    '<div class="tabdiv"></div>' +
+    '<select id="fSrc"><option>All sources</option>' +
+    META.sources.map(function (s) {
+      return '<option value="' + esc(s) + '"' + (s === SRC ? ' selected' : '') + '>' + esc(s) + '</option>';
+    }).join('') + '</select>' +
+    '<input type="search" id="fSearch" placeholder="Name, phone, vehicle" style="margin-left:4px">';
+
+    Array.prototype.forEach.call($('tabs').querySelectorAll('[data-tab]'), function (b) {
+      b.addEventListener('click', function () { TAB = b.dataset.tab; renderTabs(); render(); });
+    });
+    $('fSrc').addEventListener('change', function () { SRC = this.value; render(); });
+    $('fSearch').addEventListener('input', render);
+  }
+
   function filtered() {
-    var q = $('fSearch').value.trim().toLowerCase();
-    if (!q) return LEADS;
+    var q = ($('fSearch') ? $('fSearch').value : '').trim().toLowerCase();
     return LEADS.filter(function (l) {
-      return [l.lead_number, l.first_name, l.last_name, l.phone, l.email, l.vehicle_text]
-        .join(' ').toLowerCase().indexOf(q) >= 0;
+      if (TAB === 'working' && (l.state === 'won' || l.state === 'lost')) return false;
+      if (TAB === 'new' && l.state !== 'new') return false;
+      if (TAB === 'won' && l.state !== 'won') return false;
+      if (TAB === 'lost' && l.state !== 'lost') return false;
+      if (SRC !== 'All sources' && l.source !== SRC) return false;
+      if (q && [l.lead_number, l.first_name, l.last_name, l.phone, l.vehicle_text]
+        .join(' ').toLowerCase().indexOf(q) < 0) return false;
+      return true;
     });
   }
 
   function render() {
     var rows = filtered();
-    $('headmeta').textContent = rows.length + ' lead' + (rows.length === 1 ? '' : 's') +
-      ($('fSettled').checked ? ' · including won and lost' : ' · open only');
+    var c = counts();
+    var never = LEADS.filter(function (l) {
+      return !l.first_reply_at && l.state !== 'won' && l.state !== 'lost';
+    }).length;
+
+    $('headmeta').textContent = LEADS.length + ' lead' + (LEADS.length === 1 ? '' : 's') +
+      ' · ' + c.working + ' still working · ' + never + ' never answered';
 
     if (!rows.length) {
-      $('list').innerHTML = '<div class="empty">No leads here.<br>' +
-        'They arrive from the scheduler, the sales app, or <strong>New lead</strong>.</div>';
+      $('list').innerHTML = '<div style="font:400 11.5px var(--font);color:var(--dim);padding:16px 18px">' +
+        (LEADS.length ? 'Nothing in this filter.'
+          : 'No leads yet. They arrive from the scheduler, the sales app, or New lead.') + '</div>';
       return;
     }
 
-    $('list').innerHTML =
-      '<div class="leadrow" style="border:none;cursor:default"><div class="f-l">Who</div>' +
-      '<div class="f-l">Vehicle</div><div class="f-l">Source</div>' +
-      '<div class="f-l">Age</div><div class="f-l">State</div></div>' +
-      rows.map(function (l) {
-        var name = [l.first_name, l.last_name].filter(Boolean).join(' ') || 'Unnamed';
-        var cold = !l.first_reply_at && l.state !== 'won' && l.state !== 'lost' && l.age_hours > 24;
-        return '<div class="leadrow" data-id="' + l.id + '">' +
-          '<div><div class="log-b">' + esc(name) +
-          (l.ro_number ? ' <span class="flag" style="color:var(--done);border:1px solid var(--done)">RO ' +
-            esc(l.ro_number) + '</span>' : '') + '</div>' +
-          '<div class="sub">' + esc([l.lead_number, l.phone].filter(Boolean).join(' · ')) + '</div></div>' +
-          '<div class="sub">' + esc(l.vehicle_text || '—') + '</div>' +
-          '<div class="sub">' + esc(l.source) + '</div>' +
-          '<div class="sub' + (cold ? ' cold' : '') + '">' +
-          (l.age_hours < 24 ? l.age_hours + 'h' : Math.round(l.age_hours / 24) + 'd') +
-          (l.first_reply_at ? '' : ' · no reply') + '</div>' +
-          '<div><span class="state" style="color:' + TONE[l.state] + ';border:1px solid ' + TONE[l.state] +
-          '">' + esc(label(l.state)) + '</span></div></div>';
-      }).join('');
+    $('list').innerHTML = rows.map(function (l) {
+      var name = [l.last_name, l.first_name].filter(Boolean).join(', ') || 'Unnamed';
+      var tone = TONE[l.state] || 'var(--dim)';
+      var stale = !l.first_reply_at && l.state !== 'won' && l.state !== 'lost' && l.age_hours >= 24;
+      return '<div class="leadgrid leadrow' + (SEL === l.id ? ' sel' : '') + '" data-id="' + l.id + '">' +
+        '<div class="ledge" style="background:' + tone + '"></div>' +
+        '<div style="min-width:0"><div class="lname">' + esc(name) + '</div>' +
+        '<div class="lsub">' + esc(l.damage_note || l.lead_number) + '</div></div>' +
+        '<div class="lcell">' + esc(l.vehicle_text || '—') + '</div>' +
+        '<div class="lcell hide-sm">' + esc(l.source) + '</div>' +
+        '<div class="lcell hide-sm">' + esc(l.owner_name || '—') + '</div>' +
+        '<div class="lstate" style="color:' + tone + ';border:1px solid ' + tone + '">' +
+        esc(label(l.state)) + '</div>' +
+        '<div class="lage' + (stale ? ' stale' : '') + '">' + esc(ageText(l.age_hours)) + '</div></div>';
+    }).join('');
 
     Array.prototype.forEach.call($('list').querySelectorAll('[data-id]'), function (el) {
-      el.addEventListener('click', function () { openLead(Number(el.dataset.id)); });
-    });
-  }
-
-  /* ---------------------------------------------------------------- new */
-
-  $('newLead').addEventListener('click', function () {
-    $('newBox').hidden = !$('newBox').hidden;
-  });
-  $('cancelLead').addEventListener('click', function () { $('newBox').hidden = true; });
-
-  $('saveLead').addEventListener('click', function () {
-    var msg = $('nMsg');
-    var body = {
-      firstName: $('nFirst').value.trim() || undefined,
-      lastName: $('nLast').value.trim() || undefined,
-      phone: $('nPhone').value.trim() || undefined,
-      email: $('nEmail').value.trim() || undefined,
-      vehicleText: $('nVehicle').value.trim() || undefined,
-      damageNote: $('nNote').value.trim() || undefined,
-      source: $('nSource').value
-    };
-    api('/api/leads', { method: 'POST', body: JSON.stringify(body) })
-      .then(function () {
-        ['nFirst', 'nLast', 'nPhone', 'nEmail', 'nVehicle', 'nNote'].forEach(function (id) {
-          $(id).value = '';
-        });
-        msg.className = 'msg';
-        $('newBox').hidden = true;
-        return load();
-      })
-      .catch(function (e) { msg.textContent = e.message; msg.className = 'msg err'; });
-  });
-
-  /* -------------------------------------------------------------- drawer */
-
-  function openLead(id) {
-    OPEN = id;
-    $('scrim').classList.add('open');
-    $('drawer').classList.add('open');
-    $('drawer').setAttribute('aria-hidden', 'false');
-    $('dBody').innerHTML = '<div class="empty">Loading…</div>';
-    api('/api/leads/' + id).then(renderLead).catch(function (e) {
-      $('dBody').innerHTML = '<div class="empty">' + esc(e.message) + '</div>';
-    });
-  }
-
-  function closeLead() {
-    OPEN = null;
-    $('scrim').classList.remove('open');
-    $('drawer').classList.remove('open');
-    $('drawer').setAttribute('aria-hidden', 'true');
-  }
-
-  function field(l, v) {
-    return '<div><div class="f-l">' + esc(l) + '</div><div class="f-v">' +
-      esc(v == null || v === '' ? '—' : v) + '</div></div>';
-  }
-
-  function renderLead(d) {
-    var l = d.lead, h = [];
-    var name = [l.first_name, l.last_name].filter(Boolean).join(' ') || 'Unnamed';
-
-    $('dTitle').textContent = name;
-    $('dSub').textContent = [l.lead_number, l.vehicle_text, l.source].filter(Boolean).join(' · ');
-
-    h.push('<div class="sec">Where it stands</div>');
-    h.push('<div class="row"><span class="state" style="color:' + TONE[l.state] + ';border:1px solid ' +
-      TONE[l.state] + '">' + esc(label(l.state)) + '</span>' +
-      (l.ro_number ? '<a href="/board.html?ro=' + l.ro_id + '" class="sub">RO ' + esc(l.ro_number) + '</a>' : '') +
-      '</div>');
-
-    if (l.state !== 'won' && l.state !== 'lost') {
-      h.push('<div class="row" style="margin-top:12px">' +
-        META.states.filter(function (s) { return s.key !== 'won' && s.key !== 'lost'; })
-          .map(function (s) {
-            return '<button class="btn ' + (s.key === l.state ? '' : 'btn-ghost') +
-              '" data-state="' + s.key + '" style="padding:6px 11px;font-size:11px">' + esc(s.label) + '</button>';
-          }).join('') + '</div>');
-
-      h.push('<div class="row" style="margin-top:10px">' +
-        '<select id="lostReason" style="min-width:170px"><option value="">Lost because…</option>' +
-        META.lostReasons.map(function (r) { return '<option value="' + esc(r) + '">' + esc(r) + '</option>'; }).join('') +
-        '</select><button class="btn btn-ghost" id="markLost">Mark lost</button></div>');
-    }
-
-    h.push('<div class="msg" id="lMsg"></div>');
-
-    h.push('<div class="sec">Details</div><div class="grid2">');
-    h.push(field('Phone', l.phone), field('Email', l.email));
-    h.push(field('Vehicle', l.vehicle_text), field('Source', l.source));
-    h.push(field('Received', when(l.received_at)),
-      field('First reply', l.first_reply_at ? when(l.first_reply_at) : 'not yet'));
-    if (l.lost_reason) h.push(field('Lost because', l.lost_reason));
-    h.push('</div>');
-
-    if (l.damage_note) {
-      h.push('<div class="sec">What they want</div><div class="log-b">' + esc(l.damage_note) + '</div>');
-    }
-
-    if (!l.ro_id && ME.caps.editRepairOrders) {
-      h.push('<div class="sec">Turn into a repair order</div>' +
-        '<div class="row"><input id="convRo" placeholder="RO number" style="width:150px">' +
-        '<input id="convVin" placeholder="VIN — optional" style="flex:1;min-width:150px">' +
-        '<button class="btn btn-solid" id="convert">Create the file</button></div>');
-    }
-
-    h.push('<div class="sec">Add a note</div>' +
-      '<textarea id="noteBody" placeholder="Called, left a voicemail"></textarea>' +
-      '<div class="row" style="margin-top:9px"><button class="btn btn-ghost" id="addNote">Save note</button>' +
-      '<span class="sub">Saving a note counts as making contact.</span></div>');
-
-    h.push('<div class="sec">History</div>');
-    if (!d.events.length) h.push('<div class="sub">Nothing yet.</div>');
-    d.events.forEach(function (e) {
-      h.push('<div class="log"><div class="log-b"' + (e.kind === 'auto' ? ' style="color:var(--muted)"' : '') +
-        '>' + esc(e.body) + '</div><div class="log-m">' + esc(e.user_name || 'system') + ' · ' +
-        when(e.created_at) + '</div></div>');
-    });
-
-    $('dBody').innerHTML = h.join('');
-    wireLead(l);
-  }
-
-  function wireLead(l) {
-    var msg = $('lMsg');
-    function say(t, k) { msg.textContent = t; msg.className = 'msg ' + k; }
-
-    Array.prototype.forEach.call(document.querySelectorAll('[data-state]'), function (b) {
-      b.addEventListener('click', function () {
-        api('/api/leads/' + OPEN, { method: 'PATCH', body: JSON.stringify({ state: b.dataset.state }) })
-          .then(function () { return load().then(function () { openLead(OPEN); }); })
-          .catch(function (e) { say(e.message, 'err'); });
+      el.addEventListener('click', function () {
+        SEL = Number(el.dataset.id);
+        ADDING = false;
+        render();
+        renderDetail();
       });
     });
+  }
 
-    var lost = $('markLost');
-    if (lost) lost.addEventListener('click', function () {
-      var reason = $('lostReason').value;
-      if (!reason) return say('Pick why it was lost — that is the useful part.', 'err');
-      api('/api/leads/' + OPEN, {
-        method: 'PATCH', body: JSON.stringify({ state: 'lost', lostReason: reason })
-      }).then(function () { return load().then(function () { openLead(OPEN); }); })
-        .catch(function (e) { say(e.message, 'err'); });
+  /* ---------------------------------------------------------------- detail */
+
+  function renderDetail() {
+    if (ADDING) return renderNew();
+
+    var l = LEADS.filter(function (x) { return x.id === SEL; })[0];
+    if (!l) {
+      $('detHead').textContent = 'Lead';
+      $('detBody').innerHTML = '<div style="font:400 11.5px/1.6 var(--font);color:var(--dim);' +
+        'padding:14px 0">Pick a lead to work it. The panel stays open so you can move down the ' +
+        'list without losing your place.</div>';
+      return;
+    }
+
+    $('detHead').textContent = 'Lead ' + l.lead_number;
+    $('detBody').innerHTML = '<div style="font:400 11.5px var(--font);color:var(--dim);padding:14px 0">Loading…</div>';
+
+    api('/api/leads/' + l.id).then(function (d) {
+      var lead = d.lead;
+      var name = [lead.first_name, lead.last_name].filter(Boolean).join(' ') || 'Unnamed';
+      var h = [];
+
+      h.push('<div class="detname">' + esc(name) + '</div>');
+      h.push('<div class="detsub">' + esc([lead.vehicle_text, lead.phone].filter(Boolean).join(' · ')) + '</div>');
+
+      [['received', stamp(lead.received_at)],
+       ['source', lead.source],
+       ['damage', lead.damage_note || '—'],
+       ['first reply', lead.first_reply_at ? stamp(lead.first_reply_at) : 'no reply yet'],
+       ['age', ageText(lead.age_hours)],
+       ['email', lead.email || '—']
+      ].forEach(function (r) {
+        h.push('<div class="detrow"><div class="detk">' + esc(r[0]) + '</div>' +
+          '<div class="detv">' + esc(r[1]) + '</div></div>');
+      });
+
+      h.push('<div style="margin-top:14px;display:flex;flex-direction:column;gap:10px">');
+      h.push('<div><div class="detlbl">State</div><select class="detsel" id="dState">' +
+        META.states.map(function (s) {
+          return '<option value="' + s.key + '"' + (s.key === lead.state ? ' selected' : '') + '>' +
+            esc(s.label) + '</option>';
+        }).join('') + '</select></div>');
+      h.push('<div><div class="detlbl">Owner</div><select class="detsel" id="dOwner">' +
+        '<option value="">Unassigned</option>' +
+        STAFF.map(function (s) {
+          return '<option value="' + s.id + '"' +
+            (String(lead.owner_user_id) === String(s.id) ? ' selected' : '') + '>' +
+            esc(s.name) + '</option>';
+        }).join('') + '</select></div>');
+
+      if (lead.state === 'lost') {
+        h.push('<div><div class="detlbl">Lost because</div><select class="detsel" id="dLost">' +
+          '<option value="">Not recorded</option>' +
+          META.lostReasons.map(function (r) {
+            return '<option value="' + esc(r) + '"' + (r === lead.lost_reason ? ' selected' : '') + '>' +
+              esc(r) + '</option>';
+          }).join('') + '</select></div>');
+      }
+      h.push('</div>');
+
+      h.push('<div class="msg" id="dMsg"></div>');
+
+      if (lead.ro_id) {
+        h.push('<div style="margin-top:13px;border:1px solid var(--acc);border-radius:6px;padding:11px 12px">' +
+          '<div class="detlbl">Repair order</div>' +
+          '<div style="font:500 13px var(--font);font-variant-numeric:tabular-nums">' +
+          esc(lead.ro_number || '') + '</div>' +
+          '<div style="font:400 10.5px/1.5 var(--font);color:var(--dim);margin-top:4px">' +
+          'This lead is on the board. <a href="/board.html?ro=' + lead.ro_id + '">Open the file</a>.' +
+          '</div></div>');
+      } else if (ME.caps.editRepairOrders) {
+        h.push('<div style="margin-top:14px"><div class="detlbl">Convert</div>' +
+          '<input id="convRo" placeholder="RO number" class="detsel" style="margin-bottom:8px">' +
+          '<input id="convVin" placeholder="VIN — optional" class="detsel">' +
+          '<button class="winbtn" id="convert">Convert to repair order</button></div>');
+      }
+
+      h.push('<div style="margin-top:16px"><div class="detlbl">Activity</div>');
+      h.push('<div style="display:flex;gap:7px;margin-bottom:8px">' +
+        '<input id="noteBody" placeholder="Called, left a voicemail" class="detsel" style="flex:1">' +
+        '<button class="btn btn-ghost" id="addNote" style="white-space:nowrap">Log</button></div>');
+
+      if (!d.events.length) {
+        h.push('<div style="font:400 10.5px var(--font);color:var(--dim)">Nothing yet.</div>');
+      }
+      d.events.forEach(function (e) {
+        h.push('<div class="logline"><div class="logb"' +
+          (e.kind === 'auto' ? ' style="color:var(--muted)"' : '') + '>' + esc(e.body) + '</div>' +
+          '<div class="logm">' + esc(e.user_name || 'system') + ' · ' + stamp(e.created_at) + '</div></div>');
+      });
+      h.push('</div>');
+
+      $('detBody').innerHTML = h.join('');
+      wireDetail(lead);
+    }).catch(function (e) {
+      $('detBody').innerHTML = '<div class="msg err" style="display:block">' + esc(e.message) + '</div>';
+    });
+  }
+
+  function wireDetail(lead) {
+    var msg = $('dMsg');
+    function say(t, k) { msg.textContent = t; msg.className = 'msg ' + k; }
+
+    $('dState').addEventListener('change', function () {
+      api('/api/leads/' + lead.id, { method: 'PATCH', body: JSON.stringify({ state: this.value }) })
+        .then(load).catch(function (e) { say(e.message, 'err'); });
     });
 
-    var note = $('addNote');
-    if (note) note.addEventListener('click', function () {
-      var body = $('noteBody').value.trim();
-      if (!body) return say('The note is empty.', 'err');
-      api('/api/leads/' + OPEN + '/notes', { method: 'POST', body: JSON.stringify({ body: body }) })
-        .then(function () { return load().then(function () { openLead(OPEN); }); })
-        .catch(function (e) { say(e.message, 'err'); });
+    $('dOwner').addEventListener('change', function () {
+      api('/api/leads/' + lead.id, {
+        method: 'PATCH',
+        body: JSON.stringify({ ownerUserId: this.value ? Number(this.value) : null })
+      }).then(load).catch(function (e) { say(e.message, 'err'); });
+    });
+
+    var lost = $('dLost');
+    if (lost) lost.addEventListener('change', function () {
+      api('/api/leads/' + lead.id, { method: 'PATCH', body: JSON.stringify({ lostReason: this.value }) })
+        .then(load).catch(function (e) { say(e.message, 'err'); });
     });
 
     var conv = $('convert');
     if (conv) conv.addEventListener('click', function () {
       var ro = $('convRo').value.trim();
       if (!ro) return say('An RO number is required.', 'err');
-      api('/api/leads/' + OPEN + '/convert', {
+      api('/api/leads/' + lead.id + '/convert', {
         method: 'POST',
         body: JSON.stringify({ roNumber: ro, vin: $('convVin').value.trim() || undefined })
       }).then(function (r) { location.href = '/board.html?ro=' + r.roId; })
         .catch(function (e) { say(e.message, 'err'); });
     });
+
+    $('addNote').addEventListener('click', function () {
+      var body = $('noteBody').value.trim();
+      if (!body) return say('The note is empty.', 'err');
+      api('/api/leads/' + lead.id + '/notes', { method: 'POST', body: JSON.stringify({ body: body }) })
+        .then(load).catch(function (e) { say(e.message, 'err'); });
+    });
   }
 
-  $('fState').addEventListener('change', load);
-  $('fMine').addEventListener('change', load);
-  $('fSettled').addEventListener('change', load);
-  $('fSearch').addEventListener('input', render);
-  $('refresh').addEventListener('click', load);
-  $('scrim').addEventListener('click', closeLead);
-  $('dClose').addEventListener('click', closeLead);
-  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeLead(); });
+  /* ------------------------------------------------------------------- new */
+
+  function renderNew() {
+    $('detHead').textContent = 'New lead';
+    $('detBody').innerHTML =
+      '<div style="font:400 11px/1.5 var(--font);color:var(--muted);margin:12px 0 14px">' +
+      'Whatever you have. A phone number and a name is enough — the rest can be filled in when ' +
+      'you call them back.</div>' +
+      '<div style="display:flex;flex-direction:column;gap:10px">' +
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:9px">' +
+      '<div><div class="detlbl">First name</div><input id="nFirst" class="detsel"></div>' +
+      '<div><div class="detlbl">Last name</div><input id="nLast" class="detsel"></div></div>' +
+      '<div><div class="detlbl">Phone</div><input id="nPhone" class="detsel" placeholder="(972) 555-0100"></div>' +
+      '<div><div class="detlbl">Vehicle</div><input id="nVehicle" class="detsel" placeholder="2022 Honda CR-V EX"></div>' +
+      '<div><div class="detlbl">What is wrong</div><input id="nNote" class="detsel" placeholder="Hail on the roof and hood"></div>' +
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:9px">' +
+      '<div><div class="detlbl">Source</div><select id="nSource" class="detsel">' +
+      META.sources.map(function (s) { return '<option value="' + esc(s) + '">' + esc(s) + '</option>'; }).join('') +
+      '</select></div>' +
+      '<div><div class="detlbl">Owner</div><select id="nOwner" class="detsel">' +
+      '<option value="">Unassigned</option>' +
+      STAFF.map(function (s) { return '<option value="' + s.id + '">' + esc(s.name) + '</option>'; }).join('') +
+      '</select></div></div></div>' +
+      '<div class="msg" id="nMsg"></div>' +
+      '<button class="winbtn" id="saveLead">Save lead</button>' +
+      '<div style="text-align:center;margin-top:9px">' +
+      '<button class="btn btn-ghost" id="cancelLead">Cancel</button></div>';
+
+    $('cancelLead').addEventListener('click', function () { ADDING = false; renderDetail(); });
+
+    $('saveLead').addEventListener('click', function () {
+      var msg = $('nMsg');
+      var body = {
+        firstName: $('nFirst').value.trim() || undefined,
+        lastName: $('nLast').value.trim() || undefined,
+        phone: $('nPhone').value.trim() || undefined,
+        vehicleText: $('nVehicle').value.trim() || undefined,
+        damageNote: $('nNote').value.trim() || undefined,
+        source: $('nSource').value,
+        ownerUserId: $('nOwner').value ? Number($('nOwner').value) : undefined
+      };
+      api('/api/leads', { method: 'POST', body: JSON.stringify(body) })
+        .then(function (r) { ADDING = false; SEL = r.id; return load(); })
+        .catch(function (e) { msg.textContent = e.message; msg.className = 'msg err'; });
+    });
+  }
+
+  $('newLead').addEventListener('click', function () {
+    ADDING = true;
+    SEL = null;
+    render();
+    renderDetail();
+  });
 })();
 </script>
 </body>

@@ -17,7 +17,7 @@
   }
   .seg button.sel { background:var(--acc); color:var(--bg); }
   .colpanel {
-    position:absolute; right:18px; top:100%; z-index:30; width:250px; background:var(--surf);
+    position:absolute; left:0; top:calc(100% + 6px); z-index:30; width:222px; background:var(--surf);
     border:1px solid var(--line); border-radius:6px; box-shadow:var(--shadow-md,0 16px 40px rgba(0,0,0,.45));
     padding:6px 0;
   }
@@ -34,19 +34,7 @@
   }
 
   /* ---- table view ---- */
-  .tablewrap { padding:0 18px 24px; }
-  table.board { table-layout:fixed; }
-  th.sortable { cursor:pointer; position:relative; user-select:none; }
-  th.sortable:hover { color:var(--acc); }
-  th .arrow { opacity:.5; font-size:9px; margin-left:4px; }
-  th .grip {
-    position:absolute; right:-3px; top:0; bottom:0; width:7px; cursor:col-resize; z-index:3;
-  }
-  th .grip:hover::after {
-    content:''; position:absolute; right:3px; top:6px; bottom:6px; width:1px; background:var(--acc);
-  }
-  td.cell { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-  td.wrapcell { white-space:normal; }
+  .tablewrap { padding:0 0 24px; }
 
   /* ---- cycle view ---- */
   .cyclewrap { padding:0 0 24px; }
@@ -106,7 +94,7 @@
   /* ---- mobile: cards instead of a table ---- */
   .cards { display:none; }
   @media (max-width:820px) {
-    .tablewrap table, .cyclehead, .cyclerow { display:none; }
+    .gridhead, .gridrow, .tailrow, .cyclehead, .cyclerow { display:none; }
     .cards { display:block; }
     .tablewrap { padding:0 0 24px; }
     .card {
@@ -150,39 +138,32 @@
 </div>
 <div class="hairline"></div>
 
-<div class="head">
-  <div style="display:flex;align-items:flex-end;gap:16px;flex-wrap:wrap">
-    <div>
-      <h1>Repair orders</h1>
-      <div class="headmeta" id="headmeta">Loading…</div>
-    </div>
-    <div style="margin-left:auto;display:flex;align-items:center;gap:9px">
-      <div class="seg">
-        <button id="vTable" class="sel">Table</button>
-        <button id="vCycle">Cycle</button>
-      </div>
-    </div>
+<div class="filters">
+  <div class="segctl">
+    <button id="vTable" class="sel">Table</button>
+    <button id="vCycle">Cycle</button>
   </div>
+  <input type="search" id="fSearch" placeholder="Search RO #, VIN, plate, name…">
+  <select id="fStatus"></select>
+  <select id="fGroup"><option value="">All stages</option></select>
+  <label class="row" style="font:400 11.5px var(--font);color:var(--muted);gap:5px">
+    <input type="checkbox" id="fClosed"> Closed
+  </label>
+  <div style="position:relative">
+    <button class="btn btn-ghost" id="colBtn">Columns ▾</button>
+    <div class="colpanel" id="colPanel" hidden></div>
+  </div>
+  <div class="spacer"></div>
+  <a class="btn btn-ghost" href="/import.html" id="importLink" hidden>Import EMS</a>
+  <button class="btn" id="newRo">+ New RO</button>
 </div>
 
 <div class="kpis" id="kpis"></div>
 
-<div class="filters" style="position:relative">
-  <select id="fGroup"><option value="">All stages</option></select>
-  <select id="fStatus"><option value="">All statuses</option></select>
-  <input type="search" id="fSearch" placeholder="RO, customer, VIN">
-  <label class="row" style="font:400 11.5px var(--font);color:var(--dim);gap:5px">
-    <input type="checkbox" id="fClosed"> Closed
-  </label>
-  <button class="btn btn-ghost" id="colBtn">Columns</button>
-  <button class="btn btn-ghost" id="refresh">Refresh</button>
-  <button class="btn" id="newRo">New RO</button>
-  <div class="colpanel" id="colPanel" hidden></div>
-</div>
-
 <main>
   <div class="tablewrap" id="tableView">
-    <table class="board"><thead><tr id="thead"></tr></thead><tbody id="tbody"></tbody></table>
+    <div class="gridhead" id="gridHead"></div>
+    <div id="gridBody"></div>
     <div class="cards" id="cards"></div>
     <div class="empty" id="empty" hidden></div>
   </div>
@@ -221,27 +202,31 @@
 
   /* Columns: `on` is the default, `lock` cannot be hidden, `money` needs access. */
   var COLUMNS = [
-    { k: 'ro',       t: 'RO',        w: 108, on: true, lock: true },
-    { k: 'customer', t: 'Customer',  w: 170, on: true },
-    { k: 'vehicle',  t: 'Vehicle',   w: 170, on: true },
-    { k: 'status',   t: 'Status',    w: 230, on: true, lock: true },
-    { k: 'assigned', t: 'Assigned',  w: 150, on: true },
-    { k: 'lane',     t: 'Lane',      w: 110, on: false },
-    { k: 'insurer',  t: 'Insurer',   w: 130, on: false },
-    { k: 'vin',      t: 'VIN',       w: 160, on: false },
-    { k: 'parts',    t: 'Parts',     w: 78,  on: false, num: true },
-    { k: 'days',     t: 'Days',      w: 74,  on: true, num: true },
-    { k: 'promised', t: 'Promised',  w: 96,  on: true },
-    { k: 'target',   t: 'Target',    w: 80,  on: false, num: true },
-    { k: 'hours',    t: 'Hours',     w: 78,  on: false, num: true },
-    { k: 'amount',   t: 'Amount',    w: 110, on: true, num: true, money: true },
-    { k: 'opened',   t: 'Opened',    w: 96,  on: false }
+    { k: 'ro',       t: 'RO #',                w: 104, on: true, lock: true },
+    { k: 'vehicle',  t: 'Vehicle',             w: 232, on: true, lock: true },
+    { k: 'owner',    t: 'Owner',               w: 158, on: true },
+    { k: 'insurance',t: 'Insurance',           w: 172, on: true },
+    { k: 'desk',     t: 'Desk',                w: 52,  on: true },
+    { k: 'assigned', t: 'Assigned',            w: 140, on: false },
+    { k: 'lane',     t: 'Lane',                w: 104, on: false },
+    { k: 'vin',      t: 'VIN',                 w: 158, on: false },
+    { k: 'parts',    t: 'Parts',               w: 66,  on: false, num: true },
+    { k: 'hours',    t: 'Hours',               w: 76,  on: true, num: true },
+    { k: 'amount',   t: 'Amount',              w: 108, on: true, num: true, money: true },
+    { k: 'days',     t: 'Days',                w: 96,  on: true },
+    { k: 'promised', t: 'Promised',            w: 88,  on: false },
+    { k: 'status',   t: 'Status / last update', w: 260, on: true, lock: true, flex: true }
   ];
 
   function $(id) { return document.getElementById(id); }
   function money(c) {
     if (c == null) return '—';
-    return '$' + (c / 100).toLocaleString('en-US', { maximumFractionDigits: 0 });
+    return '$' + (c / 100).toLocaleString('en-US',
+      { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+  function money0(c) {
+    if (c == null) return '—';
+    return '$' + Math.round(c / 100).toLocaleString('en-US');
   }
   function when(iso) {
     if (!iso) return '—';
@@ -295,6 +280,7 @@
     }
     loadCols();
     Shell.mount({ me: me, active: 'board' });
+    if (me.features.indexOf('ems') >= 0 && me.caps.acceptImports) $('importLink').hidden = false;
     return Promise.all([
       api('/api/config'),
       api('/api/doc-types').catch(function () { return { types: [] }; })
@@ -309,6 +295,7 @@
       o.value = g.group_id; o.textContent = g.label;
       $('fGroup').appendChild(o);
     });
+    $('fStatus').innerHTML = '';
     fillStatusFilter('');
     renderColPanel();
     syncView();
@@ -320,7 +307,7 @@
 
   function fillStatusFilter(groupId) {
     var s = $('fStatus');
-    s.innerHTML = '<option value="">All statuses</option>';
+    s.innerHTML = '<option value="">All statuses (' + STATUSES.length + ')</option>';
     STATUSES.filter(function (st) { return !groupId || st.group_id === groupId; })
       .forEach(function (st) {
         var o = document.createElement('option');
@@ -336,17 +323,41 @@
   }
 
   function renderKpis(s) {
-    $('kpis').innerHTML = [
-      { v: s.inList, k: 'in list' },
-      { v: s.laborHours.toFixed(1), k: 'labour hours' },
-      { v: s.avgDays, k: 'avg days' },
-      { v: s.onHold, k: 'on hold', tone: s.onHold ? 'var(--stopped)' : '' },
-      { v: s.pastTarget, k: 'past target', tone: s.pastTarget ? 'var(--stopped)' : '' },
-      { v: s.stalled, k: 'stalled', tone: s.stalled ? 'var(--blocked)' : '' }
-    ].map(function (i) {
+    var cells = [{ v: s.inList, k: 'In list' }];
+    if (s.severityCents != null) cells.push({ v: money0(s.severityCents), k: 'Severity' });
+    cells.push(
+      { v: s.laborHours.toFixed(1), k: 'Labour hrs' },
+      { v: s.avgDays + 'd', k: 'Avg days' },
+      { v: s.onHold, k: 'On hold', tone: s.onHold ? 'var(--stopped)' : '' },
+      { v: s.stalled, k: 'Stalled > 4d', tone: s.stalled ? 'var(--blocked)' : '' },
+      { v: s.pastTarget, k: 'Past target', tone: s.pastTarget ? 'var(--stopped)' : '' }
+    );
+
+    $('kpis').innerHTML = cells.map(function (i) {
       return '<div><div class="kpi-v"' + (i.tone ? ' style="color:' + i.tone + '"' : '') + '>' +
         esc(i.v) + '</div><div class="kpi-k">' + esc(i.k) + '</div></div>';
-    }).join('');
+    }).join('') +
+    '<div class="kpi-tail"><div class="sub" id="sortNote"></div>' +
+    '<button class="btn" id="flipSort">Flip order</button></div>';
+
+    $('sortNote').textContent = sortNote();
+    $('flipSort').addEventListener('click', function () {
+      SORT.dir = SORT.dir === 'asc' ? 'desc' : 'asc';
+      saveCols();
+      render();
+      $('sortNote').textContent = sortNote();
+    });
+  }
+
+  function sortNote() {
+    var col = COLUMNS.filter(function (c) { return c.k === SORT.key; })[0];
+    var name = col ? col.t.toLowerCase() : SORT.key;
+    if (SORT.key === 'days') {
+      return SORT.dir === 'desc'
+        ? 'Longest in shop first · newest at the bottom'
+        : 'Newest first · longest in shop at the bottom';
+    }
+    return name + ' · ' + (SORT.dir === 'asc' ? 'ascending' : 'descending');
   }
 
   /* ---------------------------------------------------------------- filtering */
@@ -386,19 +397,27 @@
 
   /* -------------------------------------------------------------- table view */
 
-  function buildHead() {
+  function gridTemplate() {
     var cols = activeCols();
-    $('thead').innerHTML = cols.map(function (c) {
-      var arrow = SORT.key === c.k ? '<span class="arrow">' + (SORT.dir === 'asc' ? '▲' : '▼') + '</span>' : '';
-      return '<th class="sortable' + (c.num ? ' num' : '') + '" data-sort="' + c.k + '" ' +
-        'style="width:' + c.w + 'px">' + esc(c.t) + arrow +
-        '<span class="grip" data-grip="' + c.k + '"></span></th>';
+    return '2px ' + cols.map(function (c) {
+      return c.flex ? 'minmax(170px,1fr)' : c.w + 'px';
+    }).join(' ') + (cols.some(function (c) { return c.flex; }) ? '' : ' 1fr');
+  }
+
+  function buildHead() {
+    var head = $('gridHead');
+    head.style.gridTemplateColumns = gridTemplate();
+    head.innerHTML = '<div></div>' + activeCols().map(function (c) {
+      var arrow = SORT.key === c.k
+        ? '<span class="harrow">' + (SORT.dir === 'asc' ? '\u2191' : '\u2193') + '</span>' : '';
+      return '<div' + (c.num ? ' style="text-align:right"' : '') + '>' +
+        '<span class="hlabel" data-sort="' + c.k + '">' + esc(c.t) + arrow + '</span>' +
+        '<span class="hgrip" data-grip="' + c.k + '"></span></div>';
     }).join('');
 
-    Array.prototype.forEach.call($('thead').querySelectorAll('[data-sort]'), function (th) {
-      th.addEventListener('click', function (e) {
-        if (e.target.dataset.grip) return;
-        var k = th.dataset.sort;
+    Array.prototype.forEach.call(head.querySelectorAll('[data-sort]'), function (el) {
+      el.addEventListener('click', function () {
+        var k = el.dataset.sort;
         if (SORT.key === k) SORT.dir = SORT.dir === 'asc' ? 'desc' : 'asc';
         else { SORT.key = k; SORT.dir = (k === 'days' || k === 'amount' || k === 'hours') ? 'desc' : 'asc'; }
         saveCols();
@@ -406,7 +425,7 @@
       });
     });
 
-    Array.prototype.forEach.call($('thead').querySelectorAll('[data-grip]'), function (grip) {
+    Array.prototype.forEach.call(head.querySelectorAll('[data-grip]'), function (grip) {
       grip.addEventListener('mousedown', function (e) { startResize(e, grip.dataset.grip, e.clientX); });
       grip.addEventListener('touchstart', function (e) {
         startResize(e, grip.dataset.grip, e.touches[0].clientX);
@@ -422,9 +441,12 @@
 
     function move(ev) {
       var x = ev.touches ? ev.touches[0].clientX : ev.clientX;
-      col.w = Math.max(56, Math.round(startW + (x - startX)));
-      var th = $('thead').querySelector('[data-sort="' + key + '"]');
-      if (th) th.style.width = col.w + 'px';
+      col.w = Math.max(52, Math.round(startW + (x - startX)));
+      var t = gridTemplate();
+      $('gridHead').style.gridTemplateColumns = t;
+      Array.prototype.forEach.call(document.querySelectorAll('.gridrow'), function (r) {
+        r.style.gridTemplateColumns = t;
+      });
     }
     function up() {
       document.removeEventListener('mousemove', move);
@@ -439,34 +461,29 @@
     document.addEventListener('touchend', up);
   }
 
-  function cellFor(c, f) {
-    var flags = flagsFor(f);
-    switch (c.k) {
-      case 'ro': return '<div class="ro">' + esc(f.ro) + '</div>' +
-        '<div class="sub">' + esc(f.groupLabel || '') + '</div>';
-      case 'customer': return esc(f.customer || '—') +
-        (f.insurer ? '<div class="sub">' + esc(f.insurer) + '</div>' : '');
-      case 'vehicle': return esc(f.vehicle || '—') +
-        (f.color ? '<div class="sub">' + esc(f.color) + '</div>' : '');
-      case 'status': return '<span class="pill"><span class="dot" style="background:' +
-        (KIND[f.kind] || 'var(--dim)') + '"></span>' + esc(f.status || 'No status') + '</span>' + flags;
-      case 'assigned': {
-        var names = Object.keys(f.assigned || {}).map(function (k) { return f.assigned[k]; }).filter(Boolean);
-        return esc(names.join(', ') || '—');
-      }
-      case 'lane': return esc(laneLabel(f.lane) || '—');
-      case 'insurer': return esc(f.insurer || '—');
-      case 'vin': return '<span style="font-variant-numeric:tabular-nums">' + esc(f.vin || '—') + '</span>';
-      case 'parts': return f.partsWaiting
-        ? '<span style="color:var(--blocked)">' + f.partsWaiting + '</span>' : '0';
-      case 'days': return '<span style="color:' + AGE[f.age] + '">' + f.daysInShop + '</span>';
-      case 'promised': return shortDate(f.promisedAt);
-      case 'target': return f.targetDays == null ? '—' : f.targetDays;
-      case 'hours': return f.laborHours ? f.laborHours.toFixed(1) : '—';
-      case 'amount': return money(f.amount_cents);
-      case 'opened': return shortDate(f.openedAt);
-      default: return '';
-    }
+  /** MM-DD-YY, the way the shop writes dates on a file. */
+  function shopDate(v) {
+    if (!v) return '';
+    var d = new Date(v);
+    var p = function (n) { return String(n).padStart(2, '0'); };
+    return p(d.getMonth() + 1) + '-' + p(d.getDate()) + '-' + String(d.getFullYear()).slice(2);
+  }
+
+  function initials(name) {
+    if (!name) return '';
+    return String(name).split(/\s+/).map(function (w) { return w[0]; }).join('').slice(0, 2).toUpperCase();
+  }
+
+  /** The sequence pip: which status group the file is in, 01-nn. */
+  /** The row's colour: its status kind, or red once it is stalled or held. */
+  function tone(f) {
+    if (f.onHold) return 'var(--stopped)';
+    return KIND[f.kind] || 'var(--acc)';
+  }
+
+  function groupNumber(f) {
+    var i = GROUPS.map(function (g) { return g.group_id; }).indexOf(f.group);
+    return i < 0 ? '—' : String(i + 1).padStart(2, '0');
   }
 
   function flagsFor(f) {
@@ -477,6 +494,15 @@
       'title="' + f.partsWaiting + ' gating part' + (f.partsWaiting === 1 ? '' : 's') + ' outstanding">Parts</span>';
     if (f.supplementsOpen) out += '<span class="flag" style="color:var(--move);border:1px solid var(--move)" ' +
       'title="Supplement open">Supp</span>';
+    if (f.roType === 'wholesale') out += '<span class="flag" style="color:var(--dim);border:1px solid var(--line)">WS</span>';
+
+    // A file that has not moved in days says so, in its own right.
+    var days = Math.floor(Number(f.hoursInStatus || 0) / 24);
+    if (days > 4 && !f.partsWaiting) {
+      var tone = days > 9 ? 'var(--stopped)' : 'var(--blocked)';
+      out += '<span class="flag" style="color:' + tone + ';border:1px solid ' + tone +
+        '" title="No status change in ' + days + ' days">' + days + 'd in status</span>';
+    }
     return out;
   }
 
@@ -486,26 +512,109 @@
     return l ? l.label : key;
   }
 
+  function daysCell(f) {
+    var over = f.targetDays != null && f.daysInShop > f.targetDays;
+    var pct = f.targetDays ? Math.min(100, Math.round((f.daysInShop / f.targetDays) * 100)) : 0;
+    return '<div><div style="display:flex;align-items:baseline;gap:4px">' +
+      '<span style="font:500 15px/1 var(--font);font-variant-numeric:tabular-nums;color:' +
+      (over ? 'var(--stopped)' : 'var(--text)') + '">' + f.daysInShop + '</span>' +
+      '<span class="cellsub" style="margin:0">' + (f.targetDays ? 'of ' + f.targetDays : '') + '</span></div>' +
+      '<div class="track"><div class="trackfill" style="width:' + pct + '%;background:' +
+      (over ? 'var(--stopped)' : 'var(--acc)') + '"></div></div></div>';
+  }
+
+  function cellFor(c, f) {
+    switch (c.k) {
+      case 'ro':
+        return '<div><div style="display:flex;align-items:center;gap:6px">' +
+          '<span class="pip" style="color:var(--bg);background:' + tone(f) + '">' + groupNumber(f) + '</span>' +
+          '<span style="font:500 12px var(--font);font-variant-numeric:tabular-nums">' + esc(f.ro) + '</span></div>' +
+          '<div class="cellsub">in ' + shopDate(f.openedAt) + '</div></div>';
+
+      case 'vehicle':
+        return '<div style="min-width:0"><div class="cellmain" title="' + esc(f.vehicle || '') + '">' +
+          esc(f.vehicle || '—') + '</div><div class="cellsub">' +
+          esc([f.vin ? '…' + String(f.vin).slice(-8) : 'NO VIN',
+               f.plate ? (f.plateState ? f.plateState + ' ' : '') + f.plate : null,
+               f.color].filter(Boolean).join(' · ')) + '</div></div>';
+
+      case 'owner':
+        return '<div style="min-width:0"><div class="cellmain" style="color:var(--muted)">' +
+          esc(f.customer || '—') + '</div><div class="cellsub">' +
+          esc(f.phone || '—') + '</div></div>';
+
+      case 'insurance': {
+        var self = !f.insurer;
+        return '<div style="min-width:0"><div class="cellmain"' +
+          (self ? ' style="color:var(--dim)"' : '') + '>' +
+          esc(f.insurer || 'Customer Pay') + '</div><div class="cellsub">' +
+          esc(f.claimNumber || '—') + '</div></div>';
+      }
+
+      case 'desk': {
+        var who = (f.assigned && (f.assigned.sales || f.assigned.est)) || f.statusBy;
+        return '<div><span style="display:grid;place-items:center;width:24px;height:20px;border-radius:4px;' +
+          'background:var(--chip);font:500 9.5px var(--font);color:var(--muted)">' +
+          esc(initials(who) || '—') + '</span></div>';
+      }
+
+      case 'assigned': {
+        var names = Object.keys(f.assigned || {}).map(function (k) { return f.assigned[k]; }).filter(Boolean);
+        return '<div class="cellmain">' + esc(names.join(', ') || '—') + '</div>';
+      }
+
+      case 'lane': return '<div class="cellmain">' + esc(laneLabel(f.lane) || '—') + '</div>';
+
+      case 'vin': return '<div class="cellsub" style="margin:0">' + esc(f.vin || '—') + '</div>';
+
+      case 'parts': return '<div class="cellnum"' + (f.partsWaiting ? ' style="color:var(--blocked)"' : '') +
+        '>' + (f.partsWaiting || '—') + '</div>';
+
+      case 'hours': return '<div class="cellnum"' + (f.laborHours ? '' : ' style="color:var(--dim)"') +
+        '>' + (f.laborHours ? f.laborHours.toFixed(1) : '·') + '</div>';
+
+      case 'amount': return '<div class="cellnum">' +
+        (f.amount_cents === undefined ? '<span style="color:var(--dim)">••••</span>' : money(f.amount_cents)) +
+        '</div>';
+
+      case 'days': return daysCell(f);
+
+      case 'promised': return '<div class="cellmain">' + (f.promisedAt ? shopDate(f.promisedAt) : '—') + '</div>';
+
+      case 'status':
+        return '<div style="min-width:0"><div style="display:flex;align-items:center;gap:6px;min-width:0">' +
+          '<span style="font:400 11.5px var(--font);color:' + tone(f) +
+          ';white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' +
+          esc(f.status || 'No status') + '</span>' + flagsFor(f) + '</div>' +
+          '<div class="cellsub">as of ' + shopDate(f.statusSince || f.openedAt) +
+          (f.statusBy ? ' · ' + esc(f.statusBy) : '') + '</div></div>';
+
+      default: return '';
+    }
+  }
+
   function renderTable(rows) {
     var cols = activeCols();
+    var t = gridTemplate();
     buildHead();
 
-    $('tbody').innerHTML = rows.map(function (f) {
-      return '<tr class="clickable" data-id="' + f.id + '">' + cols.map(function (c) {
-        return '<td class="cell' + (c.num ? ' num' : '') + (c.k === 'status' ? ' wrapcell' : '') + '">' +
-          cellFor(c, f) + '</td>';
-      }).join('') + '</tr>';
-    }).join('');
+    $('gridBody').innerHTML = rows.map(function (f) {
+      var edge = tone(f);
+      return '<div class="gridrow" data-id="' + f.id + '" style="grid-template-columns:' + t + '">' +
+        '<div><div class="edge" style="background:' + edge + '"></div></div>' +
+        cols.map(function (c) { return cellFor(c, f); }).join('') + '</div>';
+    }).join('') +
+    '<div class="tailrow"><div>' + rows.length + ' of ' + FILES.length + ' files</div></div>';
 
-    // Phones get cards; the table is hidden by CSS.
     $('cards').innerHTML = rows.map(function (f) {
       return '<button class="card" data-id="' + f.id + '">' +
         '<div class="cardtop"><div class="cardro">' + esc(f.ro) + '</div>' +
-        '<div class="carddays" style="color:' + AGE[f.age] + '">' + f.daysInShop + 'd</div></div>' +
+        '<div class="carddays" style="color:' + AGE[f.age] + '">' + f.daysInShop + 'd' +
+        (f.targetDays ? ' of ' + f.targetDays : '') + '</div></div>' +
         '<div class="cardveh">' + esc(f.vehicle || '—') + '</div>' +
         '<div class="sub">' + esc([f.customer, f.insurer].filter(Boolean).join(' · ') || '') + '</div>' +
-        '<div class="cardline"><span class="pill"><span class="dot" style="background:' +
-        (KIND[f.kind] || 'var(--dim)') + '"></span>' + esc(f.status || 'No status') + '</span>' +
+        '<div class="cardline"><span style="font:500 12px var(--font);color:' + tone(f) + '">' +
+        esc(f.status || 'No status') + '</span>' +
         flagsFor(f) + '</div></button>';
     }).join('');
 
@@ -626,12 +735,9 @@
 
   function render() {
     var rows = filtered();
-    $('headmeta').textContent = rows.length + ' of ' + FILES.length + ' files · ' +
-      ($('fClosed').checked ? 'closed, last 90 days' : 'open') +
-      (VIEW === 'table' ? ' · ' + activeCols().length + ' columns' : '');
 
     if (!rows.length) {
-      $('tbody').innerHTML = '';
+      $('gridBody').innerHTML = '';
       $('cards').innerHTML = '';
       $('cycleBody').innerHTML = '';
       $('empty').hidden = false;
@@ -851,6 +957,9 @@
           '<div class="log-m">' + esc(p.state) + ' · qty ' + p.qty_received + '/' + p.qty +
           (p.vendor_name ? ' · ' + esc(p.vendor_name) : '') +
           (p.eta ? ' · ETA ' + shortDate(p.eta) : '') +
+          (ME.caps.money && p.price_cents
+            ? ' · ' + money(p.price_cents) + (Number(p.cost_cents) ? ' / ' + money(p.cost_cents) : '')
+            : '') +
           (p.gating ? '' : ' · not gating') + '</div></div>' +
           (ME.caps.manageParts && p.state !== 'received'
             ? '<button class="btn btn-ghost" data-recv="' + p.id + '" style="padding:5px 9px;font-size:10.5px">Received</button>'
@@ -858,8 +967,12 @@
       });
       if (ME.caps.manageParts) {
         h.push('<div class="row" style="margin-top:10px">' +
-          '<input type="text" id="pDesc" placeholder="Part description" style="flex:1;min-width:150px">' +
-          '<input type="number" id="pQty" value="1" min="1" style="width:64px">' +
+          '<input type="text" id="pDesc" placeholder="Part description" style="flex:1;min-width:140px">' +
+          '<input type="number" id="pQty" value="1" min="1" style="width:58px" title="Quantity">' +
+          (ME.caps.money
+            ? '<input type="number" id="pPrice" step="0.01" min="0" placeholder="Price" style="width:82px">' +
+              '<input type="number" id="pCost" step="0.01" min="0" placeholder="Cost" style="width:82px">'
+            : '') +
           '<button class="btn btn-ghost" id="addPart">Add</button></div>');
       }
     }
@@ -1026,9 +1139,12 @@
     if (add) add.addEventListener('click', function () {
       var desc = $('pDesc').value.trim();
       if (!desc) return say('Part needs a description.', 'err');
-      api('/api/ro/' + OPEN + '/parts', {
-        method: 'POST', body: JSON.stringify({ description: desc, qty: Number($('pQty').value) || 1 })
-      }).then(reopen).catch(function (e) { say(e.message, 'err'); });
+      var body = { description: desc, qty: Number($('pQty').value) || 1 };
+      if ($('pPrice') && $('pPrice').value) body.priceCents = Math.round(Number($('pPrice').value) * 100);
+      if ($('pCost') && $('pCost').value) body.costCents = Math.round(Number($('pCost').value) * 100);
+
+      api('/api/ro/' + OPEN + '/parts', { method: 'POST', body: JSON.stringify(body) })
+        .then(reopen).catch(function (e) { say(e.message, 'err'); });
     });
 
     Array.prototype.forEach.call(document.querySelectorAll('[data-recv]'), function (b) {

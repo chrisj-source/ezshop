@@ -401,6 +401,19 @@
       { v: t.files, k: 'files' }
     ]));
 
+    if (t.partsListCents) {
+      h.push('<div class="sec">Parts margin</div>');
+      h.push(bignums([
+        { v: money(t.partsListCents), k: 'parts at list' },
+        { v: money(t.partsCostCents), k: 'parts at cost' },
+        { v: money(t.partsListCents - t.partsCostCents), k: 'parts margin' },
+        { v: t.partsMarginPct == null ? '—' : t.partsMarginPct + '%', k: 'margin',
+          tone: t.partsMarginPct != null && t.partsMarginPct < 15 ? 'var(--blocked)' : '' }
+      ]));
+      h.push('<div class="sub" style="margin-top:6px">Lines with no cost recorded count as zero cost, ' +
+        'so this reads high until the desk fills them in.</div>');
+    }
+
     h.push('<div class="sec">What it is made of</div>');
     var parts = [
       { k: 'Parts', v: t.partsCents },

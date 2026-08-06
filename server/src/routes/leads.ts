@@ -42,11 +42,12 @@ export async function registerLeads(app: FastifyInstance): Promise<void> {
     if (q.mine === '1') { where.push('l.owner_user_id = ?'); params.push(ctx.user.id); }
 
     const rows = await tq<RowDataPacket[]>(ctx.company!.id, `
-      SELECT l.*, r.ro_number,
+      SELECT l.*, r.ro_number, sf.display_name AS owner_name,
              TIMESTAMPDIFF(HOUR, l.received_at, COALESCE(l.first_reply_at, NOW())) AS hours_to_reply,
              TIMESTAMPDIFF(HOUR, l.received_at, NOW()) AS age_hours
       FROM leads l
       LEFT JOIN repair_orders r ON r.id = l.ro_id
+      LEFT JOIN staff sf ON sf.user_id = l.owner_user_id
       ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
       ORDER BY (l.first_reply_at IS NULL) DESC, l.received_at DESC
       LIMIT 300`, params);
