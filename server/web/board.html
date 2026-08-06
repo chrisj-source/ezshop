@@ -62,6 +62,44 @@
   .track { height:2px; border-radius:1px; background:var(--whisper); margin-top:5px; }
   .trackfill { height:100%; border-radius:1px; }
 
+  /* ---- modal: centred, wide, two columns like the mockup ---- */
+  .modal {
+    position:fixed; inset:24px; z-index:30; display:none;
+    background:var(--bg); border:1px solid var(--line); border-radius:8px;
+    box-shadow:0 30px 80px rgba(0,0,0,.55); overflow:hidden;
+    grid-template-rows:auto 1fr;
+  }
+  .modal.open { display:grid; }
+  .mhead {
+    display:flex; align-items:center; gap:10px; padding:0 14px; height:56px;
+    background:var(--surf); box-shadow:inset 0 -1px 0 var(--line); flex-wrap:nowrap;
+  }
+  .mhead .spacer { margin-left:auto; }
+  .mbody { display:grid; grid-template-columns:1fr 392px; min-height:0; }
+  .mcol { overflow-y:auto; padding:0 18px 26px; }
+  .mright { border-left:1px solid var(--whisper); background:rgba(231,234,242,.02); }
+
+  /* Field blocks: label above the value, three to a row. */
+  .fieldset { display:grid; grid-template-columns:repeat(3,1fr); gap:14px 18px; }
+  .fieldset.two { grid-template-columns:repeat(2,1fr); }
+  .fl2 {
+    font:600 8px var(--font); letter-spacing:.11em; text-transform:uppercase;
+    color:var(--acc2); margin-bottom:4px;
+  }
+  .fv2 { font:400 12.5px var(--font); }
+  .fv2.num { font-variant-numeric:tabular-nums; }
+  .secline { border-bottom:1px solid var(--whisper); margin-bottom:12px; padding-bottom:9px; }
+
+  @media (max-width:1100px) {
+    .mbody { grid-template-columns:1fr; }
+    .mright { border-left:none; border-top:1px solid var(--line); }
+    .fieldset { grid-template-columns:repeat(2,1fr); }
+  }
+  @media (max-width:820px) {
+    .modal { inset:0; border-radius:0; border:none; }
+    .fieldset { grid-template-columns:1fr 1fr; }
+  }
+
   /* ---- drawer extras ---- */
   .promise { display:flex; align-items:flex-start; gap:9px; padding:8px 0; border-top:1px solid var(--whisper); }
   .promise input[type=checkbox] { margin-top:3px; }
@@ -178,16 +216,23 @@
 </main>
 
 <div class="scrim" id="scrim"></div>
-<aside class="drawer" id="drawer" aria-hidden="true">
-  <div class="dhead">
-    <div style="min-width:0;flex:1">
-      <div style="font:500 16px var(--font)" id="dRo">—</div>
-      <div class="sub" id="dSub">—</div>
-    </div>
+<div class="modal" id="drawer" aria-hidden="true" role="dialog">
+  <div class="mhead">
+    <div class="pip" id="dPip" style="background:var(--acc);color:var(--bg)">00</div>
+    <div style="font:500 15px var(--font);font-variant-numeric:tabular-nums" id="dRo">—</div>
+    <div style="font:400 13px var(--font);color:var(--muted)" id="dVeh"></div>
+    <div id="dStatus"></div>
+    <div class="sub" id="dSub" style="margin-left:14px"></div>
+    <div class="spacer"></div>
+    <a class="btn" id="dParts" href="/parts.html">Open parts for this RO</a>
+    <button class="btn btn-ghost" id="dDocs">Documents</button>
     <button class="close" id="dClose" aria-label="Close">&times;</button>
   </div>
-  <div class="dbody" id="dBody"></div>
-</aside>
+  <div class="mbody">
+    <div class="mcol" id="dLeft"></div>
+    <div class="mcol mright" id="dRight"></div>
+  </div>
+</div>
 
 <script src="/photos.js?v=5"></script>
 <script src="/shell.js?v=5"></script>
@@ -798,14 +843,11 @@
     $('drawer').setAttribute('aria-hidden', 'false');
     $('dBody').innerHTML = '<div class="empty">Loading…</div>';
 
-    api('/api/ro/' + id).then(function (d) {
-      var r = d.ro;
-      $('dRo').textContent = r.ro_number;
-      $('dSub').textContent = [r.year, r.make, r.model].filter(Boolean).join(' ') +
-        (r.customer_name ? ' · ' + r.customer_name : '');
-      renderDrawer(d);
-    }).catch(function (e) {
-      $('dBody').innerHTML = '<div class="empty">' + esc(e.message) + '</div>';
+    $('dLeft').innerHTML = '<div class="empty">Loading…</div>';
+    $('dRight').innerHTML = '';
+
+    api('/api/ro/' + id).then(renderDrawer).catch(function (e) {
+      $('dLeft').innerHTML = '<div class="empty">' + esc(e.message) + '</div>';
     });
   }
 
@@ -838,135 +880,147 @@
     { k: 'paint', t: 'Paint tech' }, { k: 'ri', t: 'R&I tech' }, { k: 'detail', t: 'Detail tech' }
   ];
 
+  function f2(label, value, num) {
+    return '<div><div class="fl2">' + esc(label) + '</div>' +
+      '<div class="fv2' + (num ? ' num' : '') + '">' +
+      esc(value == null || value === '' ? '—' : value) + '</div></div>';
+  }
+
   function renderDrawer(d) {
-    var r = d.ro, h = [];
+    var r = d.ro;
 
-    /* --- status --- */
-    h.push('<div class="sec">Status</div>');
-    h.push('<div class="row" style="margin-bottom:10px"><span class="pill"><span class="dot" style="background:' +
-      (KIND[r.status_kind] || 'var(--dim)') + '"></span>' + esc(r.status_label || 'No status') + '</span>' +
-      '<span class="sub">' + esc(r.group_label || '') + '</span>' +
-      (r.on_hold ? '<span class="flag" style="color:var(--stopped);border:1px solid var(--stopped)">On hold' +
-        (r.hold_reason ? ' — ' + esc(r.hold_reason) : '') + '</span>' : '') + '</div>');
+    /* ---- header ---- */
+    $('dPip').textContent = groupNumber({ group: r.group_id });
+    $('dPip').style.background = KIND[r.status_kind] || 'var(--acc)';
+    $('dRo').textContent = r.ro_number;
+    $('dVeh').textContent = [r.year, r.make, r.model].filter(Boolean).join(' ');
+    $('dStatus').innerHTML = '<span class="btn btn-ghost" style="cursor:default;color:' +
+      (KIND[r.status_kind] || 'var(--acc)') + ';border-color:' +
+      (KIND[r.status_kind] || 'var(--acc)') + '">' + esc(r.status_label || 'No status') + '</span>';
+    $('dSub').textContent = daysIn(r) + ' days in shop' +
+      (r.target_days ? ' · target ' + r.target_days : '');
+    $('dDocs').textContent = 'Documents ' + d.documents.length +
+      ' file' + (d.documents.length === 1 ? '' : 's');
+    $('dParts').hidden = ME.features.indexOf('parts') < 0;
 
-    h.push('<div class="stack"><select id="newStatus"><option value="">Select a new status…</option>' +
-      GROUPS.map(function (g) {
-        var o = STATUSES.filter(function (s) { return s.group_id === g.group_id; })
-          .map(function (s) { return '<option value="' + esc(s.slot_id) + '">' + esc(s.label) + '</option>'; }).join('');
-        return o ? '<optgroup label="' + esc(g.label) + '">' + o + '</optgroup>' : '';
-      }).join('') + '</select>' +
-      '<textarea id="newNote" placeholder="Add a note (optional)"></textarea>' +
-      '<div class="row"><button class="btn btn-solid" id="saveStatus">Save</button></div></div>');
-    h.push('<div class="msg" id="dMsg"></div>');
+    /* ---- left column: the file itself ---- */
+    var L = [];
 
-    /* --- assigned --- */
-    h.push('<div class="sec">Assigned</div>');
-    if (ME.caps.editAssignments) {
-      h.push('<div class="assigngrid">' + POSITIONS.map(function (p) {
-        var cur = (d.assigned || {})[p.k] || {};
-        var options = STAFF.filter(function (s) {
-          return p.k === 'sales' ? true : (!s.position_key || s.position_key === p.k);
-        });
-        return '<div><label class="fl">' + esc(p.t) + '</label>' +
-          '<select data-assign="' + p.k + '" data-was="' + (cur.userId || '') + '" style="width:100%">' +
-          '<option value="">Unassigned</option>' +
-          options.map(function (s) {
-            return '<option value="' + s.user_id + '"' +
-              (String(cur.userId) === String(s.user_id) ? ' selected' : '') + '>' +
-              esc(s.display_name) + '</option>';
-          }).join('') + '</select></div>';
-      }).join('') + '</div>' +
-      '<div class="row" style="margin-top:10px"><button class="btn btn-ghost" id="saveAssign">Save assignments</button>' +
-      '<span class="sub">The person named is notified.</span></div>');
-    } else {
-      var ak = Object.keys(d.assigned || {});
-      h.push('<div class="grid2">' + (ak.length
-        ? ak.map(function (k) {
-            var p = POSITIONS.filter(function (x) { return x.k === k; })[0];
-            return field(p ? p.t : k, d.assigned[k].name);
-          }).join('')
-        : '<div class="sub">Nobody assigned yet.</div>') + '</div>');
-    }
+    L.push('<div class="sec">Customer</div><div class="fieldset">');
+    L.push(f2('Name', r.customer_name), f2('Phone', r.customer_phone, 1),
+      f2('Email', r.customer_email));
+    L.push('</div>');
 
-    /* --- dates --- */
-    h.push('<div class="sec">Dates</div>');
+    L.push('<div class="sec">Vehicle</div><div class="fieldset">');
+    L.push(f2('Year', r.year, 1), f2('Make', r.make), f2('Model', r.model));
+    L.push(f2('Colour', r.color), f2('VIN', r.vin, 1),
+      f2('Plate', r.plate ? (r.plate_state ? r.plate_state + ' ' : '') + r.plate : null, 1));
+    L.push(f2('Mileage', r.mileage ? Number(r.mileage).toLocaleString('en-US') : null, 1));
+    L.push('</div>');
+
+    L.push('<div class="sec">Insurance and loss</div><div class="fieldset">');
+    L.push(f2('Carrier', r.insurer_name), f2('Claim number', r.claim_number, 1),
+      f2('Policy number', r.policy_number, 1));
+    L.push(f2('Date of loss', r.date_of_loss ? shopDate(r.date_of_loss) : null, 1),
+      f2('Adjuster', r.adjuster), f2('Type', r.ro_type));
+    L.push('</div>');
+
+    L.push('<div class="sec">Targets and cycle</div>');
     if (ME.caps.editRepairOrders) {
-      h.push('<div class="grid2">' +
+      L.push('<div class="fieldset">' +
         dateField('openedAt', 'Date in', r.opened_at) +
+        dateField('promisedAt', 'Promised delivery', r.promised_at) +
         dateField('deliveredAt', 'Date completed', r.delivered_at) +
         dateField('closedAt', 'Date picked up', r.closed_at) +
-        dateField('promisedAt', 'Promised', r.promised_at) +
+        f2('Days in shop', daysIn(r), 1) +
+        f2('Variance', r.target_days ? (daysIn(r) - r.target_days > 0 ? '+' : '') +
+          (daysIn(r) - r.target_days) + 'd' : '—', 1) +
         '</div><div class="row" style="margin-top:11px">' +
         '<button class="btn btn-ghost" id="saveDates">Save dates</button>' +
         '<span class="sub">Blank clears a date. Every change is logged.</span></div>');
     } else {
-      h.push('<div class="grid2">' +
-        field('Date in', r.opened_at ? when(r.opened_at) : null) +
-        field('Date completed', r.delivered_at ? when(r.delivered_at) : null) +
-        field('Date picked up', r.closed_at ? when(r.closed_at) : null) +
-        field('Promised', r.promised_at ? shortDate(r.promised_at) : null) + '</div>');
+      L.push('<div class="fieldset">' +
+        f2('Date in', r.opened_at ? shopDate(r.opened_at) : null, 1) +
+        f2('Promised', r.promised_at ? shopDate(r.promised_at) : null, 1) +
+        f2('Completed', r.delivered_at ? shopDate(r.delivered_at) : null, 1) +
+        f2('Picked up', r.closed_at ? shopDate(r.closed_at) : null, 1) +
+        f2('Days in shop', daysIn(r), 1) + '</div>');
     }
 
-    /* --- file --- */
-    h.push('<div class="sec">File</div><div class="grid2">');
-    h.push(field('Customer', r.customer_name), field('Phone', r.customer_phone));
-    h.push(field('Insurer', r.insurer_name), field('Claim', r.claim_number));
-    h.push(field('VIN', r.vin), field('Plate', r.plate));
-    h.push(field('Repair path', r.repair_path), field('Labour hours', r.labor_hours));
-    h.push(field('Type', r.ro_type), field('Target days', r.target_days));
-    h.push('</div>');
-
-    /* --- money --- */
     if (ME.caps.money) {
-      h.push('<div class="sec">Money</div><div class="grid2">' +
-        '<div><label class="fl" for="m_amount">Amount</label>' +
+      L.push('<div class="sec">Money</div>');
+      L.push('<div class="fieldset">' +
+        '<div><div class="fl2">Approval amount</div>' +
         '<input type="number" step="0.01" min="0" id="m_amount" style="width:100%" value="' +
-        ((r.amount_cents || 0) / 100).toFixed(2) + '" data-was="' + ((r.amount_cents || 0) / 100).toFixed(2) + '"></div>' +
-        '<div><label class="fl" for="m_deduct">Deductible</label>' +
+        ((r.amount_cents || 0) / 100).toFixed(2) + '" data-was="' +
+        ((r.amount_cents || 0) / 100).toFixed(2) + '"></div>' +
+        '<div><div class="fl2">Deductible</div>' +
         '<input type="number" step="0.01" min="0" id="m_deduct" style="width:100%" value="' +
-        ((r.deductible_cents || 0) / 100).toFixed(2) + '" data-was="' + ((r.deductible_cents || 0) / 100).toFixed(2) + '"></div>' +
-        '<div><label class="fl" for="m_hours">Labour hours</label>' +
+        ((r.deductible_cents || 0) / 100).toFixed(2) + '" data-was="' +
+        ((r.deductible_cents || 0) / 100).toFixed(2) + '"></div>' +
+        '<div><div class="fl2">Labour hours</div>' +
         '<input type="number" step="0.1" min="0" id="m_hours" style="width:100%" value="' +
         (Number(r.labor_hours) || 0) + '" data-was="' + (Number(r.labor_hours) || 0) + '"></div>' +
-        '<div>' + field('Parts cost', money(r.parts_cost_cents)) + '</div>' +
+        f2('Parts cost', money(r.parts_cost_cents), 1) +
+        f2('Sublet', money(r.sublet_cost_cents), 1) +
+        f2('Deductible status', Number(r.deductible_waived) ? 'Waived by shop' : 'Customer pays') +
         '</div><div class="row" style="margin-top:11px">' +
         '<button class="btn btn-ghost" id="saveMoney">Save money</button>' +
         '<span class="sub">Wholesale work is priced here.</span></div>');
     }
 
-    /* --- promises --- */
-    h.push('<div class="sec">Promises</div>');
-    h.push('<div class="sub" style="margin-bottom:6px">What someone told the customer. These are the ' +
-      'sentences that come back at you.</div>');
-    if (!d.promises.length) h.push('<div class="sub">Nothing promised yet.</div>');
-    d.promises.forEach(function (p) {
-      h.push('<div class="promise' + (p.done ? ' done' : '') + '">' +
-        '<input type="checkbox" data-promise="' + p.id + '"' + (p.done ? ' checked' : '') + '>' +
-        '<div class="ptext">' + esc(p.body) + '</div></div>');
-    });
-    h.push('<div class="row" style="margin-top:10px">' +
-      '<input type="text" id="promiseText" placeholder="Told them Friday afternoon" style="flex:1;min-width:150px">' +
-      '<button class="btn btn-ghost" id="addPromise">Add</button></div>');
+    /* Assigned */
+    var openings = POSITIONS.filter(function (p) {
+      return !(d.assigned || {})[p.k];
+    }).length;
+    L.push('<div class="sec">Assigned <span class="sub" style="text-transform:none;letter-spacing:0">' +
+      (openings ? openings + ' position' + (openings === 1 ? '' : 's') + ' open' : 'all filled') +
+      '</span></div>');
 
-    /* --- parts --- */
+    if (ME.caps.editAssignments) {
+      L.push('<div class="fieldset two">' + POSITIONS.map(function (p) {
+        var cur = (d.assigned || {})[p.k] || {};
+        var options = STAFF.filter(function (st) {
+          return p.k === 'sales' ? true : (!st.position_key || st.position_key === p.k);
+        });
+        return '<div><div class="fl2">' + esc(p.t) + '</div>' +
+          '<select data-assign="' + p.k + '" data-was="' + (cur.userId || '') + '" style="width:100%">' +
+          '<option value="">Unassigned</option>' +
+          options.map(function (st) {
+            return '<option value="' + st.user_id + '"' +
+              (String(cur.userId) === String(st.user_id) ? ' selected' : '') + '>' +
+              esc(st.display_name) + '</option>';
+          }).join('') + '</select></div>';
+      }).join('') + '</div>' +
+      '<div class="row" style="margin-top:10px">' +
+      '<button class="btn btn-ghost" id="saveAssign">Save assignments</button>' +
+      '<span class="sub">Every change is written to the activity log.</span></div>');
+    } else {
+      L.push('<div class="fieldset two">' + POSITIONS.map(function (p) {
+        return f2(p.t, ((d.assigned || {})[p.k] || {}).name);
+      }).join('') + '</div>');
+    }
+
+    /* Parts */
     if (ME.features.indexOf('parts') >= 0) {
-      h.push('<div class="sec">Parts</div>');
-      if (!d.parts.length) h.push('<div class="sub">No parts on this file.</div>');
+      L.push('<div class="sec">Parts</div>');
+      if (!d.parts.length) L.push('<div class="sub">No parts on this file.</div>');
       d.parts.forEach(function (p) {
-        h.push('<div class="partrow"><div><div class="log-b">' + esc(p.description) + '</div>' +
+        L.push('<div class="partrow"><div><div class="log-b">' + esc(p.description) + '</div>' +
           '<div class="log-m">' + esc(p.state) + ' · qty ' + p.qty_received + '/' + p.qty +
           (p.vendor_name ? ' · ' + esc(p.vendor_name) : '') +
-          (p.eta ? ' · ETA ' + shortDate(p.eta) : '') +
+          (p.eta ? ' · ETA ' + shopDate(p.eta) : '') +
           (ME.caps.money && p.price_cents
             ? ' · ' + money(p.price_cents) + (Number(p.cost_cents) ? ' / ' + money(p.cost_cents) : '')
             : '') +
           (p.gating ? '' : ' · not gating') + '</div></div>' +
           (ME.caps.manageParts && p.state !== 'received'
-            ? '<button class="btn btn-ghost" data-recv="' + p.id + '" style="padding:5px 9px;font-size:10.5px">Received</button>'
+            ? '<button class="btn btn-ghost" data-recv="' + p.id +
+              '" style="padding:5px 9px;font-size:10.5px">Received</button>'
             : '') + '</div>');
       });
       if (ME.caps.manageParts) {
-        h.push('<div class="row" style="margin-top:10px">' +
+        L.push('<div class="row" style="margin-top:10px">' +
           '<input type="text" id="pDesc" placeholder="Part description" style="flex:1;min-width:140px">' +
           '<input type="number" id="pQty" value="1" min="1" style="width:58px" title="Quantity">' +
           (ME.caps.money
@@ -977,92 +1031,144 @@
       }
     }
 
-    /* --- supplements + sublet --- */
+    /* Supplements + sublet */
     if (d.supplements && d.supplements.length) {
-      h.push('<div class="sec">Supplements</div>');
-      d.supplements.forEach(function (s) {
-        h.push('<div class="log"><div class="log-b">Supplement ' + s.seq + ' · ' + esc(s.state) + '</div>' +
+      var req = d.supplements.reduce(function (a, x) { return a + Number(x.requested_cents || 0); }, 0);
+      var app = d.supplements.reduce(function (a, x) { return a + Number(x.approved_cents || 0); }, 0);
+      L.push('<div class="sec">Supplements <span class="sub" style="text-transform:none;letter-spacing:0">' +
+        (ME.caps.money ? money(req) + ' requested, ' + money(app) + ' approved' : d.supplements.length + ' on file') +
+        '</span></div>');
+      d.supplements.forEach(function (x) {
+        L.push('<div class="log"><div class="log-b">' +
+          (x.seq === 0 ? 'Original estimate' : 'Supplement ' + x.seq) + ' · ' + esc(x.state) + '</div>' +
           '<div class="log-m">' + (ME.caps.money
-            ? 'requested ' + money(s.requested_cents) + ' · approved ' + money(s.approved_cents) + ' · ' : '') +
-          (s.sent_at ? 'sent ' + shortDate(s.sent_at) : 'not sent') +
-          (s.decided_at ? ' · decided ' + shortDate(s.decided_at) : '') + '</div></div>');
+            ? 'requested ' + money(x.requested_cents) + ' · approved ' + money(x.approved_cents) + ' · ' : '') +
+          (x.sent_at ? 'sent ' + shopDate(x.sent_at) : 'not sent') +
+          (x.decided_at ? ' · decided ' + shopDate(x.decided_at) : '') + '</div></div>');
       });
+      L.push('<div class="sub" style="margin-top:8px">The decision date is stamped when you set the ' +
+        'outcome. Supplement-to-approval time is what the cycle time report reads.</div>');
     }
 
     if (d.sublets && d.sublets.length) {
-      h.push('<div class="sec">Sublet</div>');
-      d.sublets.forEach(function (s) {
-        h.push('<div class="log"><div class="log-b">' + esc(s.service) +
-          (s.vendor ? ' — ' + esc(s.vendor) : '') + '</div>' +
-          '<div class="log-m">' + esc(s.state) +
-          (s.out_at ? ' · out ' + shortDate(s.out_at) : '') +
-          (s.back_at ? ' · back ' + shortDate(s.back_at) : '') +
-          (ME.caps.money && s.cost_cents ? ' · ' + money(s.cost_cents) : '') + '</div></div>');
+      L.push('<div class="sec">Sublet</div>');
+      d.sublets.forEach(function (x) {
+        L.push('<div class="log"><div class="log-b">' + esc(x.service) +
+          (x.vendor ? ' — ' + esc(x.vendor) : '') + '</div>' +
+          '<div class="log-m">' + esc(x.state) +
+          (x.out_at ? ' · out ' + shopDate(x.out_at) : '') +
+          (x.back_at ? ' · back ' + shopDate(x.back_at) : '') +
+          (ME.caps.money && x.cost_cents ? ' · ' + money(x.cost_cents) : '') + '</div></div>');
       });
+      L.push('<div class="sub" style="margin-top:8px">A vehicle out for calibration or glass is still ' +
+        'on the board — the sublet line is what explains the day.</div>');
     }
 
-    /* --- documents + photos --- */
+    /* Promises */
+    L.push('<div class="sec">Promises <span class="sub" style="text-transform:none;letter-spacing:0">' +
+      'work we agreed to do</span></div>');
+    if (!d.promises.length) L.push('<div class="sub">Nothing promised yet.</div>');
+    d.promises.forEach(function (p) {
+      L.push('<div class="promise' + (p.done ? ' done' : '') + '">' +
+        '<input type="checkbox" data-promise="' + p.id + '"' + (p.done ? ' checked' : '') + '>' +
+        '<div class="ptext">' + esc(p.body) + '</div></div>');
+    });
+    L.push('<div class="row" style="margin-top:10px">' +
+      '<input type="text" id="promiseText" placeholder="Buff headlamps, touch up rocker chip…" ' +
+      'style="flex:1;min-width:150px">' +
+      '<button class="btn btn-ghost" id="addPromise">Add</button></div>');
+
+    /* Documents and photos */
     if (ME.features.indexOf('docs') >= 0) {
       var photos = d.documents.filter(function (x) { return x.is_image; });
       var others = d.documents.filter(function (x) { return !x.is_image; });
       PHOTOSET = photos;
 
-      h.push('<div class="sec">Photos and documents</div>');
+      L.push('<div class="sec">Photos and documents</div>');
       if (photos.length) {
-        h.push('<div class="photogrid">' + photos.map(function (p, i) {
+        L.push('<div class="photogrid">' + photos.map(function (p, i) {
           return '<button class="photocell" data-photo="' + i + '" title="' + esc(p.label) + '">' +
             '<img loading="lazy" src="/api/documents/' + p.id +
             (p.has_thumb ? '?variant=thumb' : '') + '" alt=""></button>';
-        }).join('') + '</div>' +
-        '<div class="sub" style="margin-top:7px">' + photos.length + ' photo' +
-        (photos.length === 1 ? '' : 's') + ' — tap to open, then Download for the full file.</div>');
-      }
-
-      h.push('<div class="row" style="margin:12px 0 8px">' +
-        '<select id="docType" style="flex:1;min-width:150px">' +
-        DOCTYPES.map(function (t) { return '<option value="' + esc(t.key) + '">' + esc(t.label) + '</option>'; }).join('') +
-        '</select></div>');
-      h.push('<div class="dropzone" id="drop">Drop files here, or tap to choose' +
-        '<input type="file" id="fileInput" multiple hidden></div>');
-
-      if (!others.length && !photos.length) {
-        h.push('<div class="sub" style="margin-top:10px">Nothing filed yet.</div>');
+        }).join('') + '</div>');
       }
       others.forEach(function (doc) {
-        h.push('<div class="docrow"><div style="flex:1;min-width:0">' +
-          '<div class="log-b">' + esc(doc.label) + '</div>' +
-          '<div class="log-m">' + esc(doc.doc_type) + ' · ' + Photos.bytes(doc.size_bytes) + ' · ' +
-          esc(doc.uploaded_name || '') + ' · ' + when(doc.created_at) + '</div></div>' +
+        L.push('<div class="docrow">' +
+          '<span class="flag" style="color:var(--acc2);border:1px solid var(--line)">' +
+          esc(String(doc.doc_type).replace(/_/g, ' ')) + '</span>' +
+          '<div style="flex:1;min-width:0"><div class="log-b">' + esc(doc.label) + '</div>' +
+          '<div class="log-m">' + esc(doc.uploaded_name || '') + ' · ' + when(doc.created_at) +
+          ' · ' + Photos.bytes(doc.size_bytes) + '</div></div>' +
           '<a class="btn btn-ghost" href="/api/documents/' + doc.id + '?download=1" ' +
           'style="padding:4px 9px;font-size:10px">Download</a>' +
           (ME.caps.deleteDocuments
-            ? '<button class="btn btn-danger" data-del="' + doc.id + '" style="padding:4px 8px;font-size:10px">Delete</button>'
+            ? '<button class="btn btn-danger" data-del="' + doc.id +
+              '" style="padding:4px 8px;font-size:10px">×</button>'
             : '') + '</div>');
       });
+      L.push('<div class="row" style="margin:12px 0 8px">' +
+        '<select id="docType" style="flex:1;min-width:150px">' +
+        DOCTYPES.map(function (t) {
+          return '<option value="' + esc(t.key) + '">' + esc(t.label) + '</option>';
+        }).join('') + '</select></div>');
+      L.push('<div class="dropzone" id="drop">Drop files here, or choose a file — estimate, ' +
+        'supplement, invoice, proof of payment<input type="file" id="fileInput" multiple hidden></div>');
     }
 
-    /* --- history --- */
-    h.push('<div class="sec">Notes and history</div>');
-    h.push('<div class="row" style="margin-bottom:10px">' +
-      '<input type="text" id="quickNote" placeholder="Add a note" style="flex:1;min-width:160px">' +
-      '<button class="btn btn-ghost" id="addNote">Save</button></div>');
-    if (!d.notes.length) h.push('<div class="sub">Nothing recorded yet.</div>');
+    $('dLeft').innerHTML = L.join('');
+
+    /* ---- right column: what you do to the file ---- */
+    var R = [];
+
+    R.push('<div class="sec">Update this RO</div>');
+    R.push('<div class="stack"><select id="newStatus" style="width:100%">' +
+      '<option value="">Select a new status…</option>' +
+      GROUPS.map(function (g) {
+        var o = STATUSES.filter(function (st) { return st.group_id === g.group_id; })
+          .map(function (st) {
+            return '<option value="' + esc(st.slot_id) + '">' + esc(st.label) + '</option>';
+          }).join('');
+        return o ? '<optgroup label="' + esc(g.label) + '">' + o + '</optgroup>' : '';
+      }).join('') + '</select>' +
+      '<textarea id="newNote" placeholder="Add a note — call with the adjuster, customer, parts vendor…"></textarea>' +
+      '<div class="row"><button class="btn btn-solid" id="saveStatus">Add a note or pick a status</button>' +
+      '<span class="sub" style="flex:1;min-width:120px">Notifies whoever owns the status it lands in.</span>' +
+      '</div></div>');
+    R.push('<div class="msg" id="dMsg"></div>');
+
+    R.push('<div class="sec">Notes and history</div>');
+    if (!d.notes.length) R.push('<div class="sub">Nothing recorded yet.</div>');
     d.notes.forEach(function (n) {
-      h.push('<div class="log"><div class="log-b"' + (n.kind === 'auto' ? ' style="color:var(--muted)"' : '') +
-        '>' + esc(n.body) + '</div><div class="log-m">' + esc(n.user_name || 'system') + ' · ' +
-        when(n.created_at) + '</div></div>');
+      R.push('<div class="log"><div class="row" style="gap:7px;align-items:baseline">' +
+        '<span class="flag" style="color:' +
+        (n.kind === 'auto' ? 'var(--dim)' : 'var(--acc2)') + ';border:1px solid var(--line)">' +
+        esc(n.kind === 'auto' ? 'auto' : 'note') + '</span>' +
+        '<span style="font:400 11px var(--font);color:var(--muted)">' +
+        esc(n.user_name || 'System') + '</span>' +
+        '<span class="log-m" style="margin:0 0 0 auto">' + when(n.created_at) + '</span></div>' +
+        '<div class="log-b" style="margin-top:4px' +
+        (n.kind === 'auto' ? ';color:var(--muted)' : '') + '">' + esc(n.body) + '</div></div>');
     });
 
-    $('dBody').innerHTML = h.join('');
+    $('dRight').innerHTML = R.join('');
     wireDrawer();
+  }
+
+  function daysIn(r) {
+    return Math.floor((Date.now() - new Date(r.opened_at).getTime()) / 86400000);
   }
 
   function wireDrawer() {
     var msg = $('dMsg');
-    function say(t, k) { msg.textContent = t; msg.className = 'msg ' + k; }
+    function say(t, k) {
+      if (!msg) return;
+      msg.textContent = t;
+      msg.className = 'msg ' + k;
+    }
     function reopen() { return load().then(function () { openRo(OPEN); Shell.refreshCount(); }); }
 
-    $('saveStatus').addEventListener('click', function () {
+    var ss = $('saveStatus');
+    if (ss) ss.addEventListener('click', function () {
       var slot = $('newStatus').value, note = $('newNote').value.trim();
       if (!slot && !note) return say('Pick a status or write a note.', 'err');
       api('/api/ro/' + OPEN + '/status', {
@@ -1251,17 +1357,22 @@
     if (!p.hidden && !p.contains(e.target) && e.target.id !== 'colBtn') p.hidden = true;
   });
 
-  $('fGroup').addEventListener('change', function () { fillStatusFilter(this.value); render(); });
-  $('fStatus').addEventListener('change', render);
-  $('fSearch').addEventListener('input', render);
-  $('fClosed').addEventListener('change', function () { load(); });
-  $('refresh').addEventListener('click', function () { load(); });
-  $('scrim').addEventListener('click', closeRo);
-  $('dClose').addEventListener('click', closeRo);
+  function on(id, ev, fn) {
+    var el = $(id);
+    if (el) el.addEventListener(ev, fn);
+  }
+
+  on('fGroup', 'change', function () { fillStatusFilter(this.value); render(); });
+  on('fStatus', 'change', render);
+  on('fSearch', 'input', render);
+  on('fClosed', 'change', function () { load(); });
+  on('refresh', 'click', function () { load(); });
+  on('scrim', 'click', closeRo);
+  on('dClose', 'click', closeRo);
   document.addEventListener('keydown', function (e) {
     if (e.key === 'Escape') {
       if (!$('lightbox').hidden) hidePhoto();
-      else if (!$('colPanel').hidden) $('colPanel').hidden = true;
+      else if ($('colPanel') && !$('colPanel').hidden) $('colPanel').hidden = true;
       else closeRo();
     }
     if (!$('lightbox').hidden) {
@@ -1269,7 +1380,11 @@
       if (e.key === 'ArrowRight') showPhoto(LBAT + 1);
     }
   });
-  $('newRo').addEventListener('click', function () { location.href = '/new-ro.html'; });
+  on('newRo', 'click', function () { location.href = '/new-ro.html'; });
+  on('dDocs', 'click', function () {
+    var drop = $('drop');
+    if (drop) $('dLeft').scrollTop = drop.offsetTop - 60;
+  });
 })();
 </script>
 </body>
