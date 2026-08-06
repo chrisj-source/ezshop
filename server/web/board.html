@@ -258,6 +258,20 @@
     if (new URLSearchParams(location.search).get('ro')) history.replaceState(null, '', '/board.html');
   }
 
+  /** yyyy-mm-dd for an <input type=date>, in the browser's own timezone. */
+  function dateValue(v) {
+    if (!v) return '';
+    var d = new Date(v);
+    if (isNaN(d.getTime())) return '';
+    return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+  }
+
+  function dateField(key, label, value) {
+    return '<div><label class="fl" for="d_' + key + '">' + esc(label) + '</label>' +
+      '<input type="date" id="d_' + key + '" data-date="' + key + '" ' +
+      'data-was="' + dateValue(value) + '" value="' + dateValue(value) + '" style="width:100%"></div>';
+  }
+
   function field(l, v) {
     return '<div><div class="f-l">' + esc(l) + '</div><div class="f-v">' +
       esc(v == null || v === '' ? '—' : v) + '</div></div>';
@@ -283,11 +297,30 @@
       '<div class="row"><button class="btn btn-solid" id="saveStatus">Save</button></div></div>');
     h.push('<div class="msg" id="dMsg"></div>');
 
+    h.push('<div class="sec">Dates</div>');
+    if (ME.caps.editRepairOrders) {
+      h.push('<div class="grid2" id="dateGrid">' +
+        dateField('openedAt', 'Date in', r.opened_at) +
+        dateField('deliveredAt', 'Date completed', r.delivered_at) +
+        dateField('closedAt', 'Date picked up', r.closed_at) +
+        dateField('promisedAt', 'Promised', r.promised_at, true) +
+        '</div>' +
+        '<div class="row" style="margin-top:11px">' +
+        '<button class="btn btn-ghost" id="saveDates">Save dates</button>' +
+        '<span class="sub" id="dateHint">Blank clears a date. Every change is logged.</span></div>');
+    } else {
+      h.push('<div class="grid2">' +
+        field('Date in', r.opened_at ? when(r.opened_at) : null) +
+        field('Date completed', r.delivered_at ? when(r.delivered_at) : null) +
+        field('Date picked up', r.closed_at ? when(r.closed_at) : null) +
+        field('Promised', r.promised_at ? shortDate(r.promised_at) : null) +
+        '</div>');
+    }
+
     h.push('<div class="sec">File</div><div class="grid2">');
     h.push(field('Customer', r.customer_name), field('Phone', r.customer_phone));
     h.push(field('Insurer', r.insurer_name), field('Claim', r.claim_number));
     h.push(field('VIN', r.vin), field('Plate', r.plate));
-    h.push(field('Opened', when(r.opened_at)), field('Promised', r.promised_at ? shortDate(r.promised_at) : null));
     h.push(field('Repair path', r.repair_path), field('Labour hours', r.labor_hours));
     if (ME.caps.money) h.push(field('Amount', money(r.amount_cents)), field('Deductible', money(r.deductible_cents)));
     h.push('</div>');
@@ -389,6 +422,24 @@
       }).then(function () {
         return load().then(function () { openRo(OPEN); Shell.refreshCount(); });
       }).catch(function (e) { say(e.message, 'err'); });
+    });
+
+    var saveDates = $('saveDates');
+    if (saveDates) saveDates.addEventListener('click', function () {
+      var body = {};
+      var n = 0;
+      Array.prototype.forEach.call(document.querySelectorAll('[data-date]'), function (el) {
+        if (el.value === el.dataset.was) return;
+        body[el.dataset.date] = el.value || null;
+        n++;
+      });
+      if (!n) return say('No dates changed.', 'ok');
+
+      api('/api/ro/' + OPEN + '/dates', { method: 'PATCH', body: JSON.stringify(body) })
+        .then(function () {
+          return load().then(function () { openRo(OPEN); });
+        })
+        .catch(function (e) { say(e.message, 'err'); });
     });
 
     var add = $('addPart');

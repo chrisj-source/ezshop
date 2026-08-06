@@ -250,6 +250,91 @@ export async function registerRepairOrders(app: FastifyInstance): Promise<void> 
     return { ok: true, id };
   });
 
+  /**
+   * Correct the dates on a file. These are entered after the fact — a car
+   * that arrived Friday and got written up Monday, a delivery logged late —
+   * so they are editable rather than derived from the status history.
+   */
+  app.patch('/api/ro/:id/dates', async (req, reply) => {
+    const ctx = requireCompany(req, reply);
+    if (!ctx) return;
+    if (!ctx.caps.editRepairOrders) return reply.code(403).send({ error: 'Not permitted' });
+
+    const id = Number((req.params as { id: string }).id);
+    const cid = ctx.company!.id;
+    const b = req.body as Record<string, string | null>;
+
+    const map: Record<string, { col: string; label: string; time: boolean }> = {
+      openedAt:    { col: 'opened_at',    label: 'Date in',        time: true },
+      approvedAt:  { col: 'approved_at',  label: 'Date approved',  time: true },
+      deliveredAt: { col: 'delivered_at', label: 'Date completed', time: true },
+      closedAt:    { col: 'closed_at',    label: 'Date picked up', time: true },
+      promisedAt:  { col: 'promised_at',  label: 'Promised',       time: false },
+      dateOfLoss:  { col: 'date_of_loss', label: 'Date of loss',   time: false }
+    };
+
+    const before = await tqOne<RowDataPacket>(cid,
+      `SELECT opened_at, approved_at, delivered_at, closed_at, promised_at, date_of_loss
+       FROM repair_orders WHERE id = ?`, [id]);
+    if (!before) return reply.code(404).send({ error: 'No such repair order' });
+
+    const sets: string[] = [];
+    const vals: unknown[] = [];
+    const changes: string[] = [];
+
+    for (const [key, def] of Object.entries(map)) {
+      if (b[key] === undefined) continue;
+      const raw = b[key];
+
+      if (raw === null || raw === '') {
+        if (def.col === 'opened_at') {
+          return reply.code(400).send({ error: 'Date in cannot be emptied.' });
+        }
+        sets.push(`${def.col} = NULL`);
+        vals.push();
+        changes.push(`${def.label} cleared`);
+        continue;
+      }
+
+      // Accept "2026-08-06" or "2026-08-06T14:30" from either input type.
+      const d = new Date(def.time && raw.length === 10 ? raw + 'T12:00' : raw);
+      if (isNaN(d.getTime())) {
+        return reply.code(400).send({ error: `${def.label} is not a valid date.` });
+      }
+
+      sets.push(`${def.col} = ?`);
+      vals.push(def.time ? d : raw.slice(0, 10));
+      changes.push(`${def.label} set to ${d.toLocaleDateString('en-US', {
+        month: 'short', day: 'numeric', year: 'numeric'
+      })}`);
+    }
+
+    if (!sets.length) return reply.code(400).send({ error: 'Nothing to change' });
+
+    // A picked-up date means the file is delivered; sanity-check the order.
+    const opened = b.openedAt ? new Date(b.openedAt) : new Date(before.opened_at as string);
+    for (const later of ['deliveredAt', 'closedAt'] as const) {
+      if (b[later]) {
+        const d = new Date(b[later] as string);
+        if (d < opened) {
+          return reply.code(400).send({
+            error: `${map[later].label} cannot be before the date in.`
+          });
+        }
+      }
+    }
+
+    vals.push(id);
+    await texec(cid, `UPDATE repair_orders SET ${sets.join(', ')} WHERE id = ?`, vals);
+
+    await texec(cid,
+      `INSERT INTO ro_notes (ro_id, kind, body, user_id, user_name) VALUES (?, 'auto', ?, ?, ?)`,
+      [id, changes.join('. ') + '.', ctx.user.id, ctx.user.name]
+    );
+
+    return { ok: true };
+  });
+
   app.put('/api/ro/:id/assign/:position', async (req, reply) => {
     const ctx = requireCompany(req, reply);
     if (!ctx) return;
