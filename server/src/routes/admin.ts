@@ -123,6 +123,69 @@ export async function registerAdmin(app: FastifyInstance): Promise<void> {
     return { ok: true };
   });
 
+  /**
+   * Change the email on an account. Email is the sign-in name, so this is a
+   * platform-level change even though the owner of one shop performs it — a
+   * person who works at two shops signs in with one address.
+   */
+  app.patch('/api/admin/people/:userId/email', async (req, reply) => {
+    const ctx = requireCompany(req, reply);
+    if (!ctx) return;
+    if (!ctx.caps.admin) return reply.code(403).send({ error: 'Owner only' });
+
+    const userId = Number((req.params as { userId: string }).userId);
+    const { email } = req.body as { email?: string | null };
+
+    const mem = await mqOne<RowDataPacket>(
+      'SELECT 1 AS x FROM memberships WHERE user_id = ? AND company_id = ?', [userId, ctx.company!.id]);
+    if (!mem) return reply.code(404).send({ error: 'Not on this shop' });
+
+    const next = (email ?? '').trim().toLowerCase() || null;
+
+    if (next) {
+      if (!/^[^@\s]+@[^@\s]+\.[^@\s]{2,}$/.test(next)) {
+        return reply.code(400).send({ error: 'That does not look like an email address.' });
+      }
+      const clash = await mqOne<RowDataPacket & { id: number }>(
+        'SELECT id FROM users WHERE email = ? AND id <> ?', [next, userId]);
+      if (clash) return reply.code(409).send({ error: 'Another account already uses that address.' });
+    } else {
+      // Removing the email leaves only code sign-in, so make sure one exists.
+      const u = await mqOne<RowDataPacket & { login_code: string | null }>(
+        'SELECT login_code FROM users WHERE id = ?', [userId]);
+      if (!u?.login_code) {
+        return reply.code(400).send({
+          error: 'Clearing the email would leave no way to sign in. Issue a code first.'
+        });
+      }
+    }
+
+    await mexec('UPDATE users SET email = ? WHERE id = ?', [next, userId]);
+    await texec(ctx.company!.id,
+      `INSERT INTO audit_log (user_id, user_name, entity, entity_id, action, detail)
+       VALUES (?, ?, 'staff', ?, 'email.changed', ?)`,
+      [ctx.user.id, ctx.user.name, userId, JSON.stringify({ email: next })]
+    );
+
+    return { ok: true, email: next };
+  });
+
+  /** Rename someone. The display name on the shop follows. */
+  app.patch('/api/admin/people/:userId/name', async (req, reply) => {
+    const ctx = requireCompany(req, reply);
+    if (!ctx) return;
+    if (!ctx.caps.admin) return reply.code(403).send({ error: 'Owner only' });
+
+    const userId = Number((req.params as { userId: string }).userId);
+    const { name } = req.body as { name?: string };
+    if (!name || !name.trim()) return reply.code(400).send({ error: 'A name is required.' });
+
+    await mexec('UPDATE users SET name = ? WHERE id = ?', [name.trim(), userId]);
+    await texec(ctx.company!.id, 'UPDATE staff SET display_name = ? WHERE user_id = ?',
+      [name.trim(), userId]);
+    return { ok: true };
+  });
+
   /** Issue a fresh sign-in code for someone. Testing convenience. */
   app.post('/api/admin/people/:userId/code', async (req, reply) => {
     const ctx = requireCompany(req, reply);

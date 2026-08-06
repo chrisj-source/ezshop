@@ -724,8 +724,13 @@
       h.push('<div class="prow2" data-user="' + p.id + '"' +
         (p.membership_status === 'inactive' ? ' style="opacity:.55"' : '') + '>' +
         '<div class="avatar2">' + esc(initials) + '</div>' +
-        '<div style="min-width:0"><div class="slabel">' + esc(p.name) + '</div>' +
-        '<div class="ssub">' + esc(p.email || 'code sign-in only') + '</div></div>' +
+        '<div style="min-width:0">' +
+        '<input class="dinput p-name" value="' + esc(p.name) + '" ' +
+        'style="font:500 12px var(--font);padding:4px 7px" title="Name">' +
+        '<input class="dinput p-email" value="' + esc(p.email || '') + '" ' +
+        'placeholder="no email — code sign-in" ' +
+        'style="font:400 10.5px var(--font);padding:3px 7px;margin-top:4px;color:var(--dim)" ' +
+        'title="Email — this is what they sign in with"></div>' +
         '<select class="dsel p-role">' + ROLES.map(function (r) {
           return '<option value="' + esc(r.key) + '"' + (r.key === p.role ? ' selected' : '') + '>' +
             esc(r.label) + '</option>';
@@ -749,7 +754,7 @@
     h.push('<div class="pad" style="padding-top:16px"><div class="row">' +
       '<button class="btn btn-solid" id="savePeople">Save roles and positions</button>' +
       '<span class="sub">' + list.length + ' shown' +
-      (RAIL ? ' in this position' : '') + '</span></div></div>');
+      (RAIL ? ' in this position' : '') + ' · names and emails save here too</span></div></div>');
 
     h.push('<div id="removedBox"></div>');
 
@@ -805,17 +810,44 @@
         var id = Number(row.dataset.user);
         var was = PEOPLE.people.filter(function (p) { return p.id === id; })[0];
         var role = row.querySelector('.p-role').value;
-        var pos = row.querySelector('.p-pos').value;
+        var posEl = row.querySelector('.p-pos');
+        var pos = posEl ? posEl.value : (was.position_key || '');
         var body = {};
         if (role !== was.role) body.role = role;
         if (pos !== (was.position_key || '')) body.positionKey = pos || null;
         if (Object.keys(body).length) jobs.push({ id: id, body: body });
+
+        var nameEl = row.querySelector('.p-name');
+        if (nameEl && nameEl.value.trim() && nameEl.value.trim() !== was.name) {
+          jobs.push({ id: id, name: nameEl.value.trim() });
+        }
+
+        var emailEl = row.querySelector('.p-email');
+        if (emailEl && emailEl.value.trim() !== (was.email || '')) {
+          jobs.push({ id: id, email: emailEl.value.trim() || null });
+        }
       });
       if (!jobs.length) return say('Nothing changed.', 'ok');
-      Promise.all(jobs.map(function (j) {
-        return api('/api/admin/people/' + j.id, { method: 'PATCH', body: JSON.stringify(j.body) });
-      })).then(function () { say('Saved.', 'ok'); return reloadPeople(); })
-        .catch(function (e) { say(e.message, 'err'); });
+      // Run in sequence so a rejected email does not hide a saved role.
+      jobs.reduce(function (chain, j) {
+        return chain.then(function () {
+          if (j.name !== undefined) {
+            return api('/api/admin/people/' + j.id + '/name', {
+              method: 'PATCH', body: JSON.stringify({ name: j.name })
+            });
+          }
+          if (j.email !== undefined) {
+            return api('/api/admin/people/' + j.id + '/email', {
+              method: 'PATCH', body: JSON.stringify({ email: j.email })
+            });
+          }
+          return api('/api/admin/people/' + j.id, {
+            method: 'PATCH', body: JSON.stringify(j.body)
+          });
+        });
+      }, Promise.resolve())
+        .then(function () { say('Saved.', 'ok'); return reloadPeople(); })
+        .catch(function (e) { say(e.message + ' — anything before it was saved.', 'err'); });
     });
 
     Array.prototype.forEach.call($('mid').querySelectorAll('[data-code]'), function (b) {

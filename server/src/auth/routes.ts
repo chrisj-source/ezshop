@@ -5,6 +5,7 @@ import { mexec, mq, mqOne } from '../db/master';
 import { hashPassword, passwordProblem, verifyPassword } from './password';
 import { createSession, revokeAllForUser, revokeSession, switchSessionCompany } from './session';
 import { companyFeatures, requireUser } from '../middleware/context';
+import { texec } from '../db/tenant';
 import { ROLE_LABEL, Role, capsFor } from '../permissions';
 
 interface LoginUser extends RowDataPacket {
@@ -152,6 +153,54 @@ export async function registerAuth(app: FastifyInstance): Promise<void> {
 
     await switchSessionCompany(ctx.sessionId, companyId, !mem && ctx.isPlatformOwner);
     return { ok: true, companyId, features: await companyFeatures(companyId) };
+  });
+
+  /**
+   * Change your own email. Requires the current password, because email is the
+   * sign-in name — losing control of it is losing the account.
+   */
+  app.post('/api/auth/change-email', async (req, reply) => {
+    const ctx = requireUser(req, reply);
+    if (!ctx) return;
+    const { email, password } = req.body as { email?: string; password?: string };
+
+    const next = (email ?? '').trim().toLowerCase();
+    if (!next) return reply.code(400).send({ error: 'An email address is required.' });
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]{2,}$/.test(next)) {
+      return reply.code(400).send({ error: 'That does not look like an email address.' });
+    }
+
+    const row = await mqOne<LoginUser>('SELECT * FROM users WHERE id = ?', [ctx.user.id]);
+    if (!row) return reply.code(404).send({ error: 'User not found' });
+
+    if (row.password_hash) {
+      if (!password) return reply.code(400).send({ error: 'Your current password is required.' });
+      if (!await verifyPassword(row.password_hash, password)) {
+        return reply.code(401).send({ error: 'That password is not correct.' });
+      }
+    }
+
+    const clash = await mqOne<RowDataPacket>(
+      'SELECT id FROM users WHERE email = ? AND id <> ?', [next, ctx.user.id]);
+    if (clash) return reply.code(409).send({ error: 'Another account already uses that address.' });
+
+    await mexec('UPDATE users SET email = ? WHERE id = ?', [next, ctx.user.id]);
+    return { ok: true, email: next };
+  });
+
+  /** Your own name, as it appears on notes and history. */
+  app.post('/api/auth/change-name', async (req, reply) => {
+    const ctx = requireUser(req, reply);
+    if (!ctx) return;
+    const { name } = req.body as { name?: string };
+    if (!name || !name.trim()) return reply.code(400).send({ error: 'A name is required.' });
+
+    await mexec('UPDATE users SET name = ? WHERE id = ?', [name.trim(), ctx.user.id]);
+    if (ctx.company) {
+      await texec(ctx.company.id, 'UPDATE staff SET display_name = ? WHERE user_id = ?',
+        [name.trim(), ctx.user.id]);
+    }
+    return { ok: true };
   });
 
   app.post('/api/auth/change-password', async (req, reply) => {

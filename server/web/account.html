@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1c2740">
+<title>My account — Easy Shop</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/shell.css?v=5">
+<style>
+  body { overflow:auto; }
+  .page { max-width:620px; margin:0 auto; width:100%; padding:0 18px 48px; }
+  .card3 {
+    border:1px solid var(--line); border-radius:6px; padding:16px 18px; margin-top:16px;
+  }
+  .cardtitle { font:500 13.5px var(--font); }
+  .cardnote {
+    font:400 11.5px/1.6 var(--font); color:var(--muted); margin-top:5px; max-width:520px;
+  }
+  .frow { display:grid; gap:12px; margin-top:14px; }
+  .frow.two { grid-template-columns:1fr 1fr; }
+  .frow input { width:100%; box-sizing:border-box; padding:9px 11px; font-size:12.5px; }
+  .lbl {
+    font:600 8.5px var(--font); letter-spacing:.12em; text-transform:uppercase;
+    color:var(--acc2); margin-bottom:5px;
+  }
+  .who2 { display:flex; align-items:center; gap:12px; }
+  .bigavatar {
+    width:44px; height:44px; border-radius:50%; border:1px solid var(--acc);
+    display:grid; place-items:center; font:500 15px var(--font); color:var(--acc); flex:none;
+  }
+  @media (max-width:620px) { .frow.two { grid-template-columns:1fr; } }
+</style>
+</head>
+<body>
+
+<div class="bar">
+  <div class="brand"><div class="mark">ES</div><div class="word">Easy Shop</div></div>
+  <div class="vr"></div>
+  <div class="co" id="coName">—</div>
+  <div id="nav"></div>
+  <div class="spacer"></div>
+  <div id="bell"></div>
+  <div class="who" id="who">—</div>
+  <button class="ghostbtn" id="signout">Sign out</button>
+</div>
+<div class="hairline"></div>
+
+<div class="page">
+  <div class="head" style="padding:18px 0 0">
+    <h1>My account</h1>
+    <div class="headmeta" id="headmeta">Loading…</div>
+  </div>
+
+  <div class="card3">
+    <div class="who2">
+      <div class="bigavatar" id="avatar">—</div>
+      <div>
+        <div class="cardtitle" id="myName">—</div>
+        <div class="cardnote" id="myRole" style="margin-top:2px"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card3">
+    <div class="cardtitle">Your name</div>
+    <div class="cardnote">This is the name written against every status change, note and
+      assignment you make. Change it and the history you already wrote keeps the old name — that
+      record is not rewritten.</div>
+    <div class="frow">
+      <div><div class="lbl">Name</div><input id="nName"></div>
+    </div>
+    <div class="row" style="margin-top:13px">
+      <button class="btn btn-solid" id="saveName">Save name</button>
+    </div>
+    <div class="msg" id="nameMsg"></div>
+  </div>
+
+  <div class="card3">
+    <div class="cardtitle">Your email address</div>
+    <div class="cardnote">This is what you sign in with. Changing it needs your current password,
+      because whoever controls the address controls the account.</div>
+    <div class="frow two">
+      <div><div class="lbl">New email</div><input id="eEmail" type="email" autocomplete="email"></div>
+      <div><div class="lbl">Current password</div>
+        <input id="ePass" type="password" autocomplete="current-password"></div>
+    </div>
+    <div class="row" style="margin-top:13px">
+      <button class="btn btn-solid" id="saveEmail">Save email</button>
+    </div>
+    <div class="msg" id="emailMsg"></div>
+  </div>
+
+  <div class="card3">
+    <div class="cardtitle">Your password</div>
+    <div class="cardnote">At least ten characters. Saving signs you out of every other device —
+      the phone at the door, the machine in the office — and back in here.</div>
+    <div class="frow">
+      <div><div class="lbl">Current password</div>
+        <input id="pCurrent" type="password" autocomplete="current-password"></div>
+    </div>
+    <div class="frow two">
+      <div><div class="lbl">New password</div>
+        <input id="pNext" type="password" autocomplete="new-password"></div>
+      <div><div class="lbl">Confirm</div>
+        <input id="pAgain" type="password" autocomplete="new-password"></div>
+    </div>
+    <div class="row" style="margin-top:13px">
+      <button class="btn btn-solid" id="savePass">Change password</button>
+    </div>
+    <div class="msg" id="passMsg"></div>
+  </div>
+
+  <div class="card3" id="shopsCard" hidden>
+    <div class="cardtitle">Shops you can work in</div>
+    <div class="cardnote">Switching moves this session to that shop. Nothing about your account
+      changes.</div>
+    <div id="shops" style="margin-top:12px"></div>
+  </div>
+</div>
+
+<script src="/shell.js?v=5"></script>
+<script>
+(function () {
+  var api = Shell.api, esc = Shell.esc;
+  var ME = null;
+
+  function $(id) { return document.getElementById(id); }
+  function say(id, t, k) {
+    var m = $(id);
+    m.textContent = t;
+    m.className = 'msg ' + k;
+  }
+  function initials(name) {
+    return String(name || '?').split(/\s+/).map(function (w) { return w[0]; })
+      .join('').slice(0, 2).toUpperCase();
+  }
+
+  api('/api/me').then(function (me) {
+    ME = me;
+    Shell.mount({ me: me, active: 'account' });
+
+    $('headmeta').textContent = me.company
+      ? 'Signed in at ' + me.company.name
+      : 'Signed in, no shop selected';
+
+    $('avatar').textContent = initials(me.user.name);
+    $('myName').textContent = me.user.name;
+    $('myRole').textContent = [me.roleLabel, me.positionKey, me.user.email || 'code sign-in only']
+      .filter(Boolean).join(' · ');
+
+    $('nName').value = me.user.name;
+    $('eEmail').value = me.user.email || '';
+
+    if (me.companies && me.companies.length > 1) {
+      $('shopsCard').hidden = false;
+      $('shops').innerHTML = me.companies.map(function (c) {
+        var here = me.company && c.id === me.company.id;
+        return '<div class="row" style="padding:9px 0;border-top:1px solid var(--whisper)">' +
+          '<div style="flex:1;min-width:0"><div style="font:500 12.5px var(--font)">' +
+          esc(c.name) + '</div><div class="sub">' + esc(c.roleLabel) +
+          (c.suspended ? ' · switched off' : '') + '</div></div>' +
+          (here
+            ? '<span class="sub">you are here</span>'
+            : c.suspended
+              ? '<span class="sub">unavailable</span>'
+              : '<button class="btn btn-ghost" data-go="' + c.id + '">Switch to this shop</button>') +
+          '</div>';
+      }).join('');
+
+      Array.prototype.forEach.call($('shops').querySelectorAll('[data-go]'), function (b) {
+        b.addEventListener('click', function () {
+          api('/api/auth/switch-company', {
+            method: 'POST', body: JSON.stringify({ companyId: Number(b.dataset.go) })
+          }).then(function () { location.href = '/board.html'; });
+        });
+      });
+    }
+  }).catch(function (e) { if (e.message !== 'signed out') console.error(e); });
+
+  $('saveName').addEventListener('click', function () {
+    var name = $('nName').value.trim();
+    if (!name) return say('nameMsg', 'A name is required.', 'err');
+
+    api('/api/auth/change-name', { method: 'POST', body: JSON.stringify({ name: name }) })
+      .then(function () {
+        say('nameMsg', 'Saved.', 'ok');
+        $('myName').textContent = name;
+        $('avatar').textContent = initials(name);
+        var w = $('who');
+        if (w) w.textContent = name + (ME.roleLabel ? ' · ' + ME.roleLabel : '');
+      })
+      .catch(function (e) { say('nameMsg', e.message, 'err'); });
+  });
+
+  $('saveEmail').addEventListener('click', function () {
+    var email = $('eEmail').value.trim();
+    if (!email) return say('emailMsg', 'An email address is required.', 'err');
+
+    api('/api/auth/change-email', {
+      method: 'POST',
+      body: JSON.stringify({ email: email, password: $('ePass').value })
+    }).then(function (r) {
+      say('emailMsg', 'Saved. You now sign in with ' + r.email + '.', 'ok');
+      $('ePass').value = '';
+      $('myRole').textContent = [ME.roleLabel, ME.positionKey, r.email].filter(Boolean).join(' · ');
+    }).catch(function (e) { say('emailMsg', e.message, 'err'); });
+  });
+
+  $('savePass').addEventListener('click', function () {
+    var next = $('pNext').value, again = $('pAgain').value;
+    if (!next) return say('passMsg', 'A new password is required.', 'err');
+    if (next !== again) return say('passMsg', 'Those two do not match.', 'err');
+
+    api('/api/auth/change-password', {
+      method: 'POST',
+      body: JSON.stringify({ current: $('pCurrent').value, next: next })
+    }).then(function () {
+      say('passMsg', 'Changed. Every other device has been signed out.', 'ok');
+      ['pCurrent', 'pNext', 'pAgain'].forEach(function (id) { $(id).value = ''; });
+    }).catch(function (e) { say('passMsg', e.message, 'err'); });
+  });
+})();
+</script>
+</body>
+</html>

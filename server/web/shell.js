@@ -97,7 +97,17 @@ window.Shell = (function () {
     }
 
     var who = document.getElementById('who');
-    if (who) who.textContent = ME.user.name + (ME.roleLabel ? ' · ' + ME.roleLabel : '');
+    if (who) {
+      who.innerHTML = '<a href="/account.html" style="color:inherit;text-decoration:none" ' +
+        'title="Your name, email and password">' +
+        esc(ME.user.name) + (ME.roleLabel ? ' · ' + esc(ME.roleLabel) : '') + '</a>';
+      who.querySelector('a').addEventListener('mouseenter', function () {
+        this.style.color = 'var(--text)';
+      });
+      who.querySelector('a').addEventListener('mouseleave', function () {
+        this.style.color = 'inherit';
+      });
+    }
 
     var co = document.getElementById('coName');
     if (co && ME.company) co.textContent = ME.company.name;
