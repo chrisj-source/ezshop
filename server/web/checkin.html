@@ -7,15 +7,21 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <title>Check-in — Easy Shop</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/shell.css">
+<link rel="stylesheet" href="/shell.css?v=5">
 <style>
   body { overflow:auto; }
   .phone { max-width:520px; margin:0 auto; width:100%; }
   .step { padding:18px 16px 0; }
   .steptitle { font:500 17px var(--font); }
   .stepnote { font:400 12px var(--font); color:var(--dim); margin-top:5px; line-height:1.5; }
-  .crumbs { display:flex; gap:6px; padding:14px 16px 0; }
-  .crumb { flex:1; height:3px; border-radius:2px; background:var(--line); }
+  .crumbs {
+    display:flex; align-items:center; gap:6px; padding:14px 16px 0;
+    width:100%; box-sizing:border-box;
+  }
+  .crumb {
+    flex:1 1 0; min-width:0; height:3px; max-height:3px; border-radius:2px;
+    background:var(--line); aspect-ratio:auto; align-self:center;
+  }
   .crumb.done { background:var(--acc); }
   .choices { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:16px; }
   .choices.one { grid-template-columns:1fr; }
@@ -95,8 +101,8 @@
   <div id="stage"></div>
 </div>
 
-<script src="/photos.js"></script>
-<script src="/shell.js"></script>
+<script src="/photos.js?v=5"></script>
+<script src="/shell.js?v=5"></script>
 <script>
 (function () {
   var api = Shell.api, esc = Shell.esc;
