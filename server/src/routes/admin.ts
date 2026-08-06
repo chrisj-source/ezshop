@@ -21,7 +21,7 @@ export async function registerAdmin(app: FastifyInstance): Promise<void> {
 
     const b = req.body as {
       name: string; email?: string; role: Role; positionKey?: string;
-      employeeCode?: string; useCode?: boolean;
+      employeeCode?: string; useCode?: boolean; password?: string;
     };
     if (!b.name || !b.role) return reply.code(400).send({ error: 'Name and role are required.' });
     if (!ROLES.includes(b.role)) return reply.code(400).send({ error: 'Unknown role.' });
@@ -43,6 +43,11 @@ export async function registerAdmin(app: FastifyInstance): Promise<void> {
 
     if (b.useCode) {
       code = await uniqueCode();
+    } else if (b.password && b.password.trim()) {
+      tempPassword = b.password.trim();
+      if (tempPassword.length < 6) {
+        return reply.code(400).send({ error: 'A temporary password needs at least 6 characters.' });
+      }
     } else {
       tempPassword = randomPassword(12);
     }
@@ -137,23 +142,161 @@ export async function registerAdmin(app: FastifyInstance): Promise<void> {
     return { ok: true, code };
   });
 
+  /**
+   * Reset a password. The owner may set one they choose — the shop hands it
+   * over verbally — or let the app generate one. Either way the person must
+   * change it at first sign-in, and every session they have is killed.
+   */
   app.post('/api/admin/people/:userId/reset-password', async (req, reply) => {
     const ctx = requireCompany(req, reply);
     if (!ctx) return;
     if (!ctx.caps.admin) return reply.code(403).send({ error: 'Owner only' });
     const userId = Number((req.params as { userId: string }).userId);
+    const body = (req.body ?? {}) as { password?: string };
 
     const mem = await mqOne<RowDataPacket>(
       'SELECT 1 AS x FROM memberships WHERE user_id = ? AND company_id = ?', [userId, ctx.company!.id]);
     if (!mem) return reply.code(404).send({ error: 'Not on this shop' });
 
-    const tempPassword = randomPassword(12);
+    let tempPassword: string;
+    if (body.password && body.password.trim()) {
+      tempPassword = body.password.trim();
+      if (tempPassword.length < 6) {
+        return reply.code(400).send({ error: 'A temporary password needs at least 6 characters.' });
+      }
+      if (tempPassword.length > 200) {
+        return reply.code(400).send({ error: 'That password is too long.' });
+      }
+    } else {
+      tempPassword = randomPassword(12);
+    }
+
     await mexec(
       'UPDATE users SET password_hash = ?, must_change_pw = 1 WHERE id = ?',
       [await hashPassword(tempPassword), userId]
     );
     await mexec('UPDATE sessions SET revoked_at = NOW() WHERE user_id = ? AND revoked_at IS NULL', [userId]);
-    return { ok: true, tempPassword };
+
+    return { ok: true, tempPassword, chosen: !!(body.password && body.password.trim()) };
+  });
+
+  /**
+   * Take someone off this shop. Their name stays on the work they did — the
+   * history and the notes are the shop's record, not theirs — so this removes
+   * the membership and deactivates the staff profile rather than deleting rows.
+   * A user on no other shop is disabled outright.
+   */
+  app.delete('/api/admin/people/:userId', async (req, reply) => {
+    const ctx = requireCompany(req, reply);
+    if (!ctx) return;
+    if (!ctx.caps.admin) return reply.code(403).send({ error: 'Owner only' });
+
+    const userId = Number((req.params as { userId: string }).userId);
+    const cid = ctx.company!.id;
+
+    if (userId === ctx.user.id) {
+      return reply.code(400).send({ error: 'You cannot remove yourself.' });
+    }
+
+    const mem = await mqOne<RowDataPacket & { role: string }>(
+      'SELECT role FROM memberships WHERE user_id = ? AND company_id = ?', [userId, cid]);
+    if (!mem) return reply.code(404).send({ error: 'Not on this shop' });
+
+    if (mem.role === 'owner') {
+      const owners = await mqOne<RowDataPacket & { n: number }>(
+        `SELECT COUNT(*) AS n FROM memberships
+         WHERE company_id = ? AND role = 'owner' AND status = 'active'`, [cid]);
+      if (Number(owners?.n ?? 0) <= 1) {
+        return reply.code(400).send({ error: 'That is the only owner. Make someone else owner first.' });
+      }
+    }
+
+    const openFiles = await tqOne<RowDataPacket & { n: number }>(cid,
+      `SELECT COUNT(DISTINCT a.ro_id) AS n
+       FROM ro_assignments a JOIN repair_orders r ON r.id = a.ro_id
+       WHERE a.user_id = ? AND r.closed_at IS NULL`, [userId]);
+
+    await mexec('DELETE FROM memberships WHERE user_id = ? AND company_id = ?', [userId, cid]);
+    await mexec('UPDATE sessions SET revoked_at = NOW() WHERE user_id = ? AND company_id = ?',
+      [userId, cid]);
+
+    await texec(cid, 'UPDATE staff SET active = 0 WHERE user_id = ?', [userId]);
+
+    // Nowhere left to sign in to means the account is switched off entirely.
+    const elsewhere = await mqOne<RowDataPacket & { n: number }>(
+      'SELECT COUNT(*) AS n FROM memberships WHERE user_id = ?', [userId]);
+    const disabled = Number(elsewhere?.n ?? 0) === 0;
+    if (disabled) {
+      await mexec(
+        `UPDATE users SET status = 'disabled', login_code = NULL, login_code_expires = NULL WHERE id = ?`,
+        [userId]);
+      await mexec('UPDATE sessions SET revoked_at = NOW() WHERE user_id = ? AND revoked_at IS NULL',
+        [userId]);
+    }
+
+    await texec(cid,
+      `INSERT INTO audit_log (user_id, user_name, entity, entity_id, action, detail)
+       VALUES (?, ?, 'staff', ?, 'removed', ?)`,
+      [ctx.user.id, ctx.user.name, userId,
+       JSON.stringify({ openFiles: Number(openFiles?.n ?? 0), disabled })]
+    );
+
+    return {
+      ok: true,
+      disabled,
+      openFiles: Number(openFiles?.n ?? 0)
+    };
+  });
+
+  /** Put someone back on the shop after they were removed. */
+  app.post('/api/admin/people/:userId/restore', async (req, reply) => {
+    const ctx = requireCompany(req, reply);
+    if (!ctx) return;
+    if (!ctx.caps.admin) return reply.code(403).send({ error: 'Owner only' });
+
+    const userId = Number((req.params as { userId: string }).userId);
+    const { role, positionKey } = req.body as { role: Role; positionKey?: string };
+    if (!ROLES.includes(role)) return reply.code(400).send({ error: 'Unknown role.' });
+
+    await mexec(
+      `INSERT INTO memberships (user_id, company_id, role, position_key) VALUES (?, ?, ?, ?)
+       ON DUPLICATE KEY UPDATE role = VALUES(role), position_key = VALUES(position_key), status = 'active'`,
+      [userId, ctx.company!.id, role, positionKey ?? null]
+    );
+    await mexec(`UPDATE users SET status = 'active' WHERE id = ?`, [userId]);
+    await texec(ctx.company!.id, 'UPDATE staff SET active = 1 WHERE user_id = ?', [userId]);
+
+    return { ok: true };
+  });
+
+  /** People who were removed, so the owner can put one back. */
+  app.get('/api/admin/people/removed', async (req, reply) => {
+    const ctx = requireCompany(req, reply);
+    if (!ctx) return;
+    if (!ctx.caps.admin) return reply.code(403).send({ error: 'Owner only' });
+
+    const rows = await tq<RowDataPacket[]>(ctx.company!.id,
+      `SELECT s.user_id, s.display_name, s.position_key, s.employee_code
+       FROM staff s WHERE s.active = 0 ORDER BY s.display_name`);
+
+    if (!rows.length) return { removed: [] };
+
+    const ids = rows.map(r => r.user_id);
+    const live = await mq<RowDataPacket[]>(
+      'SELECT user_id FROM memberships WHERE company_id = ? AND user_id IN (?)',
+      [ctx.company!.id, ids]);
+    const liveSet = new Set(live.map(l => l.user_id));
+
+    const users = await mq<RowDataPacket[]>(
+      'SELECT id, name, email, status FROM users WHERE id IN (?)', [ids]);
+    const byId = new Map(users.map(u => [u.id, u]));
+
+    return {
+      removed: rows.filter(r => !liveSet.has(r.user_id)).map(r => ({
+        ...r,
+        user: byId.get(r.user_id) ?? null
+      }))
+    };
   });
 
   app.get('/api/admin/roles', async (req, reply) => {

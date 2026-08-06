@@ -118,8 +118,14 @@
     align-items:center; min-height:44px; border-bottom:1px solid var(--whisper); padding:0 2px;
   }
   .prow2 {
-    display:grid; grid-template-columns:26px 1fr 150px 130px 96px 78px 20px; gap:10px;
-    align-items:center; height:34px; border-bottom:1px solid var(--whisper);
+    display:grid; grid-template-columns:26px minmax(160px,1fr) 150px 140px 92px 148px;
+    gap:12px; align-items:center; min-height:46px; padding:6px 16px;
+    border-bottom:1px solid var(--whisper);
+  }
+  .prow2 .row { flex-wrap:nowrap; }
+  @media (max-width:1000px) {
+    .prow2 { grid-template-columns:26px minmax(140px,1fr) 130px 148px; }
+    .prow2 > .hide-sm { display:none; }
   }
   .avatar2 {
     width:22px; height:22px; flex:none; border-radius:50%; display:grid; place-items:center;
@@ -685,7 +691,7 @@
     var h = ['<div class="pad"><div class="card2" style="margin:0 0 14px">' +
       '<div class="card2row" style="grid-template-columns:1fr">' +
       '<div class="dlbl">Add someone</div>' +
-      '<div class="grid3" style="margin-top:4px">' +
+      '<div class="grid3" style="margin-top:4px;row-gap:14px">' +
       '<div><div class="dk">Name</div><input class="dinput" id="nName"></div>' +
       '<div><div class="dk">Email — optional</div><input class="dinput" id="nEmail" type="email"></div>' +
       '<div><div class="dk">Role</div><select class="dsel" id="nRole">' +
@@ -697,15 +703,20 @@
         return '<option value="' + esc(p.position_key) + '">' + esc(p.label) + '</option>';
       }).join('') + '</select></div>' +
       '<div><div class="dk">Employee code</div><input class="dinput" id="nCode"></div>' +
-      '<div style="align-self:end"><button class="btn btn-solid" id="addPerson">Add</button></div>' +
+      '<div><div class="dk">Temporary password — optional</div>' +
+      '<input class="dinput" id="nPass" placeholder="leave blank to generate one"></div>' +
       '</div>' +
+      '<div class="row" style="margin-top:12px">' +
+      '<button class="btn btn-solid" id="addPerson">Add</button>' +
+      '<span class="sub">They appear in the list below straight away.</span></div>' +
       '<div class="sub" style="margin-top:9px">Leave the email blank and they get a sign-in code ' +
       'instead — good enough for the floor. Add an email later and they set their own password.</div>' +
       '<div class="msg" id="dMsg"></div></div></div>'];
 
-    h.push('<div class="prow2" style="border-top:1px solid var(--line);height:30px">' +
-      '<div></div><div class="dk">Name</div><div class="dk">Role</div><div class="dk">Position</div>' +
-      '<div class="dk">Last in</div><div class="dk">Access</div><div></div></div>');
+    h.push('<div class="prow2" style="border-top:1px solid var(--line);min-height:32px">' +
+      '<div></div><div class="dk">Name</div><div class="dk">Role</div>' +
+      '<div class="dk hide-sm">Position</div><div class="dk hide-sm">Last in</div>' +
+      '<div class="dk">Access</div></div>');
 
     list.forEach(function (p) {
       var initials = String(p.name || '?').split(/\s+/).map(function (w) { return w[0]; })
@@ -719,22 +730,32 @@
           return '<option value="' + esc(r.key) + '"' + (r.key === p.role ? ' selected' : '') + '>' +
             esc(r.label) + '</option>';
         }).join('') + '</select>' +
-        '<select class="dsel p-pos"><option value="">None</option>' + CFG.positions.map(function (x) {
+        '<select class="dsel p-pos hide-sm"><option value="">None</option>' +
+        CFG.positions.map(function (x) {
           return '<option value="' + esc(x.position_key) + '"' +
             (x.position_key === p.position_key ? ' selected' : '') + '>' + esc(x.label) + '</option>';
         }).join('') + '</select>' +
-        '<div class="ssub">' + (p.last_login_at ? Shell.when(p.last_login_at) : 'never') + '</div>' +
-        '<div class="row" style="gap:5px">' +
+        '<div class="ssub hide-sm">' + (p.last_login_at ? Shell.when(p.last_login_at) : 'never') + '</div>' +
+        '<div class="row" style="gap:6px">' +
         '<button class="visbtn" data-code="' + p.id + '">Code</button>' +
-        '<button class="visbtn" data-reset="' + p.id + '">Reset</button></div>' +
-        '<div></div></div>');
+        '<button class="visbtn" data-reset="' + p.id + '">Password</button>' +
+        (p.id === ME.user.id
+          ? '<span class="ssub">you</span>'
+          : '<button class="visbtn" data-remove="' + p.id + '" ' +
+            'style="color:var(--stopped);border-color:var(--stopped)">Remove</button>') +
+        '</div></div>');
     });
 
-    h.push('<div class="pad"><button class="btn btn-solid" id="savePeople">' +
-      'Save roles and positions</button></div>');
+    h.push('<div class="pad" style="padding-top:16px"><div class="row">' +
+      '<button class="btn btn-solid" id="savePeople">Save roles and positions</button>' +
+      '<span class="sub">' + list.length + ' shown' +
+      (RAIL ? ' in this position' : '') + '</span></div></div>');
+
+    h.push('<div id="removedBox"></div>');
 
     $('mid').innerHTML = h.join('');
     wirePeople();
+    loadRemoved();
 
     detail('Access', '<div style="font:400 11.5px/1.6 var(--font);color:var(--muted);padding:12px 0">' +
       'Role decides what someone can see and change. Position decides which lanes they own and which ' +
@@ -762,15 +783,18 @@
         body: JSON.stringify({
           name: name,
           email: $('nEmail').value.trim() || undefined,
-          useCode: !$('nEmail').value.trim(),
+          useCode: !$('nEmail').value.trim() && !$('nPass').value.trim(),
+          password: $('nPass').value.trim() || undefined,
           role: $('nRole').value,
           positionKey: $('nPos').value || undefined,
           employeeCode: $('nCode').value.trim() || undefined
         })
       }).then(function (r) {
         var extra = (r.loginCode || r.code) ? ' Sign-in code: ' + (r.loginCode || r.code)
-          : r.tempPassword ? ' Temporary password: ' + r.tempPassword : '';
+          : r.tempPassword ? ' Temporary password: ' + r.tempPassword +
+            ' — they must change it at first sign-in.' : '';
         say('Added.' + extra, 'ok');
+        ['nName', 'nEmail', 'nCode', 'nPass'].forEach(function (id) { $(id).value = ''; });
         return reloadPeople();
       }).catch(function (e) { say(e.message, 'err'); });
     });
@@ -805,12 +829,81 @@
 
     Array.prototype.forEach.call($('mid').querySelectorAll('[data-reset]'), function (b) {
       b.addEventListener('click', function () {
-        if (!confirm('Reset this password? They will be signed out everywhere.')) return;
-        api('/api/admin/people/' + b.dataset.reset + '/reset-password', { method: 'POST' })
-          .then(function (r) { say('Temporary password: ' + r.tempPassword, 'ok'); })
-          .catch(function (e) { say(e.message, 'err'); });
+        var who = PEOPLE.people.filter(function (p) { return p.id === Number(b.dataset.reset); })[0];
+        var chosen = prompt('Temporary password for ' + (who ? who.name : 'this person') +
+          '.\n\nType one to hand over, or leave blank and the app will generate one.\n' +
+          'Either way they must change it at first sign-in, and every session they have ends now.', '');
+        if (chosen === null) return;
+
+        api('/api/admin/people/' + b.dataset.reset + '/reset-password', {
+          method: 'POST',
+          body: JSON.stringify(chosen.trim() ? { password: chosen.trim() } : {})
+        }).then(function (r) {
+          say('Temporary password for ' + (who ? who.name : 'them') + ': ' + r.tempPassword +
+            ' — they must change it at first sign-in.', 'ok');
+        }).catch(function (e) { say(e.message, 'err'); });
       });
     });
+
+    Array.prototype.forEach.call($('mid').querySelectorAll('[data-remove]'), function (b) {
+      b.addEventListener('click', function () {
+        var who = PEOPLE.people.filter(function (p) { return p.id === Number(b.dataset.remove); })[0];
+        if (!confirm('Remove ' + (who ? who.name : 'this person') + ' from the shop?\n\n' +
+          'They are signed out immediately and can no longer sign in. Their name stays on the work ' +
+          'they did — the history is the shop\u2019s record. You can put them back later.')) return;
+
+        api('/api/admin/people/' + b.dataset.remove, { method: 'DELETE' })
+          .then(function (r) {
+            say('Removed.' +
+              (r.openFiles ? ' They were on ' + r.openFiles + ' open file' +
+                (r.openFiles === 1 ? '' : 's') + ' — reassign those.' : '') +
+              (r.disabled ? ' The account is switched off entirely.' : ''), 'ok');
+            return reloadPeople();
+          }).catch(function (e) { say(e.message, 'err'); });
+      });
+    });
+  }
+
+  /** Anyone taken off the shop, with a way back on. */
+  function loadRemoved() {
+    api('/api/admin/people/removed').then(function (d) {
+      var box = $('removedBox');
+      if (!box || !d.removed.length) return;
+
+      box.innerHTML = '<div class="pad" style="padding-top:6px">' +
+        '<div class="dlbl">Removed</div>' +
+        '<div class="sub" style="margin-bottom:8px">Off the shop and unable to sign in. Their work ' +
+        'history is intact.</div>' +
+        d.removed.map(function (r) {
+          return '<div class="prow2" style="opacity:.7">' +
+            '<div class="avatar2">' +
+            esc(String(r.display_name || '?').split(/\s+/).map(function (w) { return w[0]; })
+              .join('').slice(0, 2).toUpperCase()) + '</div>' +
+            '<div style="min-width:0"><div class="slabel">' + esc(r.display_name) + '</div>' +
+            '<div class="ssub">' + esc((r.user && r.user.email) || 'no email') + '</div></div>' +
+            '<select class="dsel r-role" data-for="' + r.user_id + '">' +
+            ROLES.map(function (x) {
+              return '<option value="' + esc(x.key) + '">' + esc(x.label) + '</option>';
+            }).join('') + '</select>' +
+            '<div class="ssub hide-sm">' + esc(r.position_key || 'no position') + '</div>' +
+            '<div class="ssub hide-sm">removed</div>' +
+            '<div><button class="visbtn" data-restore="' + r.user_id + '" ' +
+            'style="color:var(--done);border-color:var(--done)">Put back</button></div></div>';
+        }).join('') + '</div>';
+
+      Array.prototype.forEach.call(box.querySelectorAll('[data-restore]'), function (b) {
+        b.addEventListener('click', function () {
+          var sel = box.querySelector('.r-role[data-for="' + b.dataset.restore + '"]');
+          api('/api/admin/people/' + b.dataset.restore + '/restore', {
+            method: 'POST',
+            body: JSON.stringify({ role: sel ? sel.value : 'technician' })
+          }).then(function () {
+            say('Put back on the shop. Give them a password or a code.', 'ok');
+            return reloadPeople();
+          }).catch(function (e) { say(e.message, 'err'); });
+        });
+      });
+    }).catch(function () { /* nothing removed, or no access */ });
   }
 
   /* ===================================================== settings */
