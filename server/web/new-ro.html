@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>New repair order — Easy Shop</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root { --bg:#131c2e;--surf:#1c2740;--text:#e7eaf2;--dim:#7f8ca4;--line:#2c3a55;
+          --acc:#d9a441;--acc2:#e5bf68;--bad:#d07e6f;--good:#6fae8c;
+          --font:'Inter',system-ui,sans-serif; }
+  * { box-sizing:border-box; }
+  body { margin:0;min-height:100vh;background:var(--bg);color:var(--text);
+         font-family:var(--font);padding:32px 24px 60px; }
+  .page { max-width:760px;margin:0 auto; }
+  a { color:var(--acc2);text-decoration:none;font:400 11.5px var(--font); }
+  a:hover { color:var(--acc); }
+  h1 { font:500 21px var(--font);margin:16px 0 6px; }
+  .sub { font:400 12.5px var(--font);color:var(--dim);margin-bottom:26px;line-height:1.5; }
+  .sec { font:600 8.5px var(--font);letter-spacing:.13em;text-transform:uppercase;
+         color:var(--acc2);padding:22px 0 10px; }
+  .grid { display:grid;grid-template-columns:repeat(3,1fr);gap:12px 16px; }
+  .grid.two { grid-template-columns:repeat(2,1fr); }
+  label { display:block;font:400 9.5px var(--font);letter-spacing:.05em;
+          text-transform:uppercase;color:var(--dim);margin-bottom:5px; }
+  input,select { width:100%;background:transparent;border:1px solid var(--line);border-radius:4px;
+                 color:var(--text);font:400 12.5px var(--font);padding:8px 10px;font-family:var(--font); }
+  select option { background:var(--surf); }
+  input:focus-visible,select:focus-visible { outline:2px solid var(--acc);outline-offset:1px; }
+  .actions { display:flex;gap:10px;align-items:center;margin-top:28px; }
+  button { font:500 12px var(--font);border-radius:4px;padding:10px 18px;cursor:pointer;
+           font-family:var(--font); }
+  .save { color:var(--bg);background:var(--acc);border:1px solid var(--acc); }
+  .save:hover { background:var(--acc2);border-color:var(--acc2); }
+  .cancel { background:none;border:1px solid var(--line);color:var(--dim); }
+  .cancel:hover { color:var(--text); }
+  .msg { font:400 11.5px var(--font);line-height:1.5;padding:10px 12px;border-radius:4px;
+         margin-top:18px;display:none; }
+  .msg.err { display:block;color:var(--bad);border:1px solid var(--bad); }
+  .msg.ok { display:block;color:var(--good);border:1px solid var(--good); }
+</style>
+</head>
+<body>
+<div class="page">
+  <a href="/board.html">&larr; Back to the board</a>
+  <h1>New repair order</h1>
+  <div class="sub">Enough to get the car on the board. Everything else can be filled in from the file.</div>
+
+  <form id="form">
+    <div class="sec">The file</div>
+    <div class="grid">
+      <div><label for="roNumber">RO number</label><input id="roNumber" required></div>
+      <div><label for="roType">Type</label>
+        <select id="roType">
+          <option value="repair">Repair</option>
+          <option value="wholesale">Wholesale</option>
+          <option value="warranty">Warranty</option>
+        </select>
+      </div>
+      <div><label for="repairPath">Repair path</label>
+        <select id="repairPath">
+          <option value="undecided">Undecided</option>
+          <option value="pdr">PDR</option>
+          <option value="conventional">Conventional</option>
+          <option value="both">Both</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="sec">Customer</div>
+    <div class="grid">
+      <div><label for="customerName">Name</label><input id="customerName"></div>
+      <div><label for="phone">Phone</label><input id="phone" type="tel"></div>
+      <div><label for="email">Email</label><input id="email" type="email"></div>
+    </div>
+
+    <div class="sec">Vehicle</div>
+    <div class="grid">
+      <div><label for="vin">VIN</label><input id="vin" maxlength="17" style="text-transform:uppercase"></div>
+      <div><label for="year">Year</label><input id="year" type="number" min="1950" max="2030"></div>
+      <div><label for="make">Make</label><input id="make"></div>
+      <div><label for="model">Model</label><input id="model"></div>
+      <div><label for="color">Colour</label><input id="color"></div>
+      <div><label for="plate">Plate</label><input id="plate" style="text-transform:uppercase"></div>
+    </div>
+
+    <div class="sec">Claim</div>
+    <div class="grid">
+      <div><label for="insurerName">Insurer</label><input id="insurerName"></div>
+      <div><label for="claimNumber">Claim number</label><input id="claimNumber"></div>
+      <div><label for="dateOfLoss">Date of loss</label><input id="dateOfLoss" type="date"></div>
+    </div>
+
+    <div class="sec">Estimate</div>
+    <div class="grid">
+      <div><label for="amount">Amount ($)</label><input id="amount" type="number" step="0.01" min="0"></div>
+      <div><label for="laborHours">Labour hours</label><input id="laborHours" type="number" step="0.1" min="0"></div>
+      <div><label for="targetDays">Target days</label><input id="targetDays" type="number" min="1"></div>
+    </div>
+
+    <div class="actions">
+      <button type="submit" class="save" id="save">Create repair order</button>
+      <button type="button" class="cancel" onclick="location.href='/board.html'">Cancel</button>
+    </div>
+    <div class="msg" id="msg"></div>
+  </form>
+</div>
+
+<script>
+(function () {
+  var msg = document.getElementById('msg');
+  function val(id) { var v = document.getElementById(id).value.trim(); return v || undefined; }
+  function num(id) { var v = document.getElementById(id).value; return v === '' ? undefined : Number(v); }
+
+  document.getElementById('form').addEventListener('submit', function (e) {
+    e.preventDefault();
+    document.getElementById('save').disabled = true;
+
+    var amount = num('amount');
+    var body = {
+      roNumber: val('roNumber'),
+      roType: val('roType'),
+      repairPath: val('repairPath'),
+      customerName: val('customerName'),
+      phone: val('phone'),
+      email: val('email'),
+      vin: val('vin') ? val('vin').toUpperCase() : undefined,
+      year: num('year'),
+      make: val('make'),
+      model: val('model'),
+      color: val('color'),
+      plate: val('plate') ? val('plate').toUpperCase() : undefined,
+      insurerName: val('insurerName'),
+      claimNumber: val('claimNumber'),
+      dateOfLoss: val('dateOfLoss'),
+      amountCents: amount === undefined ? undefined : Math.round(amount * 100),
+      laborHours: num('laborHours'),
+      targetDays: num('targetDays')
+    };
+
+    fetch('/api/ro', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body)
+    })
+      .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+      .then(function (res) {
+        document.getElementById('save').disabled = false;
+        if (!res.ok) { msg.textContent = res.j.error; msg.className = 'msg err'; return; }
+        msg.textContent = 'Created.'; msg.className = 'msg ok';
+        setTimeout(function () { location.href = '/board.html'; }, 500);
+      })
+      .catch(function () {
+        document.getElementById('save').disabled = false;
+        msg.textContent = 'Could not reach the server.'; msg.className = 'msg err';
+      });
+  });
+})();
+</script>
+</body>
+</html>

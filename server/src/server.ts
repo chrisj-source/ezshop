@@ -42,7 +42,7 @@ async function main(): Promise<void> {
     return { ok: true, db: Array.isArray(r) && r.length > 0, env: config.env, time: new Date().toISOString() };
   });
 
-  app.setErrorHandler((err, req, reply) => {
+  app.setErrorHandler((err: Error & { statusCode?: number }, req, reply) => {
     req.log.error(err);
     const code = err.statusCode && err.statusCode >= 400 ? err.statusCode : 500;
     reply.code(code).send({ error: code === 500 ? 'Something went wrong.' : err.message });
@@ -50,9 +50,15 @@ async function main(): Promise<void> {
 
   app.setNotFoundHandler((req, reply) => {
     if (req.url.startsWith('/api/')) return reply.code(404).send({ error: 'No such endpoint' });
-    const index = path.join(webRoot, 'index.html');
-    if (fs.existsSync(index)) return reply.type('text/html').send(fs.createReadStream(index));
-    return reply.code(404).send({ error: 'Not found' });
+    // Static pages are real files. A missing one is a 404, never a redirect
+    // back to the index — that turns a typo into an infinite loop.
+    return reply.code(404).type('text/html').send(
+      '<!doctype html><meta charset="utf-8"><title>Not found</title>' +
+      '<body style="background:#131c2e;color:#e7eaf2;font:400 14px system-ui;display:grid;' +
+      'place-items:center;height:100vh;margin:0">' +
+      '<div style="text-align:center"><p>That page does not exist.</p>' +
+      '<p><a href="/board.html" style="color:#e5bf68">Back to the board</a></p></div>'
+    );
   });
 
   const sweep = setInterval(() => { void purgeExpiredSessions().catch(() => {}); }, 6 * 3600 * 1000);

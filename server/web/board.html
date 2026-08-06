@@ -1,0 +1,514 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Board — Easy Shop</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg:#131c2e; --surf:#1c2740; --text:#e7eaf2; --muted:#aab3c4; --dim:#7f8ca4;
+    --line:#2c3a55; --whisper:rgba(231,234,242,.08); --chip:#22304d;
+    --acc:#d9a441; --acc2:#e5bf68;
+    --move:#7f9dc4; --blocked:#d9a441; --stopped:#d07e6f; --done:#6fae8c;
+    --font:'Inter',system-ui,-apple-system,sans-serif;
+  }
+  * { box-sizing:border-box; }
+  html,body { height:100%; }
+  body { margin:0;background:var(--bg);color:var(--text);font-family:var(--font);
+         display:flex;flex-direction:column;overflow:hidden; }
+  a { color:var(--acc2);text-decoration:none; } a:hover { color:var(--acc); }
+  button { font-family:var(--font);cursor:pointer; }
+  ::selection { background:rgba(217,164,65,.28); }
+  :focus-visible { outline:2px solid var(--acc);outline-offset:2px; }
+
+  /* header */
+  .bar { display:flex;align-items:center;gap:16px;height:52px;padding:0 18px;
+         background:var(--surf);flex:none; }
+  .brand { display:flex;align-items:center;gap:9px; }
+  .mark { width:22px;height:22px;border:1px solid var(--acc);border-radius:4px;
+          display:grid;place-items:center;font:600 9.5px var(--font);color:var(--acc); }
+  .word { font:600 13px var(--font);letter-spacing:.13em;text-transform:uppercase; }
+  .vr { width:1px;height:18px;background:var(--line); }
+  .co { font:500 12px var(--font);letter-spacing:.08em;text-transform:uppercase;color:var(--acc2); }
+  .spacer { margin-left:auto; }
+  .who { font:400 11px var(--font);color:var(--dim); }
+  .avatar { width:24px;height:24px;border-radius:50%;border:1px solid var(--acc);
+            display:grid;place-items:center;font:500 9.5px var(--font);color:var(--acc); }
+  .hairline { height:1px;flex:none;
+    background:linear-gradient(90deg,transparent,var(--line) 48px,var(--line) calc(100% - 48px),transparent); }
+  .imp { background:var(--stopped);color:var(--bg);font:500 10.5px var(--font);
+         text-align:center;padding:5px;letter-spacing:.04em; }
+
+  /* kpi + filters */
+  .head { padding:16px 18px 0;flex:none; }
+  h1 { font:500 18px var(--font);margin:0; }
+  .headmeta { font:400 11.5px var(--font);color:var(--dim);margin-top:4px; }
+  .kpis { display:flex;gap:26px;padding:14px 18px 12px;flex:none;flex-wrap:wrap; }
+  .kpi-v { font:500 19px var(--font);font-variant-numeric:tabular-nums; }
+  .kpi-k { font:400 9.5px var(--font);letter-spacing:.06em;text-transform:uppercase;
+           color:var(--dim);margin-top:3px; }
+  .filters { display:flex;align-items:center;gap:9px;padding:0 18px 12px;flex:none;flex-wrap:wrap; }
+  select,input[type=search],input[type=text],textarea,input[type=number],input[type=date] {
+    background:transparent;border:1px solid var(--line);border-radius:4px;color:var(--text);
+    font:400 12px var(--font);padding:7px 9px;font-family:var(--font); }
+  select { cursor:pointer; }
+  select option { background:var(--surf);color:var(--text); }
+  input[type=search] { min-width:200px; }
+  .btn { font:500 11.5px var(--font);color:var(--acc);border:1px solid var(--acc);
+         border-radius:4px;padding:7px 14px;background:transparent; }
+  .btn:hover { background:rgba(217,164,65,.12); }
+  .btn-ghost { color:var(--dim);border-color:var(--line); }
+  .btn-ghost:hover { color:var(--text);border-color:var(--muted);background:transparent; }
+
+  /* table */
+  .wrap { flex:1;min-height:0;overflow:auto;padding:0 18px 24px; }
+  table { width:100%;border-collapse:collapse; }
+  th { position:sticky;top:0;background:var(--bg);z-index:2;text-align:left;
+       font:600 8.5px var(--font);letter-spacing:.13em;text-transform:uppercase;
+       color:var(--acc2);padding:0 10px 9px;white-space:nowrap; }
+  th.num,td.num { text-align:right;font-variant-numeric:tabular-nums; }
+  td { padding:10px;border-top:1px solid var(--whisper);font:400 12.5px var(--font);
+       vertical-align:top; }
+  tbody tr { cursor:pointer; }
+  tbody tr:hover td { background:var(--whisper); }
+  .ro { font-weight:500;font-variant-numeric:tabular-nums; }
+  .sub { font:400 10.5px var(--font);color:var(--dim);margin-top:2px; }
+  .pill { display:inline-flex;align-items:center;gap:6px;font:500 10px var(--font);
+          padding:3px 8px;border-radius:3px;white-space:nowrap;
+          border:1px solid var(--line);color:var(--muted); }
+  .dot { width:6px;height:6px;border-radius:50%;flex:none; }
+  .flag { font:500 9px var(--font);letter-spacing:.06em;text-transform:uppercase;
+          padding:2px 6px;border-radius:3px;margin-left:6px; }
+  .empty { padding:60px 20px;text-align:center;color:var(--dim);
+           font:400 13px var(--font);line-height:1.7; }
+
+  /* drawer */
+  .scrim { position:fixed;inset:0;background:rgba(11,16,25,.6);z-index:10;display:none; }
+  .scrim.open { display:block; }
+  .drawer { position:fixed;top:0;right:0;bottom:0;width:min(560px,100vw);background:var(--bg);
+            border-left:1px solid var(--line);z-index:11;transform:translateX(100%);
+            transition:transform .18s ease;display:flex;flex-direction:column; }
+  .drawer.open { transform:none; }
+  .dhead { padding:16px 18px 14px;border-bottom:1px solid var(--whisper);flex:none;
+           display:flex;align-items:flex-start;gap:12px; }
+  .dbody { flex:1;overflow-y:auto;padding:0 18px 28px; }
+  .sec { font:600 8.5px var(--font);letter-spacing:.13em;text-transform:uppercase;
+         color:var(--acc2);padding:20px 0 9px; }
+  .grid2 { display:grid;grid-template-columns:1fr 1fr;gap:12px 18px; }
+  .f-l { font:400 9.5px var(--font);letter-spacing:.05em;text-transform:uppercase;color:var(--dim); }
+  .f-v { font:400 12.5px var(--font);margin-top:3px; }
+  .close { background:none;border:none;color:var(--dim);font-size:20px;line-height:1;padding:2px 6px; }
+  .close:hover { color:var(--text); }
+  .log { border-top:1px solid var(--whisper);padding:10px 0; }
+  .log-b { font:400 12px var(--font);line-height:1.5; }
+  .log-m { font:400 10px var(--font);color:var(--dim);margin-top:3px; }
+  .msg { font:400 11.5px var(--font);line-height:1.5;padding:9px 11px;border-radius:4px;
+         margin:12px 0;display:none; }
+  .msg.err { display:block;color:var(--stopped);border:1px solid var(--stopped); }
+  .msg.ok { display:block;color:var(--done);border:1px solid var(--done); }
+  textarea { width:100%;min-height:64px;resize:vertical; }
+  .stack { display:flex;flex-direction:column;gap:9px; }
+  .row { display:flex;gap:9px;align-items:center;flex-wrap:wrap; }
+</style>
+</head>
+<body>
+
+<div id="imp" class="imp" style="display:none"></div>
+
+<div class="bar">
+  <div class="brand"><div class="mark">ES</div><div class="word">Easy Shop</div></div>
+  <div class="vr"></div>
+  <div class="co" id="coName">—</div>
+  <div class="spacer"></div>
+  <a href="/platform.html" id="platformLink" style="display:none;font:400 11px var(--font);color:var(--dim)">Platform</a>
+  <div class="who" id="whoami">—</div>
+  <div class="avatar" id="avatar">—</div>
+  <button class="btn btn-ghost" id="signout" style="padding:5px 10px">Sign out</button>
+</div>
+<div class="hairline"></div>
+
+<div class="head">
+  <h1>Repair orders</h1>
+  <div class="headmeta" id="headmeta">Loading…</div>
+</div>
+
+<div class="kpis" id="kpis"></div>
+
+<div class="filters">
+  <select id="fGroup"><option value="">All stages</option></select>
+  <select id="fStatus"><option value="">All statuses</option></select>
+  <select id="fSort">
+    <option value="days">Longest in shop</option>
+    <option value="recent">Most recent</option>
+    <option value="ro">RO number</option>
+    <option value="status">Status</option>
+  </select>
+  <input type="search" id="fSearch" placeholder="RO, customer, VIN, plate">
+  <label class="row" style="font:400 11.5px var(--font);color:var(--dim);gap:5px">
+    <input type="checkbox" id="fClosed"> Closed files
+  </label>
+  <button class="btn btn-ghost" id="refresh">Refresh</button>
+  <button class="btn" id="newRo">New RO</button>
+</div>
+
+<div class="wrap">
+  <table>
+    <thead><tr id="thead"></tr></thead>
+    <tbody id="tbody"></tbody>
+  </table>
+  <div class="empty" id="empty" style="display:none"></div>
+</div>
+
+<div class="scrim" id="scrim"></div>
+<aside class="drawer" id="drawer" aria-hidden="true">
+  <div class="dhead">
+    <div style="min-width:0;flex:1">
+      <div style="font:500 16px var(--font)" id="dRo">—</div>
+      <div class="sub" id="dSub">—</div>
+    </div>
+    <button class="close" id="dClose" aria-label="Close">&times;</button>
+  </div>
+  <div class="dbody" id="dBody"></div>
+</aside>
+
+<script>
+(function () {
+  var ME = null, CFG = null, FILES = [], STATUSES = [], GROUPS = [], OPEN = null;
+
+  function $(id) { return document.getElementById(id); }
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c];
+    });
+  }
+  function money(cents) {
+    if (cents == null) return '—';
+    return '$' + (cents / 100).toLocaleString('en-US', { maximumFractionDigits: 0 });
+  }
+  function when(iso) {
+    if (!iso) return '—';
+    var d = new Date(iso);
+    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + ' ' +
+           d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+  }
+  function api(path, opts) {
+    return fetch(path, Object.assign({ headers: { 'content-type': 'application/json' } }, opts || {}))
+      .then(function (r) {
+        if (r.status === 401) { location.href = '/'; throw new Error('signed out'); }
+        return r.json().then(function (j) {
+          if (!r.ok) throw new Error(j.error || 'Request failed');
+          return j;
+        });
+      });
+  }
+  function initials(name) {
+    return String(name || '?').split(/\s+/).map(function (w) { return w[0]; })
+      .join('').slice(0, 2).toUpperCase();
+  }
+  var AGE = { ok: 'var(--done)', yellow: 'var(--blocked)', red: 'var(--stopped)' };
+  var KIND = { milestone: 'var(--move)', queue: 'var(--blocked)', active: 'var(--acc)', complete: 'var(--done)' };
+
+  /* ---------------------------------------------------------------- boot */
+
+  api('/api/me').then(function (me) {
+    ME = me;
+    if (!me.company) {
+      if (me.isPlatformOwner) { location.href = '/platform.html'; return; }
+      document.body.innerHTML = '<div class="empty">Your account is not attached to a shop.</div>';
+      return;
+    }
+    $('coName').textContent = me.company.name;
+    $('whoami').textContent = me.user.name + ' · ' + (me.roleLabel || '');
+    $('avatar').textContent = initials(me.user.name);
+    if (me.isPlatformOwner) $('platformLink').style.display = '';
+    if (me.impersonating) {
+      $('imp').style.display = '';
+      $('imp').textContent = 'You are inside ' + me.company.name + ' as the platform owner. Everything you do is recorded.';
+    }
+    return api('/api/config');
+  }).then(function (cfg) {
+    if (!cfg) return;
+    CFG = cfg;
+    STATUSES = cfg.statuses;
+    GROUPS = cfg.groups;
+    var g = $('fGroup');
+    cfg.groups.forEach(function (gr) {
+      var o = document.createElement('option');
+      o.value = gr.group_id; o.textContent = gr.label; g.appendChild(o);
+    });
+    fillStatusFilter('');
+    buildHead();
+    return load();
+  }).catch(function (e) {
+    if (e.message !== 'signed out') console.error(e);
+  });
+
+  function fillStatusFilter(groupId) {
+    var s = $('fStatus');
+    s.innerHTML = '<option value="">All statuses</option>';
+    STATUSES.filter(function (st) { return !groupId || st.group_id === groupId; })
+      .forEach(function (st) {
+        var o = document.createElement('option');
+        o.value = st.slot_id; o.textContent = st.label; s.appendChild(o);
+      });
+  }
+
+  /* --------------------------------------------------------------- table */
+
+  function columns() {
+    var cols = [
+      { k: 'ro', t: 'RO' },
+      { k: 'customer', t: 'Customer' },
+      { k: 'vehicle', t: 'Vehicle' },
+      { k: 'status', t: 'Status' },
+      { k: 'assigned', t: 'Assigned' },
+      { k: 'days', t: 'Days', num: true },
+      { k: 'promised', t: 'Promised' }
+    ];
+    if (ME.caps.money) cols.push({ k: 'amount', t: 'Amount', num: true });
+    return cols;
+  }
+
+  function buildHead() {
+    $('thead').innerHTML = columns().map(function (c) {
+      return '<th' + (c.num ? ' class="num"' : '') + '>' + esc(c.t) + '</th>';
+    }).join('');
+  }
+
+  function load() {
+    var closed = $('fClosed').checked ? '?closed=1' : '';
+    return Promise.all([api('/api/board' + closed), api('/api/board/summary')])
+      .then(function (r) {
+        FILES = r[0].files;
+        renderKpis(r[1]);
+        render();
+      });
+  }
+
+  function renderKpis(s) {
+    var items = [
+      { v: s.inList, k: 'in list' },
+      { v: s.laborHours.toFixed(1), k: 'labour hours' },
+      { v: s.avgDays, k: 'avg days' },
+      { v: s.onHold, k: 'on hold' },
+      { v: s.pastTarget, k: 'past target' },
+      { v: s.stalled, k: 'stalled' }
+    ];
+    $('kpis').innerHTML = items.map(function (i) {
+      return '<div><div class="kpi-v">' + esc(i.v) + '</div><div class="kpi-k">' + esc(i.k) + '</div></div>';
+    }).join('');
+  }
+
+  function filtered() {
+    var g = $('fGroup').value, st = $('fStatus').value;
+    var q = $('fSearch').value.trim().toLowerCase();
+    var out = FILES.filter(function (f) {
+      if (g && f.group !== g) return false;
+      if (st && f.statusSlot !== st) return false;
+      if (q) {
+        var hay = [f.ro, f.customer, f.vehicle, f.vin, f.insurer].join(' ').toLowerCase();
+        if (hay.indexOf(q) < 0) return false;
+      }
+      return true;
+    });
+    var sort = $('fSort').value;
+    out.sort(function (a, b) {
+      if (sort === 'days') return b.daysInShop - a.daysInShop;
+      if (sort === 'ro') return String(a.ro).localeCompare(String(b.ro));
+      if (sort === 'status') return String(a.status || '').localeCompare(String(b.status || ''));
+      return new Date(b.openedAt) - new Date(a.openedAt);
+    });
+    return out;
+  }
+
+  function render() {
+    var rows = filtered();
+    $('headmeta').textContent = rows.length + ' of ' + FILES.length + ' files' +
+      ($('fClosed').checked ? ' · closed, last 90 days' : ' · open');
+
+    if (!rows.length) {
+      $('tbody').innerHTML = '';
+      $('empty').style.display = '';
+      $('empty').innerHTML = FILES.length
+        ? 'Nothing matches those filters.'
+        : 'No repair orders yet.<br>Use <strong>New RO</strong> to write the first one.';
+      return;
+    }
+    $('empty').style.display = 'none';
+
+    $('tbody').innerHTML = rows.map(function (f) {
+      var assigned = Object.keys(f.assigned || {}).map(function (k) { return f.assigned[k]; })
+        .filter(Boolean).join(', ');
+      var flags = '';
+      if (f.onHold) flags += '<span class="flag" style="color:var(--stopped);border:1px solid var(--stopped)">Hold</span>';
+      if (f.partsWaiting) flags += '<span class="flag" style="color:var(--blocked);border:1px solid var(--blocked)">Parts</span>';
+      if (f.supplementsOpen) flags += '<span class="flag" style="color:var(--move);border:1px solid var(--move)">Supp</span>';
+
+      var cells = [
+        '<td><div class="ro">' + esc(f.ro) + '</div><div class="sub">' + esc(f.groupLabel || '') + '</div></td>',
+        '<td>' + esc(f.customer || '—') + '<div class="sub">' + esc(f.insurer || '') + '</div></td>',
+        '<td>' + esc(f.vehicle || '—') + '<div class="sub">' + esc(f.color || '') + '</div></td>',
+        '<td><span class="pill"><span class="dot" style="background:' + (KIND[f.kind] || 'var(--dim)') + '"></span>' +
+          esc(f.status || 'No status') + '</span>' + flags + '</td>',
+        '<td>' + esc(assigned || '—') + '</td>',
+        '<td class="num" style="color:' + AGE[f.age] + '">' + f.daysInShop + '</td>',
+        '<td>' + (f.promisedAt ? esc(new Date(f.promisedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })) : '—') + '</td>'
+      ];
+      if (ME.caps.money) cells.push('<td class="num">' + money(f.amount_cents) + '</td>');
+      return '<tr data-id="' + f.id + '">' + cells.join('') + '</tr>';
+    }).join('');
+
+    Array.prototype.forEach.call($('tbody').querySelectorAll('tr'), function (tr) {
+      tr.addEventListener('click', function () { openRo(Number(tr.dataset.id)); });
+    });
+  }
+
+  /* -------------------------------------------------------------- drawer */
+
+  function openRo(id) {
+    OPEN = id;
+    $('scrim').classList.add('open');
+    $('drawer').classList.add('open');
+    $('drawer').setAttribute('aria-hidden', 'false');
+    $('dBody').innerHTML = '<div class="empty">Loading…</div>';
+
+    api('/api/ro/' + id).then(function (d) {
+      var r = d.ro;
+      $('dRo').textContent = r.ro_number;
+      $('dSub').textContent = [r.year, r.make, r.model].filter(Boolean).join(' ') +
+        (r.customer_name ? ' · ' + r.customer_name : '');
+      renderDrawer(d);
+    }).catch(function (e) {
+      $('dBody').innerHTML = '<div class="empty">' + esc(e.message) + '</div>';
+    });
+  }
+
+  function closeRo() {
+    OPEN = null;
+    $('scrim').classList.remove('open');
+    $('drawer').classList.remove('open');
+    $('drawer').setAttribute('aria-hidden', 'true');
+  }
+
+  function field(label, value) {
+    return '<div><div class="f-l">' + esc(label) + '</div><div class="f-v">' + esc(value == null || value === '' ? '—' : value) + '</div></div>';
+  }
+
+  function renderDrawer(d) {
+    var r = d.ro, h = [];
+
+    h.push('<div class="sec">Status</div>');
+    h.push('<div class="row" style="margin-bottom:10px">');
+    h.push('<span class="pill"><span class="dot" style="background:' + (KIND[r.status_kind] || 'var(--dim)') + '"></span>' +
+      esc(r.status_label || 'No status') + '</span>');
+    h.push('<span class="sub">' + esc(r.group_label || '') + '</span>');
+    if (r.on_hold) h.push('<span class="flag" style="color:var(--stopped);border:1px solid var(--stopped)">On hold · ' + esc(r.hold_reason || '') + '</span>');
+    h.push('</div>');
+
+    h.push('<div class="stack">');
+    h.push('<select id="newStatus"><option value="">Select a new status…</option>' +
+      GROUPS.map(function (g) {
+        var opts = STATUSES.filter(function (s) { return s.group_id === g.group_id; })
+          .map(function (s) { return '<option value="' + esc(s.slot_id) + '">' + esc(s.label) + '</option>'; }).join('');
+        return opts ? '<optgroup label="' + esc(g.label) + '">' + opts + '</optgroup>' : '';
+      }).join('') + '</select>');
+    h.push('<textarea id="newNote" placeholder="Add a note (optional)"></textarea>');
+    h.push('<div class="row"><button class="btn" id="saveStatus">Save</button></div>');
+    h.push('</div>');
+    h.push('<div class="msg" id="dMsg"></div>');
+
+    h.push('<div class="sec">File</div><div class="grid2">');
+    h.push(field('Customer', r.customer_name));
+    h.push(field('Phone', r.customer_phone));
+    h.push(field('Insurer', r.insurer_name));
+    h.push(field('Claim', r.claim_number));
+    h.push(field('VIN', r.vin));
+    h.push(field('Plate', r.plate));
+    h.push(field('Opened', when(r.opened_at)));
+    h.push(field('Promised', r.promised_at ? new Date(r.promised_at).toLocaleDateString() : null));
+    h.push(field('Repair path', r.repair_path));
+    h.push(field('Labour hours', r.labor_hours));
+    if (ME.caps.money) {
+      h.push(field('Amount', money(r.amount_cents)));
+      h.push(field('Deductible', money(r.deductible_cents)));
+    }
+    h.push('</div>');
+
+    var assignKeys = Object.keys(d.assigned || {});
+    if (assignKeys.length) {
+      h.push('<div class="sec">Assigned</div><div class="grid2">');
+      assignKeys.forEach(function (k) { h.push(field(k, d.assigned[k].name)); });
+      h.push('</div>');
+    }
+
+    if (d.parts && d.parts.length) {
+      h.push('<div class="sec">Parts</div>');
+      d.parts.forEach(function (p) {
+        h.push('<div class="log"><div class="log-b">' + esc(p.description) + '</div>' +
+          '<div class="log-m">' + esc(p.state) + ' · qty ' + p.qty +
+          (p.vendor_name ? ' · ' + esc(p.vendor_name) : '') +
+          (p.eta ? ' · ETA ' + new Date(p.eta).toLocaleDateString() : '') + '</div></div>');
+      });
+    }
+
+    if (d.supplements && d.supplements.length) {
+      h.push('<div class="sec">Supplements</div>');
+      d.supplements.forEach(function (s) {
+        h.push('<div class="log"><div class="log-b">Supplement ' + s.seq + ' · ' + esc(s.state) + '</div>' +
+          '<div class="log-m">' + (ME.caps.money ? 'requested ' + money(s.requested_cents) + ' · approved ' + money(s.approved_cents) + ' · ' : '') +
+          (s.sent_at ? 'sent ' + new Date(s.sent_at).toLocaleDateString() : 'not sent') + '</div></div>');
+      });
+    }
+
+    h.push('<div class="sec">Notes and history</div>');
+    var log = (d.notes || []).map(function (n) {
+      return { at: n.created_at, body: n.body, who: n.user_name, kind: n.kind };
+    });
+    if (!log.length) h.push('<div class="sub">Nothing recorded yet.</div>');
+    log.forEach(function (n) {
+      h.push('<div class="log"><div class="log-b"' +
+        (n.kind === 'auto' ? ' style="color:var(--muted)"' : '') + '>' + esc(n.body) + '</div>' +
+        '<div class="log-m">' + esc(n.who || 'system') + ' · ' + when(n.at) + '</div></div>');
+    });
+
+    $('dBody').innerHTML = h.join('');
+
+    $('saveStatus').addEventListener('click', function () {
+      var slot = $('newStatus').value, note = $('newNote').value.trim();
+      var msg = $('dMsg');
+      if (!slot && !note) { msg.textContent = 'Pick a status or write a note.'; msg.className = 'msg err'; return; }
+      api('/api/ro/' + OPEN + '/status', {
+        method: 'POST', body: JSON.stringify({ slot: slot || undefined, note: note || undefined })
+      }).then(function () {
+        msg.textContent = 'Saved.'; msg.className = 'msg ok';
+        return load().then(function () { openRo(OPEN); });
+      }).catch(function (e) {
+        msg.textContent = e.message; msg.className = 'msg err';
+      });
+    });
+  }
+
+  /* --------------------------------------------------------------- wiring */
+
+  $('fGroup').addEventListener('change', function () { fillStatusFilter(this.value); render(); });
+  $('fStatus').addEventListener('change', render);
+  $('fSort').addEventListener('change', render);
+  $('fSearch').addEventListener('input', render);
+  $('fClosed').addEventListener('change', function () { load(); });
+  $('refresh').addEventListener('click', function () { load(); });
+  $('scrim').addEventListener('click', closeRo);
+  $('dClose').addEventListener('click', closeRo);
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeRo(); });
+
+  $('newRo').addEventListener('click', function () { location.href = '/new-ro.html'; });
+
+  $('signout').addEventListener('click', function () {
+    api('/api/auth/logout', { method: 'POST' }).then(function () { location.href = '/'; });
+  });
+})();
+</script>
+</body>
+</html>
