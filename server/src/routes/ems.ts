@@ -191,9 +191,8 @@ export async function registerEms(app: FastifyInstance): Promise<void> {
       let created = false;
 
       if (!roId && body.createNew) {
-        const roNumber = (imp.ro_number as string | null)
-          ?? ((imp.vin as string | null) ?? '').slice(-6)
-          ?? null;
+        const vinTail = ((imp.vin as string | null) ?? '').slice(-6);
+        const roNumber = (imp.ro_number as string | null) || vinTail || null;
         if (!roNumber) throw new Error('The estimate has no RO number and no VIN to build one from.');
 
         const [dup] = await c.query<RowDataPacket[]>(

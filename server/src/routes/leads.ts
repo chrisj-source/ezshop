@@ -243,8 +243,8 @@ export async function registerLeads(app: FastifyInstance): Promise<void> {
       const text = String(lead.vehicle_text ?? '').split(' ');
       const [vh] = await c.query<ResultSetHeader>(
         `INSERT INTO vehicles (client_id, vin, year, make, model) VALUES (?, ?, ?, ?, ?)`,
-        [cl.insertId, b.vin ?? null, b.year ?? Number(text[0]) || null,
-         b.make ?? text[1] ?? null, b.model ?? text.slice(2).join(' ') || null]);
+        [cl.insertId, b.vin ?? null, b.year ?? (Number(text[0]) || null),
+         b.make ?? text[1] ?? null, b.model ?? (text.slice(2).join(' ') || null)]);
 
       const [r] = await c.query<ResultSetHeader>(
         `INSERT INTO repair_orders
