@@ -73,11 +73,13 @@
 (function () {
   var api = Shell.api, esc = Shell.esc;
   var ME = null, CFG = null, PEOPLE = null, GROUPS = null, ROLES = [];
+  var CLIENTS = [], CTYPES = null, CKIND = 'wholesale';
   var TAB = 'statuses';
 
   var TABS = [
     { k: 'statuses', t: 'Statuses' },
     { k: 'lanes', t: 'Lanes' },
+    { k: 'clients', t: 'Clients' },
     { k: 'people', t: 'People' },
     { k: 'groups', t: 'Notification groups' },
     { k: 'settings', t: 'Settings' }
@@ -105,13 +107,17 @@
       api('/api/config'),
       api('/api/config/people'),
       api('/api/admin/notification-groups'),
-      api('/api/admin/roles')
+      api('/api/admin/roles'),
+      api('/api/clients?active=all'),
+      api('/api/client-types')
     ]);
   }).then(function (r) {
     if (!r) return;
     CFG = r[0]; PEOPLE = r[1]; GROUPS = r[2]; ROLES = r[3].roles;
+    CLIENTS = r[4].clients; CTYPES = r[5];
     $('headmeta').textContent = CFG.statuses.length + ' statuses · ' + CFG.lanes.length +
-      ' lanes · ' + PEOPLE.people.length + ' people · ' + GROUPS.groups.length + ' notification groups';
+      ' lanes · ' + PEOPLE.people.length + ' people · ' +
+      CLIENTS.filter(function (c) { return c.kind === 'wholesale' && c.active; }).length + ' wholesale accounts';
     renderTabs();
     render();
   }).catch(function (e) { if (e.message !== 'signed out') console.error(e); });
@@ -129,6 +135,7 @@
   function render() {
     if (TAB === 'statuses') return renderStatuses();
     if (TAB === 'lanes') return renderLanes();
+    if (TAB === 'clients') return renderClients();
     if (TAB === 'people') return renderPeople();
     if (TAB === 'groups') return renderGroups();
     if (TAB === 'settings') return renderSettings();
@@ -245,6 +252,168 @@
           method: 'PATCH', body: JSON.stringify({ enabled: !lane.enabled })
         }).then(reloadConfig).catch(fail);
       });
+    });
+  }
+
+  /* ------------------------------------------------------------- clients */
+
+  function renderClients() {
+    var WT = {};
+    CTYPES.wholesaleTypes.forEach(function (t) { WT[t.key] = t.label; });
+
+    var h = ['<div class="msg" id="msg"></div>'];
+    h.push('<div class="row" style="padding-top:6px">' +
+      CTYPES.kinds.map(function (k) {
+        return '<button class="chip' + (CKIND === k.key ? ' on' : '') + '" data-ckind="' + esc(k.key) + '">' +
+          esc(k.label) + '</button>';
+      }).join('') + '</div>');
+
+    var isWholesale = CKIND === 'wholesale';
+    var isInsurance = CKIND === 'insurance';
+
+    h.push('<div class="groupnote" style="padding-top:10px">' + (isWholesale
+      ? 'Dealers, hail companies, auctions and fleets. These have to exist before a car can be checked in against them — the mobile check-in picks from this list.'
+      : isInsurance
+        ? 'Carriers you write for. Marking one DRP flags it on the board.'
+        : 'Retail customers are created as cars come in; this is the history.') + '</div>');
+
+    h.push('<div class="card"><div class="groupname">Add ' +
+      (isWholesale ? 'a wholesale account' : isInsurance ? 'a carrier' : 'a customer') + '</div>' +
+      '<div class="grid3" style="margin-top:12px">' +
+      '<div><label class="fl">Name</label><input id="cName" placeholder="' +
+      (isWholesale ? 'Bob Smith Chevrolet' : isInsurance ? 'State Farm' : 'Customer name') + '"></div>' +
+      (isWholesale
+        ? '<div><label class="fl">Account type</label><select id="cWType">' +
+          CTYPES.wholesaleTypes.map(function (t) {
+            return '<option value="' + esc(t.key) + '">' + esc(t.label) + '</option>';
+          }).join('') + '</select></div>' +
+          '<div><label class="fl">Terms</label><select id="cTerms">' +
+          CTYPES.terms.map(function (t) { return '<option value="' + esc(t) + '">' + esc(t) + '</option>'; }).join('') +
+          '</select></div>'
+        : '') +
+      '<div><label class="fl">Contact</label><input id="cContact"></div>' +
+      '<div><label class="fl">Phone</label><input id="cPhone" type="tel"></div>' +
+      '<div><label class="fl">Email</label><input id="cEmail" type="email"></div>' +
+      '<div><label class="fl">City</label><input id="cCity"></div>' +
+      '<div><label class="fl">State</label><input id="cState" maxlength="2"></div>' +
+      (isInsurance
+        ? '<div><label class="fl">Adjuster desk</label><input id="cDesk"></div>'
+        : '') +
+      '<div style="align-self:end"><button class="btn btn-solid" id="addClient">Add</button></div>' +
+      '</div></div>');
+
+    var rows = CLIENTS.filter(function (c) { return c.kind === CKIND; });
+    h.push('<div class="grouphead"><div class="groupname">' + rows.length + ' ' +
+      (isWholesale ? 'account' : isInsurance ? 'carrier' : 'customer') + (rows.length === 1 ? '' : 's') +
+      '</div></div>');
+
+    if (!rows.length) {
+      h.push('<div class="groupnote">Nothing here yet.</div>');
+    } else {
+      h.push('<div class="peoplerow" style="border:none"><div class="f-l">Name</div>' +
+        (isWholesale ? '<div class="f-l">Type</div><div class="f-l">Terms</div>' :
+         isInsurance ? '<div class="f-l">Adjuster desk</div><div class="f-l">DRP</div>' :
+         '<div class="f-l">Phone</div><div class="f-l">City</div>') +
+        '<div class="f-l">Files</div><div class="f-l">Active</div></div>');
+
+      rows.forEach(function (c) {
+        h.push('<div class="peoplerow" data-client="' + c.id + '">' +
+          '<div><input class="c-name" value="' + esc(c.name) + '">' +
+          '<div class="sub">' + esc([c.contact_name, c.phone].filter(Boolean).join(' · ') ||
+            (c.platform_locked ? 'managed by the platform' : 'no contact')) + '</div></div>' +
+          (isWholesale
+            ? '<select class="c-wtype">' + CTYPES.wholesaleTypes.map(function (t) {
+                return '<option value="' + esc(t.key) + '"' +
+                  (t.key === c.wholesale_type ? ' selected' : '') + '>' + esc(t.label) + '</option>';
+              }).join('') + '</select>' +
+              '<select class="c-terms"><option value="">—</option>' + CTYPES.terms.map(function (t) {
+                return '<option value="' + esc(t) + '"' + (t === c.terms ? ' selected' : '') + '>' +
+                  esc(t) + '</option>';
+              }).join('') + '</select>'
+            : isInsurance
+              ? '<input class="c-desk" value="' + esc(c.adjuster_desk || '') + '">' +
+                '<button class="chip' + (c.is_drp ? ' on' : '') + '" data-drp="' + c.id +
+                '" data-on="' + (c.is_drp ? 1 : 0) + '">' + (c.is_drp ? 'DRP' : 'No') + '</button>'
+              : '<div class="sub">' + esc(c.phone || '—') + '</div>' +
+                '<div class="sub">' + esc([c.city, c.state].filter(Boolean).join(', ') || '—') + '</div>') +
+          '<div class="sub">' + c.open_files + ' open · ' + c.ytd_files + ' YTD</div>' +
+          '<button class="chip' + (c.active ? ' on' : '') + '" data-cactive="' + c.id +
+          '" data-on="' + (c.active ? 1 : 0) + '">' + (c.active ? 'Active' : 'Off') + '</button>' +
+          '</div>');
+      });
+
+      h.push('<div class="row" style="margin-top:20px">' +
+        '<button class="btn btn-solid" id="saveClients">Save changes</button></div>');
+    }
+
+    $('pane').innerHTML = h.join('');
+
+    Array.prototype.forEach.call(document.querySelectorAll('[data-ckind]'), function (b) {
+      b.addEventListener('click', function () { CKIND = b.dataset.ckind; renderClients(); });
+    });
+
+    $('addClient').addEventListener('click', function () {
+      var name = $('cName').value.trim();
+      if (!name) return say('A name is required.', 'err');
+      var body = {
+        kind: CKIND,
+        name: name,
+        contactName: $('cContact').value.trim() || undefined,
+        phone: $('cPhone').value.trim() || undefined,
+        email: $('cEmail').value.trim() || undefined,
+        city: $('cCity').value.trim() || undefined,
+        state: $('cState').value.trim().toUpperCase() || undefined
+      };
+      if (isWholesale) {
+        body.wholesaleType = $('cWType').value;
+        body.terms = $('cTerms').value;
+      }
+      if (isInsurance && $('cDesk')) body.adjusterDesk = $('cDesk').value.trim() || undefined;
+
+      api('/api/clients', { method: 'POST', body: JSON.stringify(body) })
+        .then(function () { say('Added.', 'ok'); return reloadClients(); })
+        .catch(fail);
+    });
+
+    Array.prototype.forEach.call(document.querySelectorAll('[data-cactive], [data-drp]'), function (b) {
+      b.addEventListener('click', function () {
+        var on = b.dataset.on !== '1';
+        b.dataset.on = on ? '1' : '0';
+        b.classList.toggle('on', on);
+        if (b.dataset.drp) b.textContent = on ? 'DRP' : 'No';
+        else b.textContent = on ? 'Active' : 'Off';
+      });
+    });
+
+    var save = $('saveClients');
+    if (save) save.addEventListener('click', function () {
+      var jobs = [];
+      Array.prototype.forEach.call(document.querySelectorAll('[data-client]'), function (row) {
+        var id = Number(row.dataset.client);
+        var was = CLIENTS.filter(function (c) { return c.id === id; })[0];
+        var body = {};
+        var name = row.querySelector('.c-name').value.trim();
+        if (name && name !== was.name) body.name = name;
+
+        var wt = row.querySelector('.c-wtype');
+        if (wt && wt.value !== was.wholesale_type) body.wholesaleType = wt.value;
+        var tm = row.querySelector('.c-terms');
+        if (tm && tm.value !== (was.terms || '')) body.terms = tm.value || null;
+        var dk = row.querySelector('.c-desk');
+        if (dk && dk.value.trim() !== (was.adjuster_desk || '')) body.adjusterDesk = dk.value.trim() || null;
+
+        var act = row.querySelector('[data-cactive]');
+        if (act && (act.dataset.on === '1') !== !!was.active) body.active = act.dataset.on === '1';
+        var drp = row.querySelector('[data-drp]');
+        if (drp && (drp.dataset.on === '1') !== !!was.is_drp) body.isDrp = drp.dataset.on === '1';
+
+        if (Object.keys(body).length) jobs.push({ id: id, body: body });
+      });
+
+      if (!jobs.length) return say('Nothing changed.', 'ok');
+      Promise.all(jobs.map(function (j) {
+        return api('/api/clients/' + j.id, { method: 'PATCH', body: JSON.stringify(j.body) });
+      })).then(function () { say('Saved.', 'ok'); return reloadClients(); }).catch(fail);
     });
   }
 
@@ -528,6 +697,9 @@
   function fail(e) { say(e.message, 'err'); }
   function reloadConfig() { return api('/api/config').then(function (c) { CFG = c; render(); }); }
   function reloadPeople() { return api('/api/config/people').then(function (p) { PEOPLE = p; renderPeople(); }); }
+  function reloadClients() {
+    return api('/api/clients?active=all').then(function (d) { CLIENTS = d.clients; renderClients(); });
+  }
   function reloadGroups() {
     return api('/api/admin/notification-groups').then(function (g) { GROUPS = g; renderGroups(); });
   }

@@ -18,9 +18,10 @@
   .crumb { flex:1; height:3px; border-radius:2px; background:var(--line); }
   .crumb.done { background:var(--acc); }
   .choices { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:16px; }
+  .choices.one { grid-template-columns:1fr; }
   .choice {
     background:transparent; border:1px solid var(--line); border-radius:6px;
-    padding:16px 12px; color:var(--text); text-align:left; min-height:76px;
+    padding:15px 13px; color:var(--text); text-align:left; min-height:70px;
   }
   .choice:hover, .choice.sel { border-color:var(--acc); }
   .choice.sel { background:rgba(217,164,65,.08); }
@@ -41,6 +42,10 @@
     border:1px solid var(--done); border-radius:6px; padding:12px 13px; margin-top:14px;
     font:400 12px var(--font); line-height:1.6;
   }
+  .acct {
+    border:1px solid var(--acc); border-radius:6px; padding:12px 13px; margin-top:14px;
+    font:400 12px var(--font); line-height:1.55;
+  }
   .photos { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-top:14px; }
   .thumb { position:relative; aspect-ratio:1; border-radius:5px; overflow:hidden; background:var(--surf); }
   .thumb img { width:100%; height:100%; object-fit:cover; }
@@ -58,10 +63,10 @@
     padding:12px 16px calc(12px + var(--safe-b)); display:flex; gap:10px; margin-top:22px;
   }
   .footbar .btn { flex:1; min-height:48px; font-size:13px; }
-  .done { padding:60px 20px; text-align:center; }
+  .done { padding:56px 20px; text-align:center; }
   .donero { font:600 26px var(--font); font-variant-numeric:tabular-nums; margin:10px 0 6px; }
-  .hint { font:400 11px var(--font); color:var(--dim); margin-top:6px; }
-  .suggestion { font:400 11px var(--font); color:var(--acc2); margin-top:6px; cursor:pointer; }
+  .hint { font:400 11px var(--font); color:var(--dim); margin-top:6px; line-height:1.5; }
+  .warn { color:var(--stopped); }
 </style>
 </head>
 <body>
@@ -85,11 +90,32 @@
 <script>
 (function () {
   var api = Shell.api, esc = Shell.esc;
-  var ME = null, STEP = 0, PHOTOS = [], STREAM = null;
-  var D = { jobType: '', roNumber: '', vin: '', year: '', make: '', model: '', color: '',
-            plate: '', plateState: '', mileage: '', customerName: '', phone: '', email: '',
-            clientId: '', insurerName: '', claimNumber: '', dateOfLoss: '', damageNote: '' };
-  var DECODED = null;
+  var ME = null, STEP = 0, PHOTOS = [], STREAM = null, READER = null, SCAN_TIMER = null;
+  var ACCOUNTS = [];
+
+  var D = {
+    payType: '', clientId: '', droppedBy: '',
+    jobType: '', roNumber: '',
+    vin: '', year: '', make: '', model: '', color: '', plate: '', plateState: '', mileage: '',
+    customerName: '', phone: '', email: '', insurerName: '', claimNumber: '', dateOfLoss: '',
+    damageNote: ''
+  };
+
+  /* getUserMedia needs a secure origin; only phones have a rear camera worth
+     pointing at a door jamb. Elsewhere the scan button is not rendered. */
+  var HAS_MEDIA = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+  var NATIVE_READER = 'BarcodeDetector' in window;
+  var SECURE = window.isSecureContext || location.protocol === 'https:' ||
+               location.hostname === 'localhost';
+  var TOUCH = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
+  var CAN_SCAN = HAS_MEDIA && SECURE && TOUCH;
+  var ZXING = null, ZXING_LOADING = null;
+
+  var PAYS = [
+    { k: 'wholesale', t: 'Wholesale', n: 'A dealer, hail company, auction or fleet. Billed to their account.' },
+    { k: 'insurance', t: 'Insurance', n: 'A claim is paying. Claim and adjuster go in at the counter.' },
+    { k: 'retail', t: 'Retail', n: 'The customer is paying out of pocket.' }
+  ];
 
   var JOBS = [
     { k: 'hail', t: 'Hail', n: 'PDR path — scope by panel' },
@@ -100,9 +126,17 @@
     { k: 'undecided', t: 'Not sure yet', n: 'Decide after assessment' }
   ];
 
-  var STEPS = ['Job', 'Vehicle', 'Customer', 'Photos', 'Review'];
+  var WT = { dealer: 'Dealership', hail: 'Hail company', auction: 'Auction', fleet: 'Fleet' };
 
   function $(id) { return document.getElementById(id); }
+
+  /** A wholesale car needs no customer step — the account is the customer. */
+  function steps() {
+    return D.payType === 'wholesale'
+      ? ['pay', 'job', 'vehicle', 'photos', 'review']
+      : ['pay', 'job', 'vehicle', 'customer', 'photos', 'review'];
+  }
+  function stepName() { return steps()[STEP]; }
 
   api('/api/me').then(function (me) {
     ME = me;
@@ -112,27 +146,70 @@
       return null;
     }
     Shell.mount({ me: me, active: 'checkin' });
-    return api('/api/next-ro-number').catch(function () { return {}; });
-  }).then(function (n) {
-    if (!n) return;
-    if (n.suggestion) D.roNumber = n.suggestion;
+    return Promise.all([
+      api('/api/next-ro-number').catch(function () { return {}; }),
+      api('/api/clients?kind=wholesale').catch(function () { return { clients: [] }; })
+    ]);
+  }).then(function (r) {
+    if (!r) return;
+    if (r[0].suggestion) D.roNumber = r[0].suggestion;
+    ACCOUNTS = r[1].clients;
     render();
   }).catch(function (e) { if (e.message !== 'signed out') console.error(e); });
 
-  function crumbs() {
-    $('crumbs').innerHTML = STEPS.map(function (_, i) {
+  function render() {
+    var list = steps();
+    $('crumbs').innerHTML = list.map(function (_, i) {
       return '<div class="crumb' + (i <= STEP ? ' done' : '') + '"></div>';
     }).join('');
-  }
 
-  function render() {
-    crumbs();
     stopCamera();
-    var h = '';
+    var h = '', name = stepName();
 
-    if (STEP === 0) {
+    if (name === 'pay') {
+      h += '<div class="step"><div class="steptitle">Who is paying?</div>' +
+        '<div class="stepnote">This decides how the file is billed and what the counter has to collect.</div>' +
+        '<div class="choices one">' +
+        PAYS.map(function (p) {
+          return '<button class="choice' + (D.payType === p.k ? ' sel' : '') + '" data-pay="' + p.k + '">' +
+            '<div class="choicet">' + esc(p.t) + '</div><div class="choicen">' + esc(p.n) + '</div></button>';
+        }).join('') + '</div>';
+
+      if (D.payType === 'wholesale') {
+        if (!ACCOUNTS.length) {
+          h += '<div class="acct warn">No wholesale accounts set up yet. ' +
+            (ME.caps.admin
+              ? 'Add them in <a href="/admin.html">Admin › Clients</a> before checking wholesale work in.'
+              : 'Ask the owner to add them in Admin › Clients.') + '</div>';
+        } else {
+          h += '<div class="fields"><div>' +
+            '<label class="fl" for="clientId">Account sending the work</label>' +
+            '<select id="clientId"><option value="">Choose an account…</option>' +
+            ACCOUNTS.map(function (a) {
+              return '<option value="' + a.id + '"' + (String(D.clientId) === String(a.id) ? ' selected' : '') +
+                '>' + esc(a.name) + ' · ' + esc(WT[a.wholesale_type] || a.wholesale_type || '') + '</option>';
+            }).join('') + '</select></div>' +
+            '<div><label class="fl" for="droppedBy">Who dropped it off</label>' +
+            '<input id="droppedBy" value="' + esc(D.droppedBy) + '" placeholder="Driver or contact — optional"></div>' +
+            '</div>';
+
+          var picked = ACCOUNTS.filter(function (a) { return String(a.id) === String(D.clientId); })[0];
+          if (picked) {
+            h += '<div class="acct"><strong>' + esc(picked.name) + '</strong><br>' +
+              esc([WT[picked.wholesale_type] || '', picked.terms, picked.contact_name, picked.phone]
+                .filter(Boolean).join(' · ')) +
+              (picked.open_files ? '<br>' + picked.open_files + ' open file' +
+                (picked.open_files === 1 ? '' : 's') + ' already' : '') + '</div>';
+          }
+        }
+      }
+
+      h += '</div>' + foot(null, 'Next');
+    }
+
+    if (name === 'job') {
       h += '<div class="step"><div class="steptitle">What is this car here for?</div>' +
-        '<div class="stepnote">This picks the repair path and the lanes the file will move through.</div>' +
+        '<div class="stepnote">This picks the repair path and the lanes the file moves through.</div>' +
         '<div class="choices">' +
         JOBS.map(function (j) {
           return '<button class="choice' + (D.jobType === j.k ? ' sel' : '') + '" data-job="' + j.k + '">' +
@@ -141,69 +218,82 @@
         '<div class="fields" style="margin-top:18px"><div>' +
         '<label class="fl" for="roNumber">RO number</label>' +
         '<input id="roNumber" value="' + esc(D.roNumber) + '" inputmode="numeric">' +
-        '</div></div></div>' +
-        foot(null, 'Vehicle');
+        '</div></div></div>' + foot('Back', 'Vehicle');
     }
 
-    if (STEP === 1) {
+    if (name === 'vehicle') {
       h += '<div class="step"><div class="steptitle">Vehicle</div>' +
-        '<div class="stepnote">Scan the VIN off the door jamb or windscreen, or type it.</div>' +
+        '<div class="stepnote">Scan the barcode on the door jamb, or type the VIN.</div>' +
         '<div class="vinrow" style="margin-top:14px">' +
         '<input id="vin" value="' + esc(D.vin) + '" maxlength="17" placeholder="VIN" autocapitalize="characters">' +
         '<button class="btn btn-ghost" id="decode">Decode</button></div>' +
-        '<div class="row" style="margin-top:9px"><button class="btn btn-ghost" id="scan">Scan with camera</button></div>' +
-        '<div id="scanArea"></div>' +
-        '<div id="decodeOut"></div>' +
+        (CAN_SCAN
+          ? '<div class="row" style="margin-top:9px"><button class="btn btn-ghost" id="scan">Scan the VIN barcode</button></div>'
+          : '<div class="hint">Scanning needs a phone or tablet with a rear camera.</div>') +
+        '<div id="scanArea"></div><div id="decodeOut"></div>' +
         '<div class="fields two" style="margin-top:16px">' +
         f('year', 'Year', 'number') + f('make', 'Make') + f('model', 'Model') + f('color', 'Colour') +
         f('plate', 'Plate') + f('mileage', 'Mileage', 'number') +
-        '</div></div>' + foot('Job', 'Customer');
+        '</div></div>' + foot('Back', D.payType === 'wholesale' ? 'Photos' : 'Customer');
     }
 
-    if (STEP === 2) {
+    if (name === 'customer') {
       h += '<div class="step"><div class="steptitle">Customer</div>' +
         '<div class="stepnote">Search by phone or name to reuse an existing customer.</div>' +
-        '<div class="fields" style="margin-top:14px">' +
-        '<div><label class="fl" for="custSearch">Find existing</label>' +
+        '<div class="fields" style="margin-top:14px"><div>' +
+        '<label class="fl" for="custSearch">Find existing</label>' +
         '<input id="custSearch" placeholder="Phone or name" autocomplete="off">' +
         '<div id="custResults"></div></div></div>' +
         '<div class="fields two" style="margin-top:6px">' +
         f('customerName', 'Name') + f('phone', 'Phone', 'tel') +
-        f('email', 'Email', 'email') + f('insurerName', 'Insurer') +
-        f('claimNumber', 'Claim number') + f('dateOfLoss', 'Date of loss', 'date') +
+        f('email', 'Email', 'email') +
+        (D.payType === 'insurance' ? f('insurerName', 'Insurer') + f('claimNumber', 'Claim number') +
+          f('dateOfLoss', 'Date of loss', 'date') : '') +
         '</div>' +
         '<div class="fields" style="margin-top:13px"><div>' +
         '<label class="fl" for="damageNote">Damage note</label>' +
         '<textarea id="damageNote" placeholder="What the customer says is wrong">' + esc(D.damageNote) + '</textarea>' +
-        '</div></div></div>' + foot('Vehicle', 'Photos');
+        '</div></div></div>' + foot('Back', 'Photos');
     }
 
-    if (STEP === 3) {
+    if (name === 'photos') {
       h += '<div class="step"><div class="steptitle">Intake photos</div>' +
-        '<div class="stepnote">Four corners, the odometer, and anything already damaged. These file against the RO as intake photos.</div>' +
+        '<div class="stepnote">Four corners, the odometer, and anything already damaged. ' +
+        'On wholesale work these are the record of what arrived.</div>' +
         '<div class="photos">' +
         PHOTOS.map(function (p, i) {
           return '<div class="thumb"><img src="' + p.url + '" alt="">' +
             '<button data-rm="' + i + '" aria-label="Remove">&times;</button></div>';
         }).join('') +
-        '<button class="addphoto" id="addPhoto">Add<br>photo</button>' +
-        '</div><input type="file" id="photoInput" accept="image/*" capture="environment" multiple hidden>' +
+        '<button class="addphoto" id="addPhoto">Add<br>photo</button></div>' +
+        '<input type="file" id="photoInput" accept="image/*" capture="environment" multiple hidden>' +
         '<div class="hint">' + PHOTOS.length + ' photo' + (PHOTOS.length === 1 ? '' : 's') + ' attached</div>' +
-        '</div>' + foot('Customer', 'Review');
+        (D.payType === 'wholesale'
+          ? '<div class="fields" style="margin-top:14px"><div>' +
+            '<label class="fl" for="damageNote">Damage note</label>' +
+            '<textarea id="damageNote" placeholder="What needs doing">' + esc(D.damageNote) + '</textarea>' +
+            '</div></div>'
+          : '') +
+        '</div>' + foot('Back', 'Review');
     }
 
-    if (STEP === 4) {
+    if (name === 'review') {
+      var acct = ACCOUNTS.filter(function (a) { return String(a.id) === String(D.clientId); })[0];
       h += '<div class="step"><div class="steptitle">Check it over</div>' +
         '<div class="stepnote">This creates the repair order at Vehicle Arrived.</div>' +
         '<div class="grid2" style="margin-top:16px">' +
-        kv('RO', D.roNumber) + kv('Job', (JOBS.filter(function (j) { return j.k === D.jobType; })[0] || {}).t) +
-        kv('Vehicle', [D.year, D.make, D.model].filter(Boolean).join(' ')) + kv('Colour', D.color) +
-        kv('VIN', D.vin) + kv('Plate', D.plate) +
-        kv('Customer', D.customerName) + kv('Phone', D.phone) +
-        kv('Insurer', D.insurerName) + kv('Claim', D.claimNumber) +
+        kv('RO', D.roNumber) +
+        kv('Billed to', D.payType === 'wholesale' ? (acct ? acct.name : '—')
+          : D.payType === 'insurance' ? (D.insurerName || 'Insurance') : 'Retail customer') +
+        kv('Job', (JOBS.filter(function (j) { return j.k === D.jobType; })[0] || {}).t) +
+        kv('Vehicle', [D.year, D.make, D.model].filter(Boolean).join(' ')) +
+        kv('VIN', D.vin) + kv('Plate', D.plate) + kv('Colour', D.color) +
+        (D.payType === 'wholesale' ? kv('Dropped by', D.droppedBy)
+          : kv('Customer', D.customerName) + kv('Phone', D.phone)) +
+        (D.payType === 'insurance' ? kv('Claim', D.claimNumber) : '') +
         kv('Photos', PHOTOS.length) + kv('Note', D.damageNote) +
         '</div><div class="msg" id="msg"></div></div>' +
-        '<div class="footbar"><button class="btn btn-ghost" data-back="Photos">Back</button>' +
+        '<div class="footbar"><button class="btn btn-ghost" data-back="1">Back</button>' +
         '<button class="btn btn-solid" id="submit">Check this car in</button></div>';
     }
 
@@ -221,7 +311,7 @@
   }
   function foot(back, next) {
     return '<div class="footbar">' +
-      (back ? '<button class="btn btn-ghost" data-back="' + back + '">Back</button>' : '') +
+      (back ? '<button class="btn btn-ghost" data-back="1">' + esc(back) + '</button>' : '') +
       '<button class="btn btn-solid" id="next">' + esc(next) + '</button></div>';
   }
 
@@ -233,19 +323,36 @@
   }
 
   function wire() {
-    Array.prototype.forEach.call(document.querySelectorAll('[data-job]'), function (b) {
+    Array.prototype.forEach.call(document.querySelectorAll('[data-pay]'), function (b) {
       b.addEventListener('click', function () {
         collect();
-        D.jobType = b.dataset.job;
+        D.payType = b.dataset.pay;
+        if (D.payType !== 'wholesale') { D.clientId = ''; D.droppedBy = ''; }
         render();
       });
+    });
+
+    var sel = $('clientId');
+    if (sel) sel.addEventListener('change', function () { collect(); render(); });
+
+    Array.prototype.forEach.call(document.querySelectorAll('[data-job]'), function (b) {
+      b.addEventListener('click', function () { collect(); D.jobType = b.dataset.job; render(); });
     });
 
     var next = $('next');
     if (next) next.addEventListener('click', function () {
       collect();
-      if (STEP === 0 && !D.jobType) return alert('Pick what the car is here for.');
-      if (STEP === 0 && !D.roNumber.trim()) return alert('An RO number is required.');
+      var name = stepName();
+      if (name === 'pay') {
+        if (!D.payType) return alert('Pick who is paying.');
+        if (D.payType === 'wholesale' && !D.clientId) {
+          return alert('Pick the wholesale account sending this car.');
+        }
+      }
+      if (name === 'job') {
+        if (!D.jobType) return alert('Pick what the car is here for.');
+        if (!String(D.roNumber).trim()) return alert('An RO number is required.');
+      }
       STEP++; render();
     });
 
@@ -257,7 +364,7 @@
     if (dec) dec.addEventListener('click', decode);
 
     var scan = $('scan');
-    if (scan) scan.addEventListener('click', startCamera);
+    if (scan && CAN_SCAN) scan.addEventListener('click', startCamera);
 
     var search = $('custSearch');
     if (search) {
@@ -268,12 +375,14 @@
           var q = search.value.trim();
           if (q.length < 2) { $('custResults').innerHTML = ''; return; }
           api('/api/clients/search?q=' + encodeURIComponent(q)).then(function (d) {
-            $('custResults').innerHTML = d.clients.length
-              ? d.clients.map(function (c) {
+            var retail = d.clients.filter(function (c) { return c.kind !== 'wholesale'; });
+            $('custResults').innerHTML = retail.length
+              ? retail.map(function (c) {
                   return '<button class="choice" style="width:100%;margin-top:8px;min-height:auto" ' +
-                    'data-client="' + c.id + '" data-name="' + esc(c.name) + '" data-phone="' + esc(c.phone || '') +
-                    '"><div class="choicet">' + esc(c.name) + '</div>' +
-                    '<div class="choicen">' + esc([c.phone, c.kind].filter(Boolean).join(' · ')) + '</div></button>';
+                    'data-client="' + c.id + '" data-name="' + esc(c.name) + '" data-phone="' +
+                    esc(c.phone || '') + '"><div class="choicet">' + esc(c.name) + '</div>' +
+                    '<div class="choicen">' + esc([c.phone, c.kind].filter(Boolean).join(' · ')) +
+                    '</div></button>';
                 }).join('')
               : '<div class="hint">No match. Fill the fields below instead.</div>';
 
@@ -294,6 +403,7 @@
     if (add) {
       add.addEventListener('click', function () { $('photoInput').click(); });
       $('photoInput').addEventListener('change', function (e) {
+        collect();
         Array.prototype.forEach.call(e.target.files, function (file) {
           PHOTOS.push({ file: file, url: URL.createObjectURL(file) });
         });
@@ -302,6 +412,7 @@
     }
     Array.prototype.forEach.call(document.querySelectorAll('[data-rm]'), function (b) {
       b.addEventListener('click', function () {
+        collect();
         PHOTOS.splice(Number(b.dataset.rm), 1);
         render();
       });
@@ -311,30 +422,48 @@
     if (sub) sub.addEventListener('click', submit);
   }
 
+  /* ------------------------------------------------------------ VIN decode */
+
   function decode() {
     var vin = $('vin').value.trim().toUpperCase();
     if (vin.length < 11) { $('decodeOut').innerHTML = '<div class="hint">A VIN is 17 characters.</div>'; return; }
     $('decodeOut').innerHTML = '<div class="hint">Decoding…</div>';
 
     api('/api/vin/' + vin).then(function (d) {
-      DECODED = d;
       D.vin = vin;
       if (d.year) D.year = String(d.year);
       if (d.make) D.make = d.make;
       if (d.model) D.model = d.model;
-      var lines = [d.trim && 'Trim ' + d.trim, d.bodyClass, d.engine, d.driveType]
-        .filter(Boolean).join(' · ');
-      var stage = $('decodeOut');
-      stage.innerHTML = '<div class="decoded"><strong>' +
+      var extra = [d.trim && 'Trim ' + d.trim, d.bodyClass, d.engine, d.driveType].filter(Boolean).join(' · ');
+      $('decodeOut').innerHTML = '<div class="decoded"><strong>' +
         esc([d.year, d.make, d.model].filter(Boolean).join(' ')) + '</strong>' +
-        (lines ? '<br>' + esc(lines) : '') + '</div>';
+        (extra ? '<br>' + esc(extra) : '') + '</div>';
       ['year', 'make', 'model'].forEach(function (k) {
         var el = document.getElementById(k);
         if (el) el.value = D[k];
       });
     }).catch(function (e) {
-      $('decodeOut').innerHTML = '<div class="hint" style="color:var(--stopped)">' + esc(e.message) + '</div>';
+      $('decodeOut').innerHTML = '<div class="hint warn">' + esc(e.message) + '</div>';
     });
+  }
+
+  /* --------------------------------------------------------------- scanning */
+
+  function loadZXing() {
+    if (ZXING) return Promise.resolve(ZXING);
+    if (ZXING_LOADING) return ZXING_LOADING;
+    ZXING_LOADING = new Promise(function (resolve, reject) {
+      var s = document.createElement('script');
+      s.src = 'https://cdn.jsdelivr.net/npm/@zxing/library@0.21.3/umd/index.min.js';
+      s.async = true;
+      s.onload = function () {
+        ZXING = window.ZXing || null;
+        ZXING ? resolve(ZXING) : reject(new Error('reader did not load'));
+      };
+      s.onerror = function () { reject(new Error('reader did not load')); };
+      document.head.appendChild(s);
+    });
+    return ZXING_LOADING;
   }
 
   function startCamera() {
@@ -342,25 +471,117 @@
     area.innerHTML = '<div class="scanwrap"><video id="cam" autoplay muted playsinline></video>' +
       '<div class="reticle"></div></div>' +
       '<div class="row" style="margin-top:9px">' +
-      '<button class="btn btn-ghost" id="stopCam">Stop camera</button>' +
-      '<span class="hint">Hold the VIN inside the box, then type what you see. Barcode reading comes later.</span></div>';
+      '<button class="btn btn-ghost" id="stopCam">Stop</button>' +
+      (NATIVE_READER ? '<button class="btn btn-ghost" id="grabFrame">Read it</button>' : '') +
+      '<span class="hint" id="scanHint">Starting the camera…</span></div>';
 
-    navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } } })
-      .then(function (s) {
-        STREAM = s;
-        $('cam').srcObject = s;
-      })
-      .catch(function () {
-        area.innerHTML = '<div class="hint" style="color:var(--stopped)">' +
-          'No camera access. Type the VIN instead.</div>';
+    $('stopCam').addEventListener('click', function () {
+      stopCamera();
+      $('scanArea').innerHTML = '';
+    });
+
+    navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } }
+    }).then(function (s) {
+      STREAM = s;
+      var v = $('cam');
+      v.srcObject = s;
+      return v.play().catch(function () {});
+    }).then(function () {
+      if (NATIVE_READER) {
+        setHint('Fill the box with the barcode, then tap Read it.');
+        var grab = $('grabFrame');
+        if (grab) grab.addEventListener('click', function () { readFrameNative(false); });
+        SCAN_TIMER = setInterval(function () { readFrameNative(true); }, 700);
+      } else {
+        setHint('Loading the reader…');
+        startZXing();
+      }
+    }).catch(function (err) {
+      var why = err && err.name === 'NotAllowedError'
+        ? 'Camera permission was declined. Allow it in Settings → Safari → Camera, or type the VIN.'
+        : err && err.name === 'NotFoundError'
+          ? 'No camera found on this device. Type the VIN instead.'
+          : 'Could not start the camera. Type the VIN instead.';
+      area.innerHTML = '<div class="hint warn">' + esc(why) + '</div>';
+    });
+  }
+
+  function setHint(t) { var h = $('scanHint'); if (h) h.textContent = t; }
+
+  function readFrameNative(quiet) {
+    var v = $('cam');
+    if (!v || !v.videoWidth) return;
+    var canvas = document.createElement('canvas');
+    canvas.width = v.videoWidth;
+    canvas.height = v.videoHeight;
+    canvas.getContext('2d').drawImage(v, 0, 0);
+
+    var det = new window.BarcodeDetector({
+      formats: ['code_39', 'data_matrix', 'qr_code', 'code_128', 'pdf417']
+    });
+    if (!quiet) setHint('Reading…');
+
+    det.detect(canvas).then(function (found) {
+      var vin = pickVin(found.map(function (x) { return x.rawValue; }));
+      if (vin) return accept(vin);
+      if (!quiet) setHint('Nothing readable in the box. Move closer, steady it, try again.');
+    }).catch(function () {
+      if (!quiet) setHint('Could not read that. Type the VIN below.');
+    });
+  }
+
+  function startZXing() {
+    loadZXing().then(function (Z) {
+      var hints = new Map();
+      hints.set(Z.DecodeHintType.POSSIBLE_FORMATS, [
+        Z.BarcodeFormat.CODE_39, Z.BarcodeFormat.CODE_128,
+        Z.BarcodeFormat.DATA_MATRIX, Z.BarcodeFormat.PDF_417, Z.BarcodeFormat.QR_CODE
+      ]);
+      hints.set(Z.DecodeHintType.TRY_HARDER, true);
+
+      READER = new Z.BrowserMultiFormatReader(hints, { delayBetweenScanAttempts: 220 });
+      setHint('Hold the barcode inside the box.');
+
+      READER.decodeFromStream(STREAM, $('cam'), function (result) {
+        if (!result) return;
+        var vin = pickVin([result.getText()]);
+        if (vin) accept(vin);
+        else setHint('Read a code, but it was not a VIN. Try the door-jamb label.');
+      }).catch(function () {
+        setHint('The reader could not start. Type the VIN below.');
       });
+    }).catch(function () {
+      setHint('No barcode reader available. Type the VIN below.');
+    });
+  }
 
-    $('stopCam').addEventListener('click', function () { stopCamera(); $('scanArea').innerHTML = ''; });
+  /** A VIN is 17 characters and never contains I, O or Q. */
+  function pickVin(values) {
+    for (var i = 0; i < values.length; i++) {
+      var raw = String(values[i] || '').toUpperCase().replace(/[^A-HJ-NPR-Z0-9]/g, '');
+      var m = /[A-HJ-NPR-Z0-9]{17}/.exec(raw);
+      if (m) return m[0];
+    }
+    return null;
+  }
+
+  function accept(vin) {
+    stopCamera();
+    $('scanArea').innerHTML = '';
+    D.vin = vin;
+    var el = $('vin');
+    if (el) el.value = vin;
+    decode();
   }
 
   function stopCamera() {
+    if (SCAN_TIMER) { clearInterval(SCAN_TIMER); SCAN_TIMER = null; }
+    if (READER) { try { READER.reset(); } catch (e) { /* already stopped */ } READER = null; }
     if (STREAM) { STREAM.getTracks().forEach(function (t) { t.stop(); }); STREAM = null; }
   }
+
+  /* ----------------------------------------------------------------- submit */
 
   function submit() {
     var btn = $('submit'), msg = $('msg');
@@ -369,7 +590,9 @@
 
     var fd = new FormData();
     Object.keys(D).forEach(function (k) { if (D[k]) fd.append(k, D[k]); });
-    PHOTOS.forEach(function (p, i) { fd.append('photo' + i, p.file, p.file.name || ('photo' + i + '.jpg')); });
+    PHOTOS.forEach(function (p, i) {
+      fd.append('photo' + i, p.file, p.file.name || ('photo' + i + '.jpg'));
+    });
 
     fetch('/api/checkin', { method: 'POST', body: fd })
       .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
@@ -390,7 +613,8 @@
       })
       .catch(function () {
         btn.disabled = false;
-        msg.textContent = 'Could not reach the server.'; msg.className = 'msg err';
+        msg.textContent = 'Could not reach the server.';
+        msg.className = 'msg err';
       });
   }
 

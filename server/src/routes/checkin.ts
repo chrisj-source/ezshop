@@ -105,6 +105,20 @@ export async function registerCheckin(app: FastifyInstance): Promise<void> {
     if (dup) return reply.code(409).send({ error: `RO ${roNumber} already exists.` });
 
     const jobType = fields.jobType ?? 'undecided';
+    const payType = fields.payType ?? 'retail';
+    const isWholesale = payType === 'wholesale';
+
+    // A wholesale car is billed to an account that must already exist.
+    if (isWholesale) {
+      const acct = fields.clientId ? await tqOne<RowDataPacket & { id: number; kind: string; active: number }>(
+        cid, 'SELECT id, kind, active FROM clients WHERE id = ?', [Number(fields.clientId)]
+      ) : null;
+      if (!acct || acct.kind !== 'wholesale' || acct.active !== 1) {
+        return reply.code(400).send({
+          error: 'Pick the wholesale account sending this car. Add accounts in Admin › Clients.'
+        });
+      }
+    }
     const pathMap: Record<string, string> = {
       hail: 'pdr', dent: 'pdr', collision: 'conventional',
       both: 'both', detail: 'undecided', undecided: 'undecided'
@@ -113,7 +127,9 @@ export async function registerCheckin(app: FastifyInstance): Promise<void> {
     const roId = await withTenantTx(cid, async (c) => {
       let clientId: number | null = fields.clientId ? Number(fields.clientId) : null;
 
-      if (!clientId && fields.customerName) {
+      // Retail and insurance cars create a customer record; wholesale bills
+      // the account, so the person who dropped it is a note, not a client.
+      if (!isWholesale && !clientId && fields.customerName) {
         const [r] = await c.query<ResultSetHeader>(
           `INSERT INTO clients (kind, name, phone, email) VALUES ('retail', ?, ?, ?)`,
           [fields.customerName, fields.phone || null, fields.email || null]
@@ -152,8 +168,9 @@ export async function registerCheckin(app: FastifyInstance): Promise<void> {
         `INSERT INTO repair_orders
            (ro_number, client_id, vehicle_id, insurer_client_id, ro_type, repair_path,
             status_slot, status_since, claim_number, date_of_loss, created_by)
-         VALUES (?, ?, ?, ?, 'repair', ?, 'intake.arrived', NOW(), ?, ?, ?)`,
-        [roNumber, clientId, vehicleId, insurerId, pathMap[jobType] ?? 'undecided',
+         VALUES (?, ?, ?, ?, ?, ?, 'intake.arrived', NOW(), ?, ?, ?)`,
+        [roNumber, clientId, vehicleId, insurerId,
+         isWholesale ? 'wholesale' : 'repair', pathMap[jobType] ?? 'undecided',
          fields.claimNumber || null, fields.dateOfLoss || null, ctx.user.id]
       );
       const id = r.insertId;
@@ -169,6 +186,13 @@ export async function registerCheckin(app: FastifyInstance): Promise<void> {
         [id, `Checked in from a phone${photos.length ? ` with ${photos.length} intake photo${photos.length === 1 ? '' : 's'}` : ''}.`,
          ctx.user.id, ctx.user.name]
       );
+
+      if (isWholesale && fields.droppedBy) {
+        await c.query(
+          `INSERT INTO ro_notes (ro_id, kind, body, user_id, user_name) VALUES (?, 'auto', ?, ?, ?)`,
+          [id, `Dropped off by ${fields.droppedBy}.`, ctx.user.id, ctx.user.name]
+        );
+      }
 
       if (fields.damageNote) {
         await c.query(
