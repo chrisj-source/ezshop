@@ -95,6 +95,7 @@
   <div id="stage"></div>
 </div>
 
+<script src="/photos.js"></script>
 <script src="/shell.js"></script>
 <script>
 (function () {
@@ -835,11 +836,14 @@
     if (D.amount !== '' && !isNaN(Number(D.amount))) {
       fd.append('amountCents', String(Math.round(Number(D.amount) * 100)));
     }
-    PHOTOS.forEach(function (p, i) {
-      fd.append('photo' + i, p.file, p.file.name || ('photo' + i + '.jpg'));
-    });
 
-    fetch('/api/checkin', { method: 'POST', body: fd })
+    msg.textContent = 'Resizing ' + PHOTOS.length + ' photo' + (PHOTOS.length === 1 ? '' : 's') + '…';
+    msg.className = 'msg ok';
+
+    Photos.prepareAll(PHOTOS.map(function (p) { return p.file; })).then(function (items) {
+      items.forEach(function (it, i) { Photos.appendTo(fd, i, it.file, it.prepared); });
+      return fetch('/api/checkin', { method: 'POST', body: fd });
+    })
       .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
       .then(function (res) {
         btn.disabled = false;

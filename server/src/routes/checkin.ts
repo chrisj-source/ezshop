@@ -83,19 +83,36 @@ export async function registerCheckin(app: FastifyInstance): Promise<void> {
 
     const cid = ctx.company!.id;
     const fields: Record<string, string> = {};
-    const photos: Array<{ key: string; bytes: number; mime: string; name: string }> = [];
+    const photos: Array<{
+      key: string; bytes: number; mime: string; name: string;
+      thumbKey?: string; width?: number; height?: number;
+    }> = [];
+    const thumbs = new Map<string, { key: string }>();
+    const dims = new Map<string, string>();
 
     if (!req.isMultipart()) return reply.code(400).send({ error: 'Expected a multipart submission' });
 
     for await (const part of req.parts()) {
       if (part.type === 'field') {
-        fields[part.fieldname] = String(part.value);
+        if (part.fieldname.startsWith('dim')) dims.set(part.fieldname.slice(3), String(part.value));
+        else fields[part.fieldname] = String(part.value);
         continue;
       }
+
       const ext = extensionOf(part.filename ?? '', part.mimetype);
       const key = storageKey(cid, ext);
       const bytes = await writeStream(key, part.file);
-      photos.push({ key, bytes, mime: part.mimetype ?? 'image/jpeg', name: part.filename ?? 'photo.jpg' });
+
+      if (part.fieldname.startsWith('thumb')) {
+        thumbs.set(part.fieldname.slice(5), { key });
+      } else {
+        const index = part.fieldname.replace(/^(file|photo)/, '');
+        photos.push({
+          key, bytes, mime: part.mimetype ?? 'image/jpeg',
+          name: part.filename ?? 'photo.jpg',
+          thumbKey: index, width: undefined, height: undefined
+        });
+      }
     }
 
     const roNumber = (fields.roNumber ?? '').trim();
@@ -206,11 +223,17 @@ export async function registerCheckin(app: FastifyInstance): Promise<void> {
     });
 
     for (const p of photos) {
+      const index = p.thumbKey ?? '';
+      const thumb = thumbs.get(index)?.key ?? null;
+      const [w, h] = (dims.get(index) ?? '').split('x').map(Number);
+
       await texec(cid, `
         INSERT INTO documents
-          (ro_id, doc_type, label, storage_key, mime_type, size_bytes, is_money_doc, uploaded_by, uploaded_name)
-        VALUES (?, 'photos_intake', ?, ?, ?, ?, 0, ?, ?)`,
-        [roId, p.name.slice(0, 190), p.key, p.mime, p.bytes, ctx.user.id, ctx.user.name]
+          (ro_id, doc_type, label, storage_key, thumb_key, mime_type, width, height,
+           is_image, size_bytes, is_money_doc, uploaded_by, uploaded_name)
+        VALUES (?, 'photos_intake', ?, ?, ?, ?, ?, ?, 1, ?, 0, ?, ?)`,
+        [roId, p.name.slice(0, 190), p.key, thumb, p.mime, w || null, h || null,
+         p.bytes, ctx.user.id, ctx.user.name]
       );
     }
 

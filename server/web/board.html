@@ -16,6 +16,21 @@
   }
   .dropzone.hot { border-color:var(--acc); color:var(--acc); background:rgba(217,164,65,.06); }
   .docrow { display:flex; align-items:center; gap:10px; padding:9px 0; border-top:1px solid var(--whisper); }
+  .photogrid { display:grid; grid-template-columns:repeat(auto-fill,minmax(88px,1fr)); gap:6px; margin-top:10px; }
+  .photocell {
+    position:relative; aspect-ratio:1; border-radius:4px; overflow:hidden;
+    background:var(--surf); border:none; padding:0; cursor:pointer;
+  }
+  .photocell img { width:100%; height:100%; object-fit:cover; display:block; }
+  .photocell:hover { outline:2px solid var(--acc); outline-offset:-2px; }
+  .lightbox {
+    position:fixed; inset:0; z-index:60; background:rgba(9,13,20,.94);
+    display:flex; flex-direction:column; align-items:center; justify-content:center; gap:12px;
+  }
+  .lightbox[hidden] { display:none; }
+  .lightbox img { max-width:94vw; max-height:78vh; border-radius:6px; }
+  .lbbar { display:flex; gap:9px; align-items:center; flex-wrap:wrap; justify-content:center; }
+  .lbmeta { font:400 11px var(--font); color:var(--dim); text-align:center; }
   .partrow { display:grid; grid-template-columns:1fr auto; gap:10px; padding:9px 0; border-top:1px solid var(--whisper); }
   @media (max-width:760px) { .wrap { padding:0 0 24px; } }
 </style>
@@ -78,11 +93,24 @@
   <div class="dbody" id="dBody"></div>
 </aside>
 
+<div class="lightbox" id="lightbox" hidden>
+  <img id="lbImg" alt="">
+  <div class="lbmeta" id="lbMeta"></div>
+  <div class="lbbar">
+    <button class="btn btn-ghost" id="lbPrev">Previous</button>
+    <a class="btn" id="lbDownload" download>Download</a>
+    <button class="btn btn-ghost" id="lbNext">Next</button>
+    <button class="btn btn-ghost" id="lbClose">Close</button>
+  </div>
+</div>
+
+<script src="/photos.js"></script>
 <script src="/shell.js"></script>
 <script>
 (function () {
   var api = Shell.api, esc = Shell.esc;
   var ME = null, CFG = null, FILES = [], STATUSES = [], GROUPS = [], DOCTYPES = [], OPEN = null;
+  var PHOTOSET = [], LBAT = 0;
 
   function $(id) { return document.getElementById(id); }
   function money(c) {
@@ -400,14 +428,32 @@
         '</select></div>');
       h.push('<div class="dropzone" id="drop">Drop files here, or tap to choose' +
         '<input type="file" id="fileInput" multiple hidden></div>');
+      var photos = d.documents.filter(function (x) { return x.is_image; });
+      var others = d.documents.filter(function (x) { return !x.is_image; });
+      PHOTOSET = photos;
+
+      if (photos.length) {
+        h.push('<div class="photogrid">' + photos.map(function (p, i) {
+          return '<button class="photocell" data-photo="' + i + '" title="' + esc(p.label) + '">' +
+            '<img loading="lazy" src="/api/documents/' + p.id +
+            (p.has_thumb ? '?variant=thumb' : '') + '" alt="' + esc(p.label) + '"></button>';
+        }).join('') + '</div>' +
+        '<div class="sub" style="margin-top:7px">' + photos.length + ' photo' +
+        (photos.length === 1 ? '' : 's') + ' — tap to open, then Download for the full file.</div>');
+      }
+
       h.push('<div id="docList">');
-      if (!d.documents.length) h.push('<div class="sub" style="margin-top:10px">Nothing filed yet.</div>');
-      d.documents.forEach(function (doc) {
+      if (!others.length && !photos.length) {
+        h.push('<div class="sub" style="margin-top:10px">Nothing filed yet.</div>');
+      }
+      others.forEach(function (doc) {
         h.push('<div class="docrow"><div style="flex:1;min-width:0">' +
-          '<a href="/api/documents/' + doc.id + '?inline=1" target="_blank" class="log-b" style="display:block">' +
+          '<a href="/api/documents/' + doc.id + '?download=1" class="log-b" style="display:block">' +
           esc(doc.label) + '</a>' +
-          '<div class="log-m">' + esc(doc.doc_type) + ' · ' + Math.round(doc.size_bytes / 1024) + ' KB · ' +
+          '<div class="log-m">' + esc(doc.doc_type) + ' · ' + Photos.bytes(doc.size_bytes) + ' · ' +
           esc(doc.uploaded_name || '') + ' · ' + when(doc.created_at) + '</div></div>' +
+          '<a class="btn btn-ghost" href="/api/documents/' + doc.id + '?download=1" ' +
+          'style="padding:4px 9px;font-size:10px">Download</a>' +
           (ME.caps.deleteDocuments
             ? '<button class="btn btn-danger" data-del="' + doc.id + '" style="padding:4px 8px;font-size:10px">Delete</button>'
             : '') + '</div>');
@@ -492,6 +538,10 @@
       });
     });
 
+    Array.prototype.forEach.call(document.querySelectorAll('[data-photo]'), function (el) {
+      el.addEventListener('click', function () { showPhoto(Number(el.dataset.photo)); });
+    });
+
     Array.prototype.forEach.call(document.querySelectorAll('[data-del]'), function (b) {
       b.addEventListener('click', function () {
         if (!confirm('Delete this document?')) return;
@@ -517,20 +567,64 @@
 
     function upload(files) {
       if (!files || !files.length) return;
-      var fd = new FormData();
-      fd.append('docType', $('docType').value);
-      for (var i = 0; i < files.length; i++) fd.append('file' + i, files[i]);
-      drop.textContent = 'Uploading ' + files.length + ' file' + (files.length === 1 ? '' : 's') + '…';
+      var n = files.length;
+      drop.textContent = 'Preparing ' + n + ' file' + (n === 1 ? '' : 's') + '…';
 
-      fetch('/api/ro/' + OPEN + '/documents', { method: 'POST', body: fd })
-        .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
-        .then(function (res) {
-          if (!res.ok) { say(res.j.error, 'err'); drop.textContent = 'Drop files here, or tap to choose'; return; }
-          openRo(OPEN);
-        })
-        .catch(function () { say('Upload failed.', 'err'); });
+      Photos.prepareAll(files).then(function (items) {
+        var fd = new FormData();
+        fd.append('docType', $('docType').value);
+        var saved = 0, before = 0;
+        items.forEach(function (it, i) {
+          Photos.appendTo(fd, i, it.file, it.prepared);
+          if (!it.prepared.passthrough) {
+            before += it.prepared.originalBytes || 0;
+            saved += it.prepared.bytes || 0;
+          }
+        });
+
+        drop.textContent = 'Uploading ' + n + ' file' + (n === 1 ? '' : 's') +
+          (before ? ' · ' + Photos.bytes(before) + ' → ' + Photos.bytes(saved) : '') + '…';
+
+        return fetch('/api/ro/' + OPEN + '/documents', { method: 'POST', body: fd })
+          .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+          .then(function (res) {
+            if (!res.ok) {
+              say(res.j.error, 'err');
+              drop.textContent = 'Drop files here, or tap to choose';
+              return;
+            }
+            openRo(OPEN);
+          });
+      }).catch(function () {
+        say('Upload failed.', 'err');
+        drop.textContent = 'Drop files here, or tap to choose';
+      });
     }
   }
+
+  function showPhoto(i) {
+    if (!PHOTOSET.length) return;
+    LBAT = (i + PHOTOSET.length) % PHOTOSET.length;
+    var p = PHOTOSET[LBAT];
+    $('lbImg').src = '/api/documents/' + p.id;
+    $('lbMeta').textContent = (LBAT + 1) + ' of ' + PHOTOSET.length + ' · ' + p.label +
+      (p.width ? ' · ' + p.width + '×' + p.height : '') + ' · ' + Photos.bytes(p.size_bytes);
+    $('lbDownload').href = '/api/documents/' + p.id + '?download=1';
+    $('lbDownload').setAttribute('download', p.label || 'photo.jpg');
+    $('lightbox').hidden = false;
+  }
+  function hidePhoto() { $('lightbox').hidden = true; $('lbImg').removeAttribute('src'); }
+
+  $('lbClose').addEventListener('click', hidePhoto);
+  $('lbPrev').addEventListener('click', function () { showPhoto(LBAT - 1); });
+  $('lbNext').addEventListener('click', function () { showPhoto(LBAT + 1); });
+  $('lightbox').addEventListener('click', function (e) { if (e.target.id === 'lightbox') hidePhoto(); });
+  document.addEventListener('keydown', function (e) {
+    if ($('lightbox').hidden) return;
+    if (e.key === 'Escape') hidePhoto();
+    if (e.key === 'ArrowLeft') showPhoto(LBAT - 1);
+    if (e.key === 'ArrowRight') showPhoto(LBAT + 1);
+  });
 
   $('fGroup').addEventListener('change', function () { fillStatusFilter(this.value); render(); });
   $('fStatus').addEventListener('change', render);
@@ -540,7 +634,9 @@
   $('refresh').addEventListener('click', function () { load(); });
   $('scrim').addEventListener('click', closeRo);
   $('dClose').addEventListener('click', closeRo);
-  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeRo(); });
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && $('lightbox').hidden) closeRo();
+  });
   $('newRo').addEventListener('click', function () { location.href = '/new-ro.html'; });
 })();
 </script>
