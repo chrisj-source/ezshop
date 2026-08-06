@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1c2740">
+<title>Parts — Easy Shop</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/shell.css">
+<style>
+  .wrap { padding:0 18px 24px; }
+  .late { color:var(--stopped); }
+  .selectcol { width:34px; }
+  .bulkbar {
+    display:flex; align-items:center; gap:9px; padding:10px 18px;
+    background:var(--surf); border-top:1px solid var(--line); flex:none; flex-wrap:wrap;
+  }
+  .bulkbar[hidden] { display:none; }
+  @media (max-width:760px) { .wrap { padding:0 0 24px; } }
+</style>
+</head>
+<body>
+
+<div class="bar">
+  <div class="brand"><div class="mark">ES</div><div class="word">Easy Shop</div></div>
+  <div class="vr"></div>
+  <div class="co" id="coName">—</div>
+  <div id="nav"></div>
+  <div class="spacer"></div>
+  <div id="bell"></div>
+  <div class="who" id="who">—</div>
+  <button class="ghostbtn" id="signout">Sign out</button>
+</div>
+<div class="hairline"></div>
+
+<div class="head">
+  <h1>Parts</h1>
+  <div class="headmeta" id="headmeta">Loading…</div>
+</div>
+
+<div class="kpis" id="kpis"></div>
+
+<div class="filters">
+  <select id="fState">
+    <option value="">Everything outstanding</option>
+    <option value="need">Needed</option>
+    <option value="ordered">Ordered</option>
+    <option value="partial">Partially received</option>
+    <option value="backordered">Backordered</option>
+    <option value="received">Received</option>
+  </select>
+  <input type="search" id="fSearch" placeholder="RO, part, vendor">
+  <label class="row" style="font:400 11.5px var(--font);color:var(--dim);gap:5px">
+    <input type="checkbox" id="fLate"> Late only
+  </label>
+  <button class="btn btn-ghost" id="refresh">Refresh</button>
+</div>
+
+<main>
+  <div class="wrap">
+    <table>
+      <thead><tr>
+        <th class="selectcol"><input type="checkbox" id="selAll"></th>
+        <th>RO</th><th>Part</th><th>Vendor</th><th>State</th>
+        <th class="num">Qty</th><th>ETA</th><th class="num" id="thCost">Cost</th>
+      </tr></thead>
+      <tbody id="tbody"></tbody>
+    </table>
+    <div class="empty" id="empty" hidden></div>
+  </div>
+</main>
+
+<div class="bulkbar" id="bulkbar" hidden>
+  <div style="font:500 11.5px var(--font)" id="bulkCount">0 selected</div>
+  <select id="bulkVendor" style="min-width:150px"><option value="">Vendor (unchanged)</option></select>
+  <input type="date" id="bulkEta">
+  <button class="btn" id="bulkOrder">Mark ordered</button>
+  <button class="btn btn-ghost" id="bulkReceive">Mark received</button>
+  <button class="btn btn-ghost" id="bulkClear">Clear</button>
+  <div class="msg" id="bulkMsg" style="margin:0"></div>
+</div>
+
+<script src="/shell.js"></script>
+<script>
+(function () {
+  var api = Shell.api, esc = Shell.esc;
+  var ME = null, PARTS = [], VENDORS = [], SEL = {};
+
+  function $(id) { return document.getElementById(id); }
+  function money(c) { return c == null ? '—' : '$' + (c / 100).toLocaleString('en-US', { maximumFractionDigits: 0 }); }
+  function shortDate(v) { return v ? new Date(v).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '—'; }
+
+  var STATE_TONE = {
+    need: 'var(--dim)', ordered: 'var(--move)', partial: 'var(--blocked)',
+    received: 'var(--done)', backordered: 'var(--stopped)',
+    returned: 'var(--dim)', not_needed: 'var(--dim)'
+  };
+  var STATE_LABEL = {
+    need: 'Needed', ordered: 'Ordered', partial: 'Partial', received: 'Received',
+    backordered: 'Backordered', returned: 'Returned', not_needed: 'Not needed'
+  };
+
+  api('/api/me').then(function (me) {
+    ME = me;
+    if (!me.company) { location.href = '/'; return null; }
+    if (me.features.indexOf('parts') < 0) {
+      document.body.innerHTML = '<div class="empty">Parts tracking is not switched on for this shop.</div>';
+      return null;
+    }
+    Shell.mount({ me: me, active: 'parts' });
+    if (!me.caps.money) $('thCost').hidden = true;
+    return load();
+  }).catch(function (e) { if (e.message !== 'signed out') console.error(e); });
+
+  function load() {
+    var st = $('fState').value;
+    return api('/api/parts' + (st ? '?state=' + st : '')).then(function (d) {
+      PARTS = d.parts; VENDORS = d.vendors;
+      $('bulkVendor').innerHTML = '<option value="">Vendor (unchanged)</option>' +
+        VENDORS.map(function (v) { return '<option value="' + v.id + '">' + esc(v.name) + '</option>'; }).join('');
+      renderKpis(d.summary);
+      render();
+    });
+  }
+
+  function renderKpis(s) {
+    $('kpis').innerHTML = [
+      { v: s.needed, k: 'to order' }, { v: s.ordered, k: 'on order' },
+      { v: s.late, k: 'past ETA' }, { v: s.backordered, k: 'backordered' },
+      { v: s.filesWaiting, k: 'files waiting' }
+    ].map(function (i) {
+      return '<div><div class="kpi-v"' + (i.k === 'past ETA' && i.v > 0 ? ' style="color:var(--stopped)"' : '') +
+        '>' + esc(i.v) + '</div><div class="kpi-k">' + esc(i.k) + '</div></div>';
+    }).join('');
+  }
+
+  function filtered() {
+    var q = $('fSearch').value.trim().toLowerCase(), lateOnly = $('fLate').checked;
+    return PARTS.filter(function (p) {
+      if (lateOnly && !(p.days_late > 0 && p.state !== 'received')) return false;
+      if (q && [p.ro_number, p.description, p.part_number, p.vendor_name, p.customer_name]
+        .join(' ').toLowerCase().indexOf(q) < 0) return false;
+      return true;
+    });
+  }
+
+  function render() {
+    var rows = filtered();
+    $('headmeta').textContent = rows.length + ' part line' + (rows.length === 1 ? '' : 's');
+
+    if (!rows.length) {
+      $('tbody').innerHTML = '';
+      $('empty').hidden = false;
+      $('empty').textContent = PARTS.length ? 'Nothing matches those filters.'
+        : 'No parts on any open file yet. Add them from a repair order.';
+      return;
+    }
+    $('empty').hidden = true;
+
+    $('tbody').innerHTML = rows.map(function (p) {
+      var late = p.days_late > 0 && p.state !== 'received';
+      return '<tr data-id="' + p.id + '">' +
+        '<td><input type="checkbox" class="cb" data-id="' + p.id + '"' + (SEL[p.id] ? ' checked' : '') + '></td>' +
+        '<td><a href="/board.html?ro=' + p.ro_id + '" class="log-b">' + esc(p.ro_number) + '</a>' +
+        '<div class="sub">' + esc(p.vehicle || p.customer_name || '') + '</div></td>' +
+        '<td>' + esc(p.description) + '<div class="sub">' +
+        esc([p.part_number, p.part_type].filter(Boolean).join(' · ')) + '</div></td>' +
+        '<td>' + esc(p.vendor_name || '—') + '</td>' +
+        '<td><span class="pill"><span class="dot" style="background:' + STATE_TONE[p.state] + '"></span>' +
+        esc(STATE_LABEL[p.state] || p.state) + '</span></td>' +
+        '<td class="num">' + p.qty_received + '/' + p.qty + '</td>' +
+        '<td' + (late ? ' class="late"' : '') + '>' + shortDate(p.eta) +
+        (late ? '<div class="sub late">' + p.days_late + 'd late</div>' : '') + '</td>' +
+        (ME.caps.money ? '<td class="num">' + money(p.price_cents * p.qty) + '</td>' : '') +
+        '</tr>';
+    }).join('');
+
+    Array.prototype.forEach.call($('tbody').querySelectorAll('.cb'), function (cb) {
+      cb.addEventListener('change', function () {
+        if (cb.checked) SEL[cb.dataset.id] = true; else delete SEL[cb.dataset.id];
+        syncBulk();
+      });
+    });
+    syncBulk();
+  }
+
+  function syncBulk() {
+    var n = Object.keys(SEL).length;
+    $('bulkbar').hidden = n === 0;
+    $('bulkCount').textContent = n + ' selected';
+  }
+
+  function bulk(state) {
+    var ids = Object.keys(SEL).map(Number);
+    if (!ids.length) return;
+    var msg = $('bulkMsg');
+
+    if (state === 'ordered') {
+      api('/api/parts/bulk-order', {
+        method: 'POST',
+        body: JSON.stringify({
+          ids: ids,
+          vendorId: $('bulkVendor').value ? Number($('bulkVendor').value) : undefined,
+          eta: $('bulkEta').value || undefined
+        })
+      }).then(done).catch(fail);
+    } else {
+      Promise.all(ids.map(function (id) {
+        return api('/api/parts/' + id, { method: 'PATCH', body: JSON.stringify({ state: state }) });
+      })).then(done).catch(fail);
+    }
+
+    function done() { SEL = {}; msg.className = 'msg'; load(); Shell.refreshCount(); }
+    function fail(e) { msg.textContent = e.message; msg.className = 'msg err'; }
+  }
+
+  $('fState').addEventListener('change', function () { SEL = {}; load(); });
+  $('fSearch').addEventListener('input', render);
+  $('fLate').addEventListener('change', render);
+  $('refresh').addEventListener('click', function () { load(); });
+  $('selAll').addEventListener('change', function () {
+    var on = $('selAll').checked;
+    SEL = {};
+    if (on) filtered().forEach(function (p) { SEL[p.id] = true; });
+    render();
+  });
+  $('bulkOrder').addEventListener('click', function () { bulk('ordered'); });
+  $('bulkReceive').addEventListener('click', function () { bulk('received'); });
+  $('bulkClear').addEventListener('click', function () { SEL = {}; render(); });
+})();
+</script>
+</body>
+</html>

@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import Fastify from 'fastify';
 import cookie from '@fastify/cookie';
 import fstatic from '@fastify/static';
+import multipart from '@fastify/multipart';
 import { config } from './config';
 import { closeMaster, master } from './db/master';
 import { closeAllTenants } from './db/tenant';
@@ -12,6 +13,11 @@ import { registerPlatform } from './routes/platform';
 import { registerBoard } from './routes/board';
 import { registerRepairOrders } from './routes/ro';
 import { registerShopConfig } from './routes/config';
+import { registerNotifications } from './routes/notifications';
+import { registerDocuments } from './routes/documents';
+import { registerParts } from './routes/parts';
+import { registerAdmin } from './routes/admin';
+import { registerCheckin } from './routes/checkin';
 import { purgeExpiredSessions } from './auth/session';
 
 async function main(): Promise<void> {
@@ -24,6 +30,9 @@ async function main(): Promise<void> {
   });
 
   await app.register(cookie, { secret: config.cookieSecret });
+  await app.register(multipart, {
+    limits: { fileSize: 25 * 1024 * 1024, files: 12 }
+  });
 
   const webRoot = path.join(__dirname, '..', 'web');
   if (fs.existsSync(webRoot)) {
@@ -36,6 +45,11 @@ async function main(): Promise<void> {
   await registerBoard(app);
   await registerRepairOrders(app);
   await registerShopConfig(app);
+  await registerNotifications(app);
+  await registerDocuments(app);
+  await registerParts(app);
+  await registerAdmin(app);
+  await registerCheckin(app);
 
   app.get('/api/health', async () => {
     const [r] = await master().query('SELECT 1 AS ok');

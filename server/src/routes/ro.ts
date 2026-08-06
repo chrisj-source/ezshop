@@ -3,6 +3,7 @@ import { PoolConnection, RowDataPacket, ResultSetHeader } from 'mysql2/promise';
 import { texec, tq, tqOne, withTenantTx } from '../db/tenant';
 import { requireCompany, requireFeature, Ctx } from '../middleware/context';
 import { canMoveTo, scrubMoney } from '../permissions';
+import { notify } from '../notify';
 
 export async function registerRepairOrders(app: FastifyInstance): Promise<void> {
 
@@ -89,11 +90,11 @@ export async function registerRepairOrders(app: FastifyInstance): Promise<void> 
     );
     if (!current) return reply.code(404).send({ error: 'No such repair order' });
 
-    let target: (RowDataPacket & { slot_id: string; label: string; lane_key: string | null; is_terminal: number }) | null = null;
+    let target: (RowDataPacket & { slot_id: string; label: string; lane_key: string | null; is_terminal: number; owner_role: string }) | null = null;
 
     if (slot) {
       target = await tqOne(cid,
-        `SELECT slot_id, label, lane_key, is_terminal FROM statuses WHERE slot_id = ?`, [slot]);
+        `SELECT slot_id, label, lane_key, is_terminal, owner_role FROM statuses WHERE slot_id = ?`, [slot]);
       if (!target) return reply.code(400).send({ error: 'Unknown status' });
 
       if (!canMoveTo(ctx.role!, ctx.positionKey, target.lane_key)) {
@@ -137,6 +138,23 @@ export async function registerRepairOrders(app: FastifyInstance): Promise<void> 
         );
       }
     });
+
+    if (target) {
+      const ro = await tqOne<RowDataPacket & { ro_number: string; vehicle: string | null }>(
+        cid, `SELECT r.ro_number, CONCAT_WS(' ', v.year, v.make, v.model) AS vehicle
+              FROM repair_orders r LEFT JOIN vehicles v ON v.id = r.vehicle_id WHERE r.id = ?`, [id]
+      );
+      await notify({
+        companyId: cid,
+        event: 'status.change',
+        roId: id,
+        ownerRole: target.owner_role,
+        title: `${target.label} — RO ${ro?.ro_number ?? id}`,
+        body: `${ro?.vehicle || 'A file'} moved from “${current.label ?? 'unset'}” to “${target.label}”.`,
+        actorUserId: ctx.user.id,
+        dedupeKey: `status:${id}:${target.slot_id}:${Date.now()}`
+      }).catch(e => req.log.error(e));
+    }
 
     return { ok: true };
   });
@@ -253,6 +271,23 @@ export async function registerRepairOrders(app: FastifyInstance): Promise<void> 
       [id, displayName ? `${position} assigned to ${displayName}.` : `${position} assignment cleared.`,
        ctx.user.id, ctx.user.name]
     );
+
+    if (userId) {
+      const ro = await tqOne<RowDataPacket & { ro_number: string; vehicle: string | null }>(
+        ctx.company!.id, `SELECT r.ro_number, CONCAT_WS(' ', v.year, v.make, v.model) AS vehicle
+                          FROM repair_orders r LEFT JOIN vehicles v ON v.id = r.vehicle_id WHERE r.id = ?`, [id]
+      );
+      await notify({
+        companyId: ctx.company!.id,
+        event: 'assign.file',
+        roId: id,
+        directUserIds: [userId],
+        title: `Assigned to you — RO ${ro?.ro_number ?? id}`,
+        body: `${ro?.vehicle || 'A file'} is yours as ${position}.`,
+        actorUserId: ctx.user.id,
+        dedupeKey: `assign:${id}:${position}:${userId}`
+      }).catch(e => req.log.error(e));
+    }
 
     return { ok: true };
   });

@@ -1,0 +1,401 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
+<meta name="theme-color" content="#1c2740">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Check-in — Easy Shop</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/shell.css">
+<style>
+  body { overflow:auto; }
+  .phone { max-width:520px; margin:0 auto; width:100%; }
+  .step { padding:18px 16px 0; }
+  .steptitle { font:500 17px var(--font); }
+  .stepnote { font:400 12px var(--font); color:var(--dim); margin-top:5px; line-height:1.5; }
+  .crumbs { display:flex; gap:6px; padding:14px 16px 0; }
+  .crumb { flex:1; height:3px; border-radius:2px; background:var(--line); }
+  .crumb.done { background:var(--acc); }
+  .choices { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:16px; }
+  .choice {
+    background:transparent; border:1px solid var(--line); border-radius:6px;
+    padding:16px 12px; color:var(--text); text-align:left; min-height:76px;
+  }
+  .choice:hover, .choice.sel { border-color:var(--acc); }
+  .choice.sel { background:rgba(217,164,65,.08); }
+  .choicet { font:500 13.5px var(--font); }
+  .choicen { font:400 10.5px var(--font); color:var(--dim); margin-top:3px; line-height:1.4; }
+  .fields { display:grid; gap:13px; margin-top:16px; }
+  .fields.two { grid-template-columns:1fr 1fr; }
+  .fields input, .fields select { width:100%; padding:11px 12px; font-size:14px; min-height:46px; }
+  .vinrow { display:flex; gap:8px; }
+  .vinrow input { flex:1; letter-spacing:.09em; text-transform:uppercase; font-size:15px; }
+  video { width:100%; border-radius:6px; background:#000; display:block; }
+  .scanwrap { position:relative; margin-top:12px; }
+  .reticle {
+    position:absolute; left:8%; right:8%; top:38%; height:24%;
+    border:2px solid var(--acc); border-radius:4px; pointer-events:none;
+  }
+  .decoded {
+    border:1px solid var(--done); border-radius:6px; padding:12px 13px; margin-top:14px;
+    font:400 12px var(--font); line-height:1.6;
+  }
+  .photos { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-top:14px; }
+  .thumb { position:relative; aspect-ratio:1; border-radius:5px; overflow:hidden; background:var(--surf); }
+  .thumb img { width:100%; height:100%; object-fit:cover; }
+  .thumb button {
+    position:absolute; top:3px; right:3px; width:24px; height:24px; border-radius:50%;
+    background:rgba(11,16,25,.8); border:none; color:#fff; font-size:14px; line-height:1;
+  }
+  .addphoto {
+    aspect-ratio:1; border:1px dashed var(--line); border-radius:5px; background:transparent;
+    color:var(--dim); font:400 11px var(--font); display:grid; place-items:center; text-align:center;
+  }
+  .addphoto:hover { border-color:var(--acc); color:var(--acc); }
+  .footbar {
+    position:sticky; bottom:0; background:var(--bg); border-top:1px solid var(--line);
+    padding:12px 16px calc(12px + var(--safe-b)); display:flex; gap:10px; margin-top:22px;
+  }
+  .footbar .btn { flex:1; min-height:48px; font-size:13px; }
+  .done { padding:60px 20px; text-align:center; }
+  .donero { font:600 26px var(--font); font-variant-numeric:tabular-nums; margin:10px 0 6px; }
+  .hint { font:400 11px var(--font); color:var(--dim); margin-top:6px; }
+  .suggestion { font:400 11px var(--font); color:var(--acc2); margin-top:6px; cursor:pointer; }
+</style>
+</head>
+<body>
+
+<div class="bar">
+  <div class="brand"><div class="mark">ES</div><div class="word">Easy Shop</div></div>
+  <div class="vr"></div>
+  <div class="co" id="coName">—</div>
+  <div id="nav"></div>
+  <div class="spacer"></div>
+  <div id="bell"></div>
+  <button class="ghostbtn" id="signout">Sign out</button>
+</div>
+
+<div class="phone">
+  <div class="crumbs" id="crumbs"></div>
+  <div id="stage"></div>
+</div>
+
+<script src="/shell.js"></script>
+<script>
+(function () {
+  var api = Shell.api, esc = Shell.esc;
+  var ME = null, STEP = 0, PHOTOS = [], STREAM = null;
+  var D = { jobType: '', roNumber: '', vin: '', year: '', make: '', model: '', color: '',
+            plate: '', plateState: '', mileage: '', customerName: '', phone: '', email: '',
+            clientId: '', insurerName: '', claimNumber: '', dateOfLoss: '', damageNote: '' };
+  var DECODED = null;
+
+  var JOBS = [
+    { k: 'hail', t: 'Hail', n: 'PDR path — scope by panel' },
+    { k: 'dent', t: 'Dent / ding', n: 'PDR path — single panel' },
+    { k: 'collision', t: 'Collision', n: 'Conventional — teardown first' },
+    { k: 'both', t: 'Hail + collision', n: 'Both paths on one file' },
+    { k: 'detail', t: 'Detail only', n: 'No repair lanes' },
+    { k: 'undecided', t: 'Not sure yet', n: 'Decide after assessment' }
+  ];
+
+  var STEPS = ['Job', 'Vehicle', 'Customer', 'Photos', 'Review'];
+
+  function $(id) { return document.getElementById(id); }
+
+  api('/api/me').then(function (me) {
+    ME = me;
+    if (!me.company) { location.href = '/'; return null; }
+    if (me.features.indexOf('mcheck') < 0) {
+      document.body.innerHTML = '<div class="empty">Mobile check-in is not switched on for this shop.</div>';
+      return null;
+    }
+    Shell.mount({ me: me, active: 'checkin' });
+    return api('/api/next-ro-number').catch(function () { return {}; });
+  }).then(function (n) {
+    if (!n) return;
+    if (n.suggestion) D.roNumber = n.suggestion;
+    render();
+  }).catch(function (e) { if (e.message !== 'signed out') console.error(e); });
+
+  function crumbs() {
+    $('crumbs').innerHTML = STEPS.map(function (_, i) {
+      return '<div class="crumb' + (i <= STEP ? ' done' : '') + '"></div>';
+    }).join('');
+  }
+
+  function render() {
+    crumbs();
+    stopCamera();
+    var h = '';
+
+    if (STEP === 0) {
+      h += '<div class="step"><div class="steptitle">What is this car here for?</div>' +
+        '<div class="stepnote">This picks the repair path and the lanes the file will move through.</div>' +
+        '<div class="choices">' +
+        JOBS.map(function (j) {
+          return '<button class="choice' + (D.jobType === j.k ? ' sel' : '') + '" data-job="' + j.k + '">' +
+            '<div class="choicet">' + esc(j.t) + '</div><div class="choicen">' + esc(j.n) + '</div></button>';
+        }).join('') + '</div>' +
+        '<div class="fields" style="margin-top:18px"><div>' +
+        '<label class="fl" for="roNumber">RO number</label>' +
+        '<input id="roNumber" value="' + esc(D.roNumber) + '" inputmode="numeric">' +
+        '</div></div></div>' +
+        foot(null, 'Vehicle');
+    }
+
+    if (STEP === 1) {
+      h += '<div class="step"><div class="steptitle">Vehicle</div>' +
+        '<div class="stepnote">Scan the VIN off the door jamb or windscreen, or type it.</div>' +
+        '<div class="vinrow" style="margin-top:14px">' +
+        '<input id="vin" value="' + esc(D.vin) + '" maxlength="17" placeholder="VIN" autocapitalize="characters">' +
+        '<button class="btn btn-ghost" id="decode">Decode</button></div>' +
+        '<div class="row" style="margin-top:9px"><button class="btn btn-ghost" id="scan">Scan with camera</button></div>' +
+        '<div id="scanArea"></div>' +
+        '<div id="decodeOut"></div>' +
+        '<div class="fields two" style="margin-top:16px">' +
+        f('year', 'Year', 'number') + f('make', 'Make') + f('model', 'Model') + f('color', 'Colour') +
+        f('plate', 'Plate') + f('mileage', 'Mileage', 'number') +
+        '</div></div>' + foot('Job', 'Customer');
+    }
+
+    if (STEP === 2) {
+      h += '<div class="step"><div class="steptitle">Customer</div>' +
+        '<div class="stepnote">Search by phone or name to reuse an existing customer.</div>' +
+        '<div class="fields" style="margin-top:14px">' +
+        '<div><label class="fl" for="custSearch">Find existing</label>' +
+        '<input id="custSearch" placeholder="Phone or name" autocomplete="off">' +
+        '<div id="custResults"></div></div></div>' +
+        '<div class="fields two" style="margin-top:6px">' +
+        f('customerName', 'Name') + f('phone', 'Phone', 'tel') +
+        f('email', 'Email', 'email') + f('insurerName', 'Insurer') +
+        f('claimNumber', 'Claim number') + f('dateOfLoss', 'Date of loss', 'date') +
+        '</div>' +
+        '<div class="fields" style="margin-top:13px"><div>' +
+        '<label class="fl" for="damageNote">Damage note</label>' +
+        '<textarea id="damageNote" placeholder="What the customer says is wrong">' + esc(D.damageNote) + '</textarea>' +
+        '</div></div></div>' + foot('Vehicle', 'Photos');
+    }
+
+    if (STEP === 3) {
+      h += '<div class="step"><div class="steptitle">Intake photos</div>' +
+        '<div class="stepnote">Four corners, the odometer, and anything already damaged. These file against the RO as intake photos.</div>' +
+        '<div class="photos">' +
+        PHOTOS.map(function (p, i) {
+          return '<div class="thumb"><img src="' + p.url + '" alt="">' +
+            '<button data-rm="' + i + '" aria-label="Remove">&times;</button></div>';
+        }).join('') +
+        '<button class="addphoto" id="addPhoto">Add<br>photo</button>' +
+        '</div><input type="file" id="photoInput" accept="image/*" capture="environment" multiple hidden>' +
+        '<div class="hint">' + PHOTOS.length + ' photo' + (PHOTOS.length === 1 ? '' : 's') + ' attached</div>' +
+        '</div>' + foot('Customer', 'Review');
+    }
+
+    if (STEP === 4) {
+      h += '<div class="step"><div class="steptitle">Check it over</div>' +
+        '<div class="stepnote">This creates the repair order at Vehicle Arrived.</div>' +
+        '<div class="grid2" style="margin-top:16px">' +
+        kv('RO', D.roNumber) + kv('Job', (JOBS.filter(function (j) { return j.k === D.jobType; })[0] || {}).t) +
+        kv('Vehicle', [D.year, D.make, D.model].filter(Boolean).join(' ')) + kv('Colour', D.color) +
+        kv('VIN', D.vin) + kv('Plate', D.plate) +
+        kv('Customer', D.customerName) + kv('Phone', D.phone) +
+        kv('Insurer', D.insurerName) + kv('Claim', D.claimNumber) +
+        kv('Photos', PHOTOS.length) + kv('Note', D.damageNote) +
+        '</div><div class="msg" id="msg"></div></div>' +
+        '<div class="footbar"><button class="btn btn-ghost" data-back="Photos">Back</button>' +
+        '<button class="btn btn-solid" id="submit">Check this car in</button></div>';
+    }
+
+    $('stage').innerHTML = h;
+    wire();
+  }
+
+  function f(key, label, type) {
+    return '<div><label class="fl" for="' + key + '">' + esc(label) + '</label>' +
+      '<input id="' + key + '" type="' + (type || 'text') + '" value="' + esc(D[key]) + '"></div>';
+  }
+  function kv(k, v) {
+    return '<div><div class="f-l">' + esc(k) + '</div><div class="f-v">' +
+      esc(v == null || v === '' ? '—' : v) + '</div></div>';
+  }
+  function foot(back, next) {
+    return '<div class="footbar">' +
+      (back ? '<button class="btn btn-ghost" data-back="' + back + '">Back</button>' : '') +
+      '<button class="btn btn-solid" id="next">' + esc(next) + '</button></div>';
+  }
+
+  function collect() {
+    Object.keys(D).forEach(function (k) {
+      var el = document.getElementById(k);
+      if (el) D[k] = el.value;
+    });
+  }
+
+  function wire() {
+    Array.prototype.forEach.call(document.querySelectorAll('[data-job]'), function (b) {
+      b.addEventListener('click', function () {
+        collect();
+        D.jobType = b.dataset.job;
+        render();
+      });
+    });
+
+    var next = $('next');
+    if (next) next.addEventListener('click', function () {
+      collect();
+      if (STEP === 0 && !D.jobType) return alert('Pick what the car is here for.');
+      if (STEP === 0 && !D.roNumber.trim()) return alert('An RO number is required.');
+      STEP++; render();
+    });
+
+    Array.prototype.forEach.call(document.querySelectorAll('[data-back]'), function (b) {
+      b.addEventListener('click', function () { collect(); STEP--; render(); });
+    });
+
+    var dec = $('decode');
+    if (dec) dec.addEventListener('click', decode);
+
+    var scan = $('scan');
+    if (scan) scan.addEventListener('click', startCamera);
+
+    var search = $('custSearch');
+    if (search) {
+      var t = null;
+      search.addEventListener('input', function () {
+        clearTimeout(t);
+        t = setTimeout(function () {
+          var q = search.value.trim();
+          if (q.length < 2) { $('custResults').innerHTML = ''; return; }
+          api('/api/clients/search?q=' + encodeURIComponent(q)).then(function (d) {
+            $('custResults').innerHTML = d.clients.length
+              ? d.clients.map(function (c) {
+                  return '<button class="choice" style="width:100%;margin-top:8px;min-height:auto" ' +
+                    'data-client="' + c.id + '" data-name="' + esc(c.name) + '" data-phone="' + esc(c.phone || '') +
+                    '"><div class="choicet">' + esc(c.name) + '</div>' +
+                    '<div class="choicen">' + esc([c.phone, c.kind].filter(Boolean).join(' · ')) + '</div></button>';
+                }).join('')
+              : '<div class="hint">No match. Fill the fields below instead.</div>';
+
+            Array.prototype.forEach.call($('custResults').querySelectorAll('[data-client]'), function (b) {
+              b.addEventListener('click', function () {
+                D.clientId = b.dataset.client;
+                D.customerName = b.dataset.name;
+                D.phone = b.dataset.phone;
+                render();
+              });
+            });
+          });
+        }, 250);
+      });
+    }
+
+    var add = $('addPhoto');
+    if (add) {
+      add.addEventListener('click', function () { $('photoInput').click(); });
+      $('photoInput').addEventListener('change', function (e) {
+        Array.prototype.forEach.call(e.target.files, function (file) {
+          PHOTOS.push({ file: file, url: URL.createObjectURL(file) });
+        });
+        render();
+      });
+    }
+    Array.prototype.forEach.call(document.querySelectorAll('[data-rm]'), function (b) {
+      b.addEventListener('click', function () {
+        PHOTOS.splice(Number(b.dataset.rm), 1);
+        render();
+      });
+    });
+
+    var sub = $('submit');
+    if (sub) sub.addEventListener('click', submit);
+  }
+
+  function decode() {
+    var vin = $('vin').value.trim().toUpperCase();
+    if (vin.length < 11) { $('decodeOut').innerHTML = '<div class="hint">A VIN is 17 characters.</div>'; return; }
+    $('decodeOut').innerHTML = '<div class="hint">Decoding…</div>';
+
+    api('/api/vin/' + vin).then(function (d) {
+      DECODED = d;
+      D.vin = vin;
+      if (d.year) D.year = String(d.year);
+      if (d.make) D.make = d.make;
+      if (d.model) D.model = d.model;
+      var lines = [d.trim && 'Trim ' + d.trim, d.bodyClass, d.engine, d.driveType]
+        .filter(Boolean).join(' · ');
+      var stage = $('decodeOut');
+      stage.innerHTML = '<div class="decoded"><strong>' +
+        esc([d.year, d.make, d.model].filter(Boolean).join(' ')) + '</strong>' +
+        (lines ? '<br>' + esc(lines) : '') + '</div>';
+      ['year', 'make', 'model'].forEach(function (k) {
+        var el = document.getElementById(k);
+        if (el) el.value = D[k];
+      });
+    }).catch(function (e) {
+      $('decodeOut').innerHTML = '<div class="hint" style="color:var(--stopped)">' + esc(e.message) + '</div>';
+    });
+  }
+
+  function startCamera() {
+    var area = $('scanArea');
+    area.innerHTML = '<div class="scanwrap"><video id="cam" autoplay muted playsinline></video>' +
+      '<div class="reticle"></div></div>' +
+      '<div class="row" style="margin-top:9px">' +
+      '<button class="btn btn-ghost" id="stopCam">Stop camera</button>' +
+      '<span class="hint">Hold the VIN inside the box, then type what you see. Barcode reading comes later.</span></div>';
+
+    navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } } })
+      .then(function (s) {
+        STREAM = s;
+        $('cam').srcObject = s;
+      })
+      .catch(function () {
+        area.innerHTML = '<div class="hint" style="color:var(--stopped)">' +
+          'No camera access. Type the VIN instead.</div>';
+      });
+
+    $('stopCam').addEventListener('click', function () { stopCamera(); $('scanArea').innerHTML = ''; });
+  }
+
+  function stopCamera() {
+    if (STREAM) { STREAM.getTracks().forEach(function (t) { t.stop(); }); STREAM = null; }
+  }
+
+  function submit() {
+    var btn = $('submit'), msg = $('msg');
+    btn.disabled = true;
+    msg.className = 'msg';
+
+    var fd = new FormData();
+    Object.keys(D).forEach(function (k) { if (D[k]) fd.append(k, D[k]); });
+    PHOTOS.forEach(function (p, i) { fd.append('photo' + i, p.file, p.file.name || ('photo' + i + '.jpg')); });
+
+    fetch('/api/checkin', { method: 'POST', body: fd })
+      .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+      .then(function (res) {
+        btn.disabled = false;
+        if (!res.ok) { msg.textContent = res.j.error; msg.className = 'msg err'; return; }
+        PHOTOS.forEach(function (p) { URL.revokeObjectURL(p.url); });
+        $('stage').innerHTML = '<div class="done">' +
+          '<div class="f-l">Checked in</div>' +
+          '<div class="donero">' + esc(res.j.roNumber) + '</div>' +
+          '<div class="stepnote">' + res.j.photos + ' photo' + (res.j.photos === 1 ? '' : 's') +
+          ' filed. The car is on the board at Vehicle Arrived.</div>' +
+          '<div class="row" style="justify-content:center;margin-top:22px">' +
+          '<a class="btn" href="/board.html?ro=' + res.j.id + '">Open the file</a>' +
+          '<button class="btn btn-ghost" id="again">Check in another</button></div></div>';
+        $('crumbs').innerHTML = '';
+        $('again').addEventListener('click', function () { location.reload(); });
+      })
+      .catch(function () {
+        btn.disabled = false;
+        msg.textContent = 'Could not reach the server.'; msg.className = 'msg err';
+      });
+  }
+
+  window.addEventListener('beforeunload', stopCamera);
+})();
+</script>
+</body>
+</html>
