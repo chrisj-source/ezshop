@@ -62,6 +62,24 @@
   .track { height:2px; border-radius:1px; background:var(--whisper); margin-top:5px; }
   .trackfill { height:100%; border-radius:1px; }
 
+  /* ---- unsaved-changes guard ---- */
+  .guard {
+    position:fixed; inset:0; z-index:70; background:rgba(9,13,20,.72);
+    display:grid; place-items:center; padding:24px;
+  }
+  .guard[hidden] { display:none; }
+  .guardcard {
+    width:min(440px,100%); background:var(--bg); border:1px solid var(--acc);
+    border-radius:8px; padding:18px 20px 16px; box-shadow:0 24px 60px rgba(0,0,0,.55);
+  }
+  .guardtitle { font:500 14px var(--font); }
+  .guardbody {
+    font:400 11.5px/1.6 var(--font); color:var(--muted); margin:9px 0 15px;
+  }
+  .guardbody ul { margin:6px 0 0; padding-left:17px; }
+  .guardbody li { margin:2px 0; }
+  .guardrow { display:flex; gap:9px; flex-wrap:wrap; }
+
   /* ---- modal: centred, wide, two columns like the mockup ---- */
   .modal {
     position:fixed; inset:24px; z-index:30; display:none;
@@ -216,6 +234,20 @@
 </main>
 
 <div class="scrim" id="scrim"></div>
+
+<div class="guard" id="guard" hidden>
+  <div class="guardcard">
+    <div class="guardtitle">You have unsaved changes on this file</div>
+    <div class="guardbody" id="guardList"></div>
+    <div class="guardrow">
+      <button class="btn btn-solid" id="gSave">Save and close</button>
+      <button class="btn btn-ghost" id="gKeep">Keep editing</button>
+      <button class="btn btn-danger" id="gDiscard">Discard changes</button>
+    </div>
+    <div class="msg" id="gMsg"></div>
+  </div>
+</div>
+
 <div class="modal" id="drawer" aria-hidden="true" role="dialog">
   <div class="mhead">
     <div class="pip" id="dPip" style="background:var(--acc);color:var(--bg)">00</div>
@@ -849,7 +881,126 @@
     });
   }
 
+  /**
+   * What is unsaved in the modal right now. Returned as plain sentences so the
+   * guard can tell the user what they are about to lose rather than just
+   * warning them abstractly.
+   */
+  function pending() {
+    var out = [];
+    if (!OPEN) return out;
+
+    var st = $('newStatus'), note = $('newNote');
+    if (st && st.value) out.push('a status change to “' + st.options[st.selectedIndex].textContent + '”');
+    if (note && note.value.trim()) out.push('a note you have typed');
+
+    var dates = Array.prototype.slice.call(document.querySelectorAll('[data-date]'))
+      .filter(function (el) { return el.value !== el.dataset.was; });
+    if (dates.length) out.push(dates.length + ' date change' + (dates.length === 1 ? '' : 's'));
+
+    ['m_amount', 'm_deduct', 'm_hours'].forEach(function (id) {
+      var el = $(id);
+      if (el && el.value !== el.dataset.was) out.push('an edit to ' +
+        (id === 'm_amount' ? 'the amount' : id === 'm_deduct' ? 'the deductible' : 'labour hours'));
+    });
+
+    var assigns = Array.prototype.slice.call(document.querySelectorAll('[data-assign]'))
+      .filter(function (el) { return el.value !== el.dataset.was; });
+    if (assigns.length) out.push(assigns.length + ' assignment change' +
+      (assigns.length === 1 ? '' : 's'));
+
+    var promise = $('promiseText');
+    if (promise && promise.value.trim()) out.push('a promise you have typed');
+    var part = $('pDesc');
+    if (part && part.value.trim()) out.push('a part you have typed');
+
+    return out;
+  }
+
+  /** Run every pending save in order, so one failure stops the rest. */
+  function saveAll() {
+    var jobs = [];
+
+    var st = $('newStatus'), note = $('newNote');
+    if (st && (st.value || (note && note.value.trim()))) {
+      jobs.push(function () {
+        return api('/api/ro/' + OPEN + '/status', {
+          method: 'POST',
+          body: JSON.stringify({
+            slot: st.value || undefined,
+            note: note && note.value.trim() ? note.value.trim() : undefined
+          })
+        });
+      });
+    }
+
+    var dateBody = {}, dateN = 0;
+    Array.prototype.forEach.call(document.querySelectorAll('[data-date]'), function (el) {
+      if (el.value === el.dataset.was) return;
+      dateBody[el.dataset.date] = el.value || null;
+      dateN++;
+    });
+    if (dateN) jobs.push(function () {
+      return api('/api/ro/' + OPEN + '/dates', { method: 'PATCH', body: JSON.stringify(dateBody) });
+    });
+
+    var moneyBody = {}, moneyN = 0;
+    var a = $('m_amount'), dd = $('m_deduct'), hr = $('m_hours');
+    if (a && a.value !== a.dataset.was) { moneyBody.amountCents = Math.round(Number(a.value || 0) * 100); moneyN++; }
+    if (dd && dd.value !== dd.dataset.was) { moneyBody.deductibleCents = Math.round(Number(dd.value || 0) * 100); moneyN++; }
+    if (hr && hr.value !== hr.dataset.was) { moneyBody.laborHours = Number(hr.value || 0); moneyN++; }
+    if (moneyN) jobs.push(function () {
+      return api('/api/ro/' + OPEN + '/money', { method: 'PATCH', body: JSON.stringify(moneyBody) });
+    });
+
+    Array.prototype.forEach.call(document.querySelectorAll('[data-assign]'), function (sel) {
+      if (sel.value === sel.dataset.was) return;
+      var name = sel.value ? sel.options[sel.selectedIndex].textContent : null;
+      jobs.push(function () {
+        return api('/api/ro/' + OPEN + '/assign/' + sel.dataset.assign, {
+          method: 'PUT',
+          body: JSON.stringify({ userId: sel.value ? Number(sel.value) : null, displayName: name })
+        });
+      });
+    });
+
+    var promise = $('promiseText');
+    if (promise && promise.value.trim()) {
+      jobs.push(function () {
+        return api('/api/ro/' + OPEN + '/promises', {
+          method: 'POST', body: JSON.stringify({ body: promise.value.trim() })
+        });
+      });
+    }
+
+    var part = $('pDesc');
+    if (part && part.value.trim()) {
+      jobs.push(function () {
+        var body = { description: part.value.trim(), qty: Number($('pQty').value) || 1 };
+        if ($('pPrice') && $('pPrice').value) body.priceCents = Math.round(Number($('pPrice').value) * 100);
+        if ($('pCost') && $('pCost').value) body.costCents = Math.round(Number($('pCost').value) * 100);
+        return api('/api/ro/' + OPEN + '/parts', { method: 'POST', body: JSON.stringify(body) });
+      });
+    }
+
+    return jobs.reduce(function (chain, job) {
+      return chain.then(job);
+    }, Promise.resolve());
+  }
+
+  /** Closing with edits in flight asks first. */
+  function tryCloseRo() {
+    var list = pending();
+    if (!list.length) return closeRo();
+
+    $('guardList').innerHTML = 'Closing now loses:<ul>' +
+      list.map(function (t) { return '<li>' + esc(t) + '</li>'; }).join('') + '</ul>';
+    $('gMsg').className = 'msg';
+    $('guard').hidden = false;
+  }
+
   function closeRo() {
+    $('guard').hidden = true;
     OPEN = null;
     $('scrim').classList.remove('open');
     $('drawer').classList.remove('open');
@@ -1365,13 +1516,33 @@
   on('fSearch', 'input', render);
   on('fClosed', 'change', function () { load(); });
   on('refresh', 'click', function () { load(); });
-  on('scrim', 'click', closeRo);
-  on('dClose', 'click', closeRo);
+  on('scrim', 'click', tryCloseRo);
+  on('dClose', 'click', tryCloseRo);
+
+  on('gKeep', 'click', function () { $('guard').hidden = true; });
+  on('gDiscard', 'click', closeRo);
+  on('gSave', 'click', function () {
+    var btn = $('gSave');
+    btn.disabled = true;
+    $('gMsg').textContent = 'Saving…';
+    $('gMsg').className = 'msg ok';
+
+    saveAll().then(function () {
+      btn.disabled = false;
+      closeRo();
+      return load().then(function () { Shell.refreshCount(); });
+    }).catch(function (e) {
+      btn.disabled = false;
+      $('gMsg').textContent = e.message + ' — nothing after that point was saved.';
+      $('gMsg').className = 'msg err';
+    });
+  });
   document.addEventListener('keydown', function (e) {
     if (e.key === 'Escape') {
       if (!$('lightbox').hidden) hidePhoto();
       else if ($('colPanel') && !$('colPanel').hidden) $('colPanel').hidden = true;
-      else closeRo();
+      else if (!$('guard').hidden) $('guard').hidden = true;
+      else tryCloseRo();
     }
     if (!$('lightbox').hidden) {
       if (e.key === 'ArrowLeft') showPhoto(LBAT - 1);

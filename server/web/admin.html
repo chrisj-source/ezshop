@@ -8,40 +8,134 @@
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/shell.css?v=5">
 <style>
-  .tabs { display:flex; gap:2px; padding:0 18px 12px; flex:none; flex-wrap:wrap; }
-  .tab {
-    font:500 11.5px var(--font); color:var(--dim); background:transparent;
-    border:1px solid var(--line); border-radius:4px; padding:8px 13px;
+  /* Tabs underline, as in the mockup — not pills. */
+  .adminbar {
+    display:flex; align-items:center; gap:18px; padding:12px 18px 0; flex:none;
   }
-  .tab:hover { color:var(--text); }
-  .tab.sel { color:var(--acc); border-color:var(--acc); background:rgba(217,164,65,.09); }
-  .pane { padding:0 18px 40px; }
-  .grouphead { display:flex; align-items:baseline; gap:10px; padding:18px 0 8px; }
-  .groupname { font:500 14px var(--font); }
-  .groupnote { font:400 10.5px var(--font); color:var(--dim); line-height:1.5; max-width:640px; }
-  .slot {
-    display:grid; grid-template-columns:1fr 200px 130px 90px 90px; gap:10px;
-    align-items:center; padding:9px 0; border-top:1px solid var(--whisper);
+  .atab {
+    font:500 11.5px var(--font); padding:0 0 9px; background:none; border:none;
+    color:var(--dim); border-bottom:2px solid transparent;
   }
-  .slotid { font:400 9.5px var(--font); color:var(--dim); margin-top:2px; font-variant-numeric:tabular-nums; }
-  .slot input, .slot select { width:100%; }
-  .card { border:1px solid var(--line); border-radius:6px; padding:14px; margin-top:12px; }
-  .chips { display:flex; gap:7px; flex-wrap:wrap; margin-top:8px; }
-  .chip {
-    font:500 10.5px var(--font); padding:6px 11px; border-radius:14px;
-    border:1px solid var(--line); color:var(--dim); background:transparent;
+  .atab:hover { color:var(--muted); }
+  .atab.sel { color:var(--text); border-bottom-color:var(--acc); }
+  .abarline { height:1px; background:var(--line); flex:none; }
+
+  /* Three panes: rail, list, detail. */
+  .three { flex:1; min-height:0; display:grid; grid-template-columns:196px 1fr 316px; }
+  .rail { border-right:1px solid var(--whisper); padding:14px 0; overflow-y:auto; }
+  .railtitle {
+    font:600 8.5px var(--font); letter-spacing:.12em; text-transform:uppercase;
+    color:var(--acc2); padding:0 16px 9px;
   }
-  .chip.on { border-color:var(--acc); color:var(--acc); background:rgba(217,164,65,.08); }
-  .evrow { display:grid; grid-template-columns:1fr 110px 90px; gap:10px; align-items:center;
-           padding:8px 0; border-top:1px solid var(--whisper); }
-  .peoplerow { display:grid; grid-template-columns:1fr 150px 130px 110px auto; gap:10px;
-               align-items:center; padding:10px 0; border-top:1px solid var(--whisper); }
-  .code { font:600 15px var(--font); letter-spacing:.16em; color:var(--acc); }
-  @media (max-width:900px) {
-    .slot { grid-template-columns:1fr 1fr; }
-    .peoplerow { grid-template-columns:1fr 1fr; }
-    .evrow { grid-template-columns:1fr auto; }
-    .pane { padding:0 14px 40px; }
+  .railitem {
+    display:flex; align-items:center; gap:8px; width:100%; text-align:left;
+    padding:7px 16px; background:none; border:none; color:var(--muted);
+    font:400 11.5px var(--font); border-left:2px solid transparent;
+  }
+  .railitem:hover { background:var(--whisper); color:var(--text); }
+  .railitem.sel { background:var(--whisper); color:var(--text); border-left-color:var(--acc); }
+  .railitem .c {
+    margin-left:auto; font:400 10px var(--font); font-variant-numeric:tabular-nums; color:var(--dim);
+  }
+
+  .mid { overflow-y:auto; padding-bottom:26px; }
+  .detail {
+    border-left:1px solid var(--whisper); background:var(--surf);
+    overflow-y:auto; padding:15px 16px;
+  }
+
+  /* Status rows. */
+  .srow, .shead {
+    display:grid; grid-template-columns:3px 1fr 166px 84px 122px 78px 68px 60px;
+    gap:13px; align-items:center; padding:0 16px;
+  }
+  .shead { padding-top:6px; padding-bottom:6px; border-top:1px solid var(--line);
+    border-bottom:1px solid var(--line); }
+  .shead > div {
+    font:600 8.5px var(--font); letter-spacing:.11em; text-transform:uppercase; color:var(--acc2);
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  }
+  .srow { height:44px; border-bottom:1px solid var(--whisper); cursor:pointer; }
+  .srow:hover { background:var(--whisper); }
+  .srow.sel { background:var(--whisper); }
+  .sedge { width:3px; height:22px; border-radius:1px; }
+  .slabel {
+    font:500 12px var(--font); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  }
+  .ssub, .sslot {
+    font:400 10px var(--font); color:var(--dim);
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  }
+  .sslot { font-variant-numeric:tabular-nums; }
+  .schip {
+    display:inline-block; font:600 8.5px var(--font); letter-spacing:.07em; text-transform:uppercase;
+    padding:2px 6px; border-radius:3px; white-space:nowrap;
+  }
+  .scell { font:400 11px var(--font); color:var(--muted); white-space:nowrap; }
+  .scell.num { font-variant-numeric:tabular-nums; }
+  .visbtn {
+    font:400 10px var(--font); padding:3px 7px; border-radius:3px; background:transparent;
+    border:1px solid var(--line); color:var(--dim); white-space:nowrap;
+  }
+  .visbtn:hover { border-color:var(--acc); color:var(--acc); }
+  .visbtn.on { color:var(--done); border-color:var(--done); }
+
+  .sechead {
+    display:flex; align-items:baseline; gap:10px; padding:13px 16px 9px;
+    position:sticky; top:0; background:var(--bg); z-index:1;
+  }
+  .secn { font:600 9px var(--font); letter-spacing:.1em; color:var(--acc); }
+  .secname { font:500 12.5px var(--font); }
+
+  /* Detail pane. */
+  .dlbl {
+    font:600 8.5px var(--font); letter-spacing:.12em; text-transform:uppercase;
+    color:var(--acc2); margin-bottom:6px;
+  }
+  .dinput, .dsel {
+    width:100%; box-sizing:border-box; background:transparent; border:1px solid var(--line);
+    border-radius:4px; color:var(--text); font:400 11.5px var(--font); padding:7px 9px;
+  }
+  .dsel { appearance:none; cursor:pointer; }
+  .drow {
+    display:grid; grid-template-columns:118px 1fr; gap:10px; align-items:baseline;
+    padding:6px 0; border-bottom:1px solid var(--whisper);
+  }
+  .dk { font:400 10px var(--font); letter-spacing:.04em; color:var(--dim); }
+  .dv { font:400 11px/1.4 var(--font); }
+
+  /* Lanes, tracks, people, groups all share the flat card look. */
+  .card2 { border:1px solid var(--line); border-radius:6px; margin:0 16px 12px; overflow:hidden; }
+  .card2row { display:grid; gap:14px; align-items:center; padding:11px 13px; }
+  .card2row + .card2row { border-top:1px solid var(--whisper); }
+  .pchip {
+    font:400 10.5px var(--font); padding:4px 9px; border-radius:3px; white-space:nowrap;
+    background:transparent; border:1px solid var(--line); color:var(--muted);
+  }
+  .pchip.on { background:var(--chip); color:var(--text); border-color:var(--acc); }
+  .evrow {
+    display:grid; grid-template-columns:3px 1fr 168px 148px 50px; gap:12px;
+    align-items:center; min-height:44px; border-bottom:1px solid var(--whisper); padding:0 2px;
+  }
+  .prow2 {
+    display:grid; grid-template-columns:26px 1fr 150px 130px 96px 78px 20px; gap:10px;
+    align-items:center; height:34px; border-bottom:1px solid var(--whisper);
+  }
+  .avatar2 {
+    width:22px; height:22px; flex:none; border-radius:50%; display:grid; place-items:center;
+    font:500 8.5px var(--font); color:var(--acc); border:1px solid var(--line);
+  }
+  .pad { padding:14px 16px; }
+
+  @media (max-width:1200px) {
+    .three { grid-template-columns:170px 1fr; }
+    .detail { display:none; }
+    .srow, .shead { grid-template-columns:3px 1fr 120px 84px 110px 68px; }
+    .srow > .hide-lg, .shead > .hide-lg { display:none; }
+  }
+  @media (max-width:820px) {
+    .three { grid-template-columns:1fr; }
+    .rail { display:none; }
   }
 </style>
 </head>
@@ -59,34 +153,46 @@
 </div>
 <div class="hairline"></div>
 
-<div class="head">
-  <h1>Admin</h1>
-  <div class="headmeta" id="headmeta">Loading…</div>
+<div class="adminbar" id="tabs"></div>
+<div class="abarline"></div>
+
+<div class="three">
+  <div class="rail">
+    <div class="railtitle" id="railTitle">Groups</div>
+    <div id="rail"></div>
+  </div>
+  <div class="mid" id="mid"><div class="empty">Loading…</div></div>
+  <div class="detail">
+    <div class="dlbl" id="detTitle" style="border-bottom:1px solid var(--whisper);padding-bottom:9px">
+      Reference
+    </div>
+    <div id="detBody"></div>
+  </div>
 </div>
-
-<div class="tabs" id="tabs" style="padding-top:14px"></div>
-
-<main><div class="pane" id="pane"><div class="empty">Loading…</div></div></main>
 
 <script src="/shell.js?v=5"></script>
 <script>
 (function () {
   var api = Shell.api, esc = Shell.esc;
-  var ME = null, CFG = null, PEOPLE = null, GROUPS = null, ROLES = [];
-  var CTYPES = null;
-  var TAB = 'statuses';
+  var ME = null, CFG = null, PEOPLE = null, GROUPS = null, ROLES = [], CTYPES = null;
+  var TAB = 'statuses', RAIL = null, SEL = null;
 
   var TABS = [
     { k: 'statuses', t: 'Statuses' },
-    { k: 'lanes', t: 'Lanes' },
+    { k: 'lanes', t: 'Lanes and gates' },
+    { k: 'notify', t: 'Notification groups' },
     { k: 'people', t: 'People' },
-    { k: 'groups', t: 'Notification groups' },
-    { k: 'settings', t: 'Settings' },
+    { k: 'settings', t: 'Shop settings' },
     { k: 'storage', t: 'Storage' }
   ];
 
+  var KIND_TONE = {
+    milestone: 'var(--move)', queue: 'var(--blocked)',
+    active: 'var(--acc)', complete: 'var(--done)'
+  };
+
   function $(id) { return document.getElementById(id); }
-  function hours(h) { return h == null ? '' : (h % 24 === 0 ? (h / 24) + 'd' : h + 'h'); }
+  function hours(h) { return h == null ? '—' : (h % 24 === 0 ? (h / 24) + 'd' : h + 'h'); }
   function toHours(v) {
     if (!v) return null;
     var m = /^(\d+)\s*([hd])?$/i.exec(String(v).trim());
@@ -107,204 +213,547 @@
       api('/api/config'),
       api('/api/config/people'),
       api('/api/admin/notification-groups'),
-      api('/api/admin/roles'),
-      api('/api/client-types')
+      api('/api/admin/roles')
     ]);
   }).then(function (r) {
     if (!r) return;
     CFG = r[0]; PEOPLE = r[1]; GROUPS = r[2]; ROLES = r[3].roles;
-    CTYPES = r[4];
-    $('headmeta').textContent = CFG.statuses.length + ' statuses · ' + CFG.lanes.length +
-      ' lanes · ' + PEOPLE.people.length + ' people · ' +
-      GROUPS.groups.length + ' notification groups';
     renderTabs();
     render();
   }).catch(function (e) { if (e.message !== 'signed out') console.error(e); });
 
   function renderTabs() {
     $('tabs').innerHTML = TABS.map(function (t) {
-      return '<button class="tab' + (t.k === TAB ? ' sel' : '') + '" data-tab="' + t.k + '">' +
+      return '<button class="atab' + (t.k === TAB ? ' sel' : '') + '" data-tab="' + t.k + '">' +
         esc(t.t) + '</button>';
     }).join('');
     Array.prototype.forEach.call($('tabs').children, function (b) {
-      b.addEventListener('click', function () { TAB = b.dataset.tab; renderTabs(); render(); });
+      b.addEventListener('click', function () {
+        TAB = b.dataset.tab;
+        RAIL = null;
+        SEL = null;
+        renderTabs();
+        render();
+      });
     });
   }
 
   function render() {
-    if (TAB === 'statuses') return renderStatuses();
-    if (TAB === 'lanes') return renderLanes();
-    if (TAB === 'people') return renderPeople();
-    if (TAB === 'groups') return renderGroups();
-    if (TAB === 'settings') return renderSettings();
-    if (TAB === 'storage') return renderStorage();
+    ({
+      statuses: renderStatuses, lanes: renderLanes, notify: renderNotify,
+      people: renderPeople, settings: renderSettings, storage: renderStorage
+    }[TAB])();
   }
 
-  /* ------------------------------------------------------------ statuses */
+  function rail(title, items) {
+    $('railTitle').textContent = title;
+    $('rail').innerHTML = items.map(function (i) {
+      return '<button class="railitem' + (i.k === RAIL ? ' sel' : '') + '" data-rail="' + esc(i.k) + '">' +
+        '<span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' +
+        esc(i.t) + '</span>' + (i.c != null ? '<span class="c">' + i.c + '</span>' : '') + '</button>';
+    }).join('');
+    Array.prototype.forEach.call($('rail').children, function (b) {
+      b.addEventListener('click', function () {
+        RAIL = RAIL === b.dataset.rail ? null : b.dataset.rail;
+        render();
+      });
+    });
+  }
+
+  function detail(title, html) {
+    $('detTitle').textContent = title;
+    $('detBody').innerHTML = html;
+  }
+
+  /* ===================================================== statuses */
 
   function renderStatuses() {
-    var h = ['<div class="msg" id="msg"></div>'];
-    h.push('<div class="groupnote" style="padding-top:6px">Rename anything. The identifier under each ' +
-      'name never changes, so reports and notifications keep working. Clocks are in hours; ' +
-      'write <strong>2d</strong> for days.</div>');
+    rail('Groups', CFG.groups.map(function (g) {
+      return {
+        k: g.group_id, t: g.label,
+        c: CFG.statuses.filter(function (s) { return s.group_id === g.group_id; }).length
+      };
+    }));
 
-    CFG.groups.forEach(function (g) {
-      var slots = CFG.statuses.filter(function (s) { return s.group_id === g.group_id; });
-      if (!slots.length) return;
+    var groups = CFG.groups.filter(function (g) { return !RAIL || g.group_id === RAIL; });
+    var h = [];
 
-      h.push('<div class="grouphead"><div class="groupname">' + esc(g.label) + '</div>' +
-        '<div class="groupnote">' + esc(g.note || '') + '</div></div>');
+    groups.forEach(function (g, gi) {
+      var rows = CFG.statuses.filter(function (s) { return s.group_id === g.group_id; });
+      if (!rows.length) return;
 
-      h.push('<div class="slot" style="border:none;padding-bottom:4px">' +
-        '<div class="f-l">Name shown in the shop</div><div class="f-l">Name shown to the customer</div>' +
-        '<div class="f-l">Owner</div><div class="f-l">Warn at</div><div class="f-l">Red at</div></div>');
+      var n = CFG.groups.indexOf(g) + 1;
+      h.push('<div style="margin-bottom:4px">');
+      h.push('<div class="sechead"><div class="secn">' + String(n).padStart(2, '0') + '</div>' +
+        '<div class="secname">' + esc(g.label) + '</div>' +
+        '<div class="sub">' + rows.length + ' statuses' +
+        (g.note ? ' · ' + esc(g.note) : '') + '</div></div>');
 
-      slots.forEach(function (s) {
-        h.push('<div class="slot" data-slot="' + esc(s.slot_id) + '">' +
-          '<div><input class="s-label" value="' + esc(s.label) + '">' +
-          '<div class="slotid">' + esc(s.slot_id) + '</div></div>' +
-          '<input class="s-clabel" value="' + esc(s.customer_label || '') + '" placeholder="not shown">' +
-          '<input class="s-owner" value="' + esc(s.owner_role) + '">' +
-          '<input class="s-yellow" value="' + hours(s.age_yellow_hours) + '" placeholder="—">' +
-          '<input class="s-red" value="' + hours(s.age_red_hours) + '" placeholder="—">' +
-          '</div>');
+      h.push('<div class="shead"><div></div><div>Status</div>' +
+        '<div class="hide-lg">Slot ID</div><div>Kind</div><div>Owner</div>' +
+        '<div>Age Y / R</div><div class="hide-lg">Follow-up</div><div>Shown</div></div>');
+
+      rows.forEach(function (s) {
+        var tone = KIND_TONE[s.kind] || 'var(--dim)';
+        var hidden = !s.visible;
+        h.push('<div class="srow' + (SEL === s.slot_id ? ' sel' : '') + '" data-slot="' +
+          esc(s.slot_id) + '"' + (hidden ? ' style="opacity:.45"' : '') + '>' +
+          '<div class="sedge" style="background:' + tone + '"></div>' +
+          '<div style="min-width:0"><div class="slabel"' +
+          (hidden ? ' style="text-decoration:line-through"' : '') + '>' + esc(s.label) + '</div>' +
+          '<div class="ssub">' + esc(s.customer_label || 'not shown to the customer') + '</div></div>' +
+          '<div class="sslot hide-lg">' + esc(s.slot_id) + '</div>' +
+          '<div><span class="schip" style="color:' + tone + ';border:1px solid ' + tone + '">' +
+          esc(s.kind) + '</span></div>' +
+          '<div class="scell">' + esc(s.owner_role) + '</div>' +
+          '<div class="scell num">' + hours(s.age_yellow_hours) + ' / ' + hours(s.age_red_hours) + '</div>' +
+          '<div class="scell num hide-lg">' + hours(s.follow_up_hours) + '</div>' +
+          '<button class="visbtn' + (hidden ? '' : ' on') + '" data-vis="' + esc(s.slot_id) + '">' +
+          (hidden ? 'Hidden' : 'Shown') + '</button></div>');
+      });
+
+      h.push('</div>');
+    });
+
+    $('mid').innerHTML = h.join('');
+
+    Array.prototype.forEach.call($('mid').querySelectorAll('[data-slot]'), function (el) {
+      el.addEventListener('click', function (e) {
+        if (e.target.dataset.vis) return;
+        SEL = el.dataset.slot;
+        renderStatuses();
       });
     });
 
-    h.push('<div class="row" style="margin-top:22px">' +
-      '<button class="btn btn-solid" id="saveStatuses">Save changes</button></div>');
-
-    $('pane').innerHTML = h.join('');
-
-    $('saveStatuses').addEventListener('click', function () {
-      var rows = Array.prototype.slice.call(document.querySelectorAll('[data-slot]'));
-      var changed = [];
-
-      rows.forEach(function (row) {
-        var slot = row.dataset.slot;
-        var was = CFG.statuses.filter(function (s) { return s.slot_id === slot; })[0];
-        var body = {};
-        var label = row.querySelector('.s-label').value.trim();
-        var clabel = row.querySelector('.s-clabel').value.trim();
-        var owner = row.querySelector('.s-owner').value.trim();
-        var y = toHours(row.querySelector('.s-yellow').value);
-        var rd = toHours(row.querySelector('.s-red').value);
-
-        if (label && label !== was.label) body.label = label;
-        if (clabel !== (was.customer_label || '')) body.customerLabel = clabel || null;
-        if (owner && owner !== was.owner_role) body.ownerRole = owner;
-        if (y !== was.age_yellow_hours) body.ageYellowHours = y;
-        if (rd !== was.age_red_hours) body.ageRedHours = rd;
-
-        if (Object.keys(body).length) changed.push({ slot: slot, body: body });
+    Array.prototype.forEach.call($('mid').querySelectorAll('[data-vis]'), function (b) {
+      b.addEventListener('click', function (e) {
+        e.stopPropagation();
+        var s = CFG.statuses.filter(function (x) { return x.slot_id === b.dataset.vis; })[0];
+        api('/api/config/statuses/' + encodeURIComponent(b.dataset.vis), {
+          method: 'PATCH', body: JSON.stringify({ visible: s.visible ? 0 : 1 })
+        }).then(reloadConfig);
       });
+    });
 
-      if (!changed.length) return say('Nothing changed.', 'ok');
-      say('Saving ' + changed.length + ' status' + (changed.length === 1 ? '' : 'es') + '…', 'ok');
+    renderStatusDetail();
+  }
 
-      Promise.all(changed.map(function (c) {
-        return api('/api/config/statuses/' + encodeURIComponent(c.slot), {
-          method: 'PATCH', body: JSON.stringify(c.body)
-        });
-      })).then(function () {
-        return api('/api/config').then(function (c) { CFG = c; renderStatuses(); say('Saved.', 'ok'); });
-      }).catch(function (e) { say(e.message, 'err'); });
+  function renderStatusDetail() {
+    var s = CFG.statuses.filter(function (x) { return x.slot_id === SEL; })[0];
+
+    if (!s) {
+      return detail('Reference', '<div style="font:400 11.5px/1.6 var(--font);color:var(--muted);' +
+        'padding:12px 0">Pick a status to rename it, change who owns it, or retune its clocks.' +
+        '<br><br>The identifier underneath each name never changes, so reports, notifications and ' +
+        'automations keep working after a rename.</div>' +
+        '<div class="dlbl" style="margin-top:14px">Kinds</div>' +
+        [['milestone', 'a point passed, no work sits here'],
+         ['queue', 'waiting for someone to pick it up'],
+         ['active', 'work is happening now'],
+         ['complete', 'that stage is finished']].map(function (k) {
+          return '<div class="drow"><div class="dk"><span class="schip" style="color:' +
+            KIND_TONE[k[0]] + ';border:1px solid ' + KIND_TONE[k[0]] + '">' + k[0] + '</span></div>' +
+            '<div class="dv">' + esc(k[1]) + '</div></div>';
+        }).join(''));
+    }
+
+    var group = CFG.groups.filter(function (g) { return g.group_id === s.group_id; })[0];
+
+    detail('Status', '<div style="display:flex;flex-direction:column;gap:11px;margin-top:12px">' +
+      '<div><div class="dlbl">Name in the shop</div>' +
+      '<input class="dinput" id="eLabel" value="' + esc(s.label) + '"></div>' +
+      '<div><div class="dlbl">Name shown to the customer</div>' +
+      '<input class="dinput" id="eClabel" value="' + esc(s.customer_label || '') + '" ' +
+      'placeholder="leave blank to hide it"></div>' +
+      '<div><div class="dlbl">Owner role</div>' +
+      '<input class="dinput" id="eOwner" value="' + esc(s.owner_role) + '"></div>' +
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">' +
+      '<div><div class="dlbl">Warn at</div>' +
+      '<input class="dinput" id="eYellow" value="' + (s.age_yellow_hours == null ? '' : hours(s.age_yellow_hours)) + '" placeholder="12h"></div>' +
+      '<div><div class="dlbl">Red at</div>' +
+      '<input class="dinput" id="eRed" value="' + (s.age_red_hours == null ? '' : hours(s.age_red_hours)) + '" placeholder="2d"></div>' +
+      '</div>' +
+      '<div><div class="dlbl">Follow-up every</div>' +
+      '<input class="dinput" id="eFu" value="' + (s.follow_up_hours == null ? '' : hours(s.follow_up_hours)) + '" placeholder="24h"></div>' +
+      '</div>' +
+
+      '<div class="dlbl" style="margin-top:15px">Fixed</div>' +
+      [['Slot ID', s.slot_id], ['Group', group ? group.label : s.group_id],
+       ['Kind', s.kind], ['Lane', s.lane_key || 'not in a lane'],
+       ['Counts to cycle', Number(s.counts_toward_cycle) ? 'yes' : 'no'],
+       ['Terminal', Number(s.is_terminal) ? 'closes the file' : 'no'],
+       ['Modules', s.module_tags || '—']].map(function (r) {
+        return '<div class="drow"><div class="dk">' + esc(r[0]) + '</div>' +
+          '<div class="dv">' + esc(r[1]) + '</div></div>';
+      }).join('') +
+
+      '<div class="row" style="margin-top:14px">' +
+      '<button class="btn btn-solid" id="saveSlot">Save status</button>' +
+      '<button class="btn btn-ghost" id="clearSlot">Cancel</button></div>' +
+      '<div class="msg" id="dMsg"></div>' +
+      '<div class="sub" style="margin-top:10px">Clocks accept hours or days — write ' +
+      '<strong>12h</strong> or <strong>2d</strong>. Blank turns the clock off.</div>');
+
+    $('clearSlot').addEventListener('click', function () { SEL = null; renderStatuses(); });
+
+    $('saveSlot').addEventListener('click', function () {
+      var body = {};
+      if ($('eLabel').value.trim() !== s.label) body.label = $('eLabel').value.trim();
+      if ($('eClabel').value.trim() !== (s.customer_label || '')) {
+        body.customerLabel = $('eClabel').value.trim() || null;
+      }
+      if ($('eOwner').value.trim() !== s.owner_role) body.ownerRole = $('eOwner').value.trim();
+
+      var y = toHours($('eYellow').value), rd = toHours($('eRed').value), fu = toHours($('eFu').value);
+      if (y !== s.age_yellow_hours) body.ageYellowHours = y;
+      if (rd !== s.age_red_hours) body.ageRedHours = rd;
+      if (fu !== s.follow_up_hours) body.followUpHours = fu;
+
+      if (!Object.keys(body).length) return say('Nothing changed.', 'ok');
+
+      api('/api/config/statuses/' + encodeURIComponent(s.slot_id), {
+        method: 'PATCH', body: JSON.stringify(body)
+      }).then(reloadConfig).catch(function (e) { say(e.message, 'err'); });
     });
   }
 
-  /* --------------------------------------------------------------- lanes */
+  /* ======================================================== lanes */
 
   function renderLanes() {
-    var h = ['<div class="msg" id="msg"></div>'];
-    h.push('<div class="groupnote" style="padding-top:6px">A lane with its parts gate on will not let a ' +
-      'file start until every gating part is received. Switch a lane off and its statuses disappear ' +
-      'from the board.</div>');
+    rail('Reference', [
+      { k: 'gate-block', t: 'Block' }, { k: 'gate-warn', t: 'Warn' }, { k: 'gate-no', t: 'Ignore' }
+    ]);
+
+    var h = ['<div class="pad"><div style="font:400 11.5px/1.55 var(--font);color:var(--muted);' +
+      'max-width:640px">A lane with its gate set to <strong>Block</strong> will not let a file start ' +
+      'until every gating part is received. <strong>Warn</strong> lets it through with a flag. ' +
+      'Switch a lane off and its statuses disappear from the board.</div></div>'];
 
     CFG.lanes.forEach(function (l) {
-      h.push('<div class="card" data-lane="' + esc(l.lane_key) + '">' +
-        '<div class="row"><input class="l-label" value="' + esc(l.label) + '" style="width:180px">' +
-        '<span class="sub">' + esc(l.lane_key) + ' · owned by ' + esc(l.owner_role) + '</span>' +
-        '<div class="spacer"></div>' +
-        '<button class="chip' + (l.enabled ? ' on' : '') + '" data-en="' + esc(l.lane_key) + '">' +
+      h.push('<div class="card2"><div class="card2row" style="grid-template-columns:3px 1fr auto">' +
+        '<div class="sedge" style="background:' + (l.enabled ? 'var(--acc)' : 'var(--line)') + '"></div>' +
+        '<div><input class="dinput" data-lane-label="' + esc(l.lane_key) + '" value="' +
+        esc(l.label) + '" style="max-width:220px"></div>' +
+        '<button class="pchip' + (l.enabled ? ' on' : '') + '" data-lane-en="' + esc(l.lane_key) + '">' +
         (l.enabled ? 'On' : 'Off') + '</button></div>' +
-        '<div class="row" style="margin-top:11px"><span class="f-l">Parts gate</span>' +
+
+        '<div class="card2row" style="grid-template-columns:150px 1fr">' +
+        '<div class="dk">Parts gate</div><div class="row">' +
         ['yes', 'warn', 'no'].map(function (g) {
-          return '<button class="chip' + (l.parts_gate === g ? ' on' : '') +
+          return '<button class="pchip' + (l.parts_gate === g ? ' on' : '') +
             '" data-gate="' + esc(l.lane_key) + '" data-val="' + g + '">' +
             (g === 'yes' ? 'Block' : g === 'warn' ? 'Warn' : 'Ignore') + '</button>';
-        }).join('') + '</div></div>');
+        }).join('') + '</div></div>' +
+
+        '<div class="card2row" style="grid-template-columns:150px 1fr">' +
+        '<div class="dk">Owned by</div><div class="dv">' + esc(l.owner_role) +
+        (l.module_tag ? ' · ' + esc(l.module_tag) : '') + '</div></div>' +
+
+        '<div class="card2row" style="grid-template-columns:150px 1fr">' +
+        '<div class="dk">Statuses</div><div class="dv">' +
+        CFG.statuses.filter(function (s) { return s.lane_key === l.lane_key; }).length +
+        ' in this lane</div></div></div>');
     });
 
-    $('pane').innerHTML = h.join('');
+    $('mid').innerHTML = h.join('');
 
-    Array.prototype.forEach.call(document.querySelectorAll('[data-gate]'), function (b) {
+    Array.prototype.forEach.call($('mid').querySelectorAll('[data-gate]'), function (b) {
       b.addEventListener('click', function () {
         api('/api/config/lanes/' + b.dataset.gate, {
           method: 'PATCH', body: JSON.stringify({ partsGate: b.dataset.val })
-        }).then(reloadConfig).catch(fail);
+        }).then(reloadConfig);
       });
     });
-    Array.prototype.forEach.call(document.querySelectorAll('[data-en]'), function (b) {
+
+    Array.prototype.forEach.call($('mid').querySelectorAll('[data-lane-en]'), function (b) {
       b.addEventListener('click', function () {
-        var lane = CFG.lanes.filter(function (l) { return l.lane_key === b.dataset.en; })[0];
-        api('/api/config/lanes/' + b.dataset.en, {
-          method: 'PATCH', body: JSON.stringify({ enabled: !lane.enabled })
-        }).then(reloadConfig).catch(fail);
+        var l = CFG.lanes.filter(function (x) { return x.lane_key === b.dataset.laneEn; })[0];
+        api('/api/config/lanes/' + b.dataset.laneEn, {
+          method: 'PATCH', body: JSON.stringify({ enabled: !l.enabled })
+        }).then(reloadConfig);
+      });
+    });
+
+    Array.prototype.forEach.call($('mid').querySelectorAll('[data-lane-label]'), function (inp) {
+      inp.addEventListener('change', function () {
+        api('/api/config/lanes/' + inp.dataset.laneLabel, {
+          method: 'PATCH', body: JSON.stringify({ label: inp.value.trim() })
+        }).then(reloadConfig);
+      });
+    });
+
+    detail('Gates', '<div style="font:400 11.5px/1.6 var(--font);color:var(--muted);padding:12px 0">' +
+      'The gate is the rule that stops a car moving into a lane before its parts are on the shelf. ' +
+      'It is the single most useful setting on this page — set it to Block on Reassembly and a ' +
+      'missing clip becomes visible on the board instead of a surprise on Friday.</div>' +
+      '<div class="dlbl" style="margin-top:12px">Lanes on</div>' +
+      CFG.lanes.map(function (l) {
+        return '<div class="drow"><div class="dk">' + esc(l.label) + '</div>' +
+          '<div class="dv">' + (l.enabled ? 'on' : 'off') + ' · gate ' +
+          (l.parts_gate === 'yes' ? 'blocks' : l.parts_gate === 'warn' ? 'warns' : 'ignored') +
+          '</div></div>';
+      }).join(''));
+  }
+
+  /* ============================================ notification groups */
+
+  function renderNotify() {
+    rail('Groups', GROUPS.groups.map(function (g) {
+      return { k: String(g.id), t: g.name, c: g.positions.length + g.users.length };
+    }).concat([{ k: 'new', t: '+ New group' }]));
+
+    if (RAIL === 'new') return renderNewGroup();
+
+    var list = GROUPS.groups.filter(function (g) { return !RAIL || String(g.id) === RAIL; });
+    var h = ['<div class="pad"><div style="font:400 11.5px/1.55 var(--font);color:var(--muted);' +
+      'max-width:660px">A group is a list of recipients and the events it wants. Put positions in it, ' +
+      'people in it, or both. <strong>Owned</strong> scope means the group only hears about statuses ' +
+      'its positions own — that is what keeps the painter out of disassembly traffic.</div></div>'];
+
+    list.forEach(function (g) {
+      h.push('<div class="card2" data-group="' + g.id + '">');
+      h.push('<div class="card2row" style="grid-template-columns:1fr auto">' +
+        '<div><input class="dinput g-name" value="' + esc(g.name) + '" style="max-width:260px">' +
+        '<input class="dinput g-desc" value="' + esc(g.description || '') + '" ' +
+        'placeholder="What it is for" style="margin-top:7px"></div>' +
+        '<button class="btn btn-danger" data-delgroup="' + g.id + '" ' +
+        'style="padding:5px 10px;font-size:10.5px">Delete</button></div>');
+
+      h.push('<div class="card2row" style="grid-template-columns:150px 1fr">' +
+        '<div class="dk">Positions</div><div class="row">' +
+        CFG.positions.map(function (p) {
+          var on = g.positions.indexOf(p.position_key) >= 0;
+          return '<button class="pchip' + (on ? ' on' : '') + '" data-pos="' + esc(p.position_key) +
+            '" data-on="' + (on ? 1 : 0) + '">' + esc(p.label) + '</button>';
+        }).join('') + '</div></div>');
+
+      h.push('<div class="card2row" style="grid-template-columns:150px 1fr">' +
+        '<div class="dk">Named people</div><div class="row">' +
+        (GROUPS.staff.length
+          ? GROUPS.staff.map(function (st) {
+              var on = g.users.indexOf(st.user_id) >= 0;
+              return '<button class="pchip' + (on ? ' on' : '') + '" data-usr="' + st.user_id +
+                '" data-on="' + (on ? 1 : 0) + '">' + esc(st.display_name) + '</button>';
+            }).join('')
+          : '<span class="sub">Nobody on staff yet.</span>') + '</div></div>');
+
+      h.push('<div class="card2row" style="grid-template-columns:1fr;padding-bottom:4px">' +
+        '<div class="dlbl" style="margin:0">Events</div></div>');
+
+      h.push('<div style="padding:0 13px 11px">');
+      GROUPS.events.forEach(function (ev) {
+        var sub = g.events.filter(function (x) { return x.event_key === ev.key; })[0];
+        var on = sub && sub.enabled;
+        h.push('<div class="evrow" data-ev="' + esc(ev.key) + '"' + (on ? '' : ' style="opacity:.5"') + '>' +
+          '<div class="sedge" style="background:' + (on ? 'var(--done)' : 'var(--line)') + '"></div>' +
+          '<div><div style="font:400 11.5px var(--font)">' + esc(ev.label) + '</div>' +
+          (ev.key === 'sms.reply'
+            ? '<div class="ssub">Needs SMS, which is not switched on.</div>' : '') + '</div>' +
+          '<select class="dsel ev-scope"' + (on ? '' : ' disabled') + '>' +
+          '<option value="owned"' + (sub && sub.scope === 'owned' ? ' selected' : '') + '>Owned only</option>' +
+          '<option value="any"' + (sub && sub.scope === 'any' ? ' selected' : '') + '>Anything</option>' +
+          '</select>' +
+          '<div class="sub">' + (on ? 'in app' : 'off') + '</div>' +
+          '<button class="pchip' + (on ? ' on' : '') + '" data-evon="' + (on ? 1 : 0) + '">' +
+          (on ? 'On' : 'Off') + '</button></div>');
+      });
+      h.push('</div>');
+
+      h.push('<div class="card2row" style="grid-template-columns:1fr">' +
+        '<div class="row"><button class="btn btn-solid" data-savegroup="' + g.id + '">Save group</button>' +
+        '<span class="sub" id="gmsg-' + g.id + '"></span></div></div>');
+      h.push('</div>');
+    });
+
+    $('mid').innerHTML = h.join('');
+    wireGroups();
+
+    var resolved = GROUPS.groups.reduce(function (a, g) {
+      return a + g.positions.length + g.users.length;
+    }, 0);
+    detail('Routing', '<div style="font:400 11.5px/1.6 var(--font);color:var(--muted);padding:12px 0">' +
+      'Notifications are in-app only for now. Email and SMS delivery are switched off at the ' +
+      'platform level until they are wired up.</div>' +
+      '<div class="dlbl" style="margin-top:12px">Now</div>' +
+      '<div class="drow"><div class="dk">Groups</div><div class="dv">' + GROUPS.groups.length + '</div></div>' +
+      '<div class="drow"><div class="dk">Recipients</div><div class="dv">' + resolved + ' entries</div></div>' +
+      '<div class="drow"><div class="dk">Events</div><div class="dv">' + GROUPS.events.length +
+      ' available</div></div>' +
+      '<div class="sub" style="margin-top:12px">A person on three groups that all want the same event ' +
+      'still gets one notification.</div>');
+  }
+
+  function renderNewGroup() {
+    $('mid').innerHTML = '<div class="pad"><div class="card2" style="margin:0">' +
+      '<div class="card2row" style="grid-template-columns:1fr">' +
+      '<div class="dlbl">New group</div>' +
+      '<input class="dinput" id="gName" placeholder="Name, e.g. Paint bench">' +
+      '<input class="dinput" id="gDesc" placeholder="What it is for" style="margin-top:8px">' +
+      '<div class="row" style="margin-top:12px">' +
+      '<button class="btn btn-solid" id="addGroup">Create</button>' +
+      '<button class="btn btn-ghost" id="cancelGroup">Cancel</button></div>' +
+      '<div class="msg" id="dMsg"></div></div></div></div>';
+
+    $('cancelGroup').addEventListener('click', function () { RAIL = null; render(); });
+    $('addGroup').addEventListener('click', function () {
+      var name = $('gName').value.trim();
+      if (!name) return say('A name is required.', 'err');
+      api('/api/admin/notification-groups', {
+        method: 'POST', body: JSON.stringify({ name: name, description: $('gDesc').value.trim() })
+      }).then(function () { RAIL = null; return reloadGroups(); }).catch(function (e) { say(e.message, 'err'); });
+    });
+
+    detail('New group', '<div style="font:400 11.5px/1.6 var(--font);color:var(--muted);padding:12px 0">' +
+      'Name it after the bench or the desk, not the person — people move.</div>');
+  }
+
+  function wireGroups() {
+    Array.prototype.forEach.call($('mid').querySelectorAll('.pchip[data-pos], .pchip[data-usr]'),
+      function (b) {
+        b.addEventListener('click', function () {
+          var on = b.dataset.on !== '1';
+          b.dataset.on = on ? '1' : '0';
+          b.classList.toggle('on', on);
+        });
+      });
+
+    Array.prototype.forEach.call($('mid').querySelectorAll('.pchip[data-evon]'), function (b) {
+      b.addEventListener('click', function () {
+        var on = b.dataset.evon !== '1';
+        b.dataset.evon = on ? '1' : '0';
+        b.classList.toggle('on', on);
+        b.textContent = on ? 'On' : 'Off';
+        var row = b.closest('.evrow');
+        row.style.opacity = on ? '1' : '.5';
+        row.querySelector('.ev-scope').disabled = !on;
+        row.querySelector('.sedge').style.background = on ? 'var(--done)' : 'var(--line)';
+      });
+    });
+
+    Array.prototype.forEach.call($('mid').querySelectorAll('[data-savegroup]'), function (b) {
+      b.addEventListener('click', function () {
+        var card = b.closest('[data-group]');
+        var body = {
+          name: card.querySelector('.g-name').value.trim(),
+          description: card.querySelector('.g-desc').value.trim(),
+          positions: Array.prototype.slice.call(card.querySelectorAll('.pchip[data-pos]'))
+            .filter(function (c) { return c.dataset.on === '1'; })
+            .map(function (c) { return c.dataset.pos; }),
+          users: Array.prototype.slice.call(card.querySelectorAll('.pchip[data-usr]'))
+            .filter(function (c) { return c.dataset.on === '1'; })
+            .map(function (c) { return Number(c.dataset.usr); }),
+          events: Array.prototype.slice.call(card.querySelectorAll('.evrow')).map(function (row) {
+            return {
+              key: row.dataset.ev,
+              enabled: row.querySelector('.pchip[data-evon]').dataset.evon === '1',
+              scope: row.querySelector('.ev-scope').value
+            };
+          })
+        };
+        api('/api/admin/notification-groups/' + b.dataset.savegroup, {
+          method: 'PUT', body: JSON.stringify(body)
+        }).then(reloadGroups).catch(function (e) { alert(e.message); });
+      });
+    });
+
+    Array.prototype.forEach.call($('mid').querySelectorAll('[data-delgroup]'), function (b) {
+      b.addEventListener('click', function () {
+        if (!confirm('Delete this group? Nobody in it will be notified any more.')) return;
+        api('/api/admin/notification-groups/' + b.dataset.delgroup, { method: 'DELETE' })
+          .then(function () { RAIL = null; return reloadGroups(); });
       });
     });
   }
 
-  /* -------------------------------------------------------------- people */
+  /* ======================================================= people */
 
   function renderPeople() {
-    var h = ['<div class="msg" id="msg"></div>'];
-    h.push('<div class="card"><div class="groupname">Add someone</div>' +
-      '<div class="grid3" style="margin-top:12px">' +
-      '<div><label class="fl">Name</label><input id="nName"></div>' +
-      '<div><label class="fl">Email (optional)</label><input id="nEmail" type="email"></div>' +
-      '<div><label class="fl">Role</label><select id="nRole">' +
-      ROLES.map(function (r) { return '<option value="' + esc(r.key) + '">' + esc(r.label) + '</option>'; }).join('') +
-      '</select></div>' +
-      '<div><label class="fl">Position</label><select id="nPos"><option value="">None</option>' +
+    var byPos = {};
+    PEOPLE.people.forEach(function (p) {
+      var k = p.position_key || 'none';
+      byPos[k] = (byPos[k] || 0) + 1;
+    });
+
+    rail('Positions', CFG.positions.map(function (p) {
+      return { k: p.position_key, t: p.label, c: byPos[p.position_key] || 0 };
+    }).concat([{ k: 'none', t: 'No position', c: byPos.none || 0 }]));
+
+    var list = PEOPLE.people.filter(function (p) {
+      return !RAIL || (RAIL === 'none' ? !p.position_key : p.position_key === RAIL);
+    });
+
+    var h = ['<div class="pad"><div class="card2" style="margin:0 0 14px">' +
+      '<div class="card2row" style="grid-template-columns:1fr">' +
+      '<div class="dlbl">Add someone</div>' +
+      '<div class="grid3" style="margin-top:4px">' +
+      '<div><div class="dk">Name</div><input class="dinput" id="nName"></div>' +
+      '<div><div class="dk">Email — optional</div><input class="dinput" id="nEmail" type="email"></div>' +
+      '<div><div class="dk">Role</div><select class="dsel" id="nRole">' +
+      ROLES.map(function (r) {
+        return '<option value="' + esc(r.key) + '">' + esc(r.label) + '</option>';
+      }).join('') + '</select></div>' +
+      '<div><div class="dk">Position</div><select class="dsel" id="nPos"><option value="">None</option>' +
       CFG.positions.map(function (p) {
         return '<option value="' + esc(p.position_key) + '">' + esc(p.label) + '</option>';
       }).join('') + '</select></div>' +
-      '<div><label class="fl">Employee code</label><input id="nCode"></div>' +
+      '<div><div class="dk">Employee code</div><input class="dinput" id="nCode"></div>' +
       '<div style="align-self:end"><button class="btn btn-solid" id="addPerson">Add</button></div>' +
-      '</div><div class="groupnote" style="margin-top:10px">Leave the email blank and they get a ' +
-      'sign-in code instead — good enough for testing on the floor. Add an email later and they can ' +
-      'set their own password.</div></div>');
+      '</div>' +
+      '<div class="sub" style="margin-top:9px">Leave the email blank and they get a sign-in code ' +
+      'instead — good enough for the floor. Add an email later and they set their own password.</div>' +
+      '<div class="msg" id="dMsg"></div></div></div>'];
 
-    h.push('<div class="grouphead"><div class="groupname">Everyone</div></div>');
-    h.push('<div class="peoplerow" style="border:none"><div class="f-l">Name</div>' +
-      '<div class="f-l">Role</div><div class="f-l">Position</div><div class="f-l">Last in</div>' +
-      '<div class="f-l">Access</div></div>');
+    h.push('<div class="prow2" style="border-top:1px solid var(--line);height:30px">' +
+      '<div></div><div class="dk">Name</div><div class="dk">Role</div><div class="dk">Position</div>' +
+      '<div class="dk">Last in</div><div class="dk">Access</div><div></div></div>');
 
-    PEOPLE.people.forEach(function (p) {
-      h.push('<div class="peoplerow" data-user="' + p.id + '">' +
-        '<div><div class="log-b">' + esc(p.name) + '</div>' +
-        '<div class="sub">' + esc(p.email || 'code sign-in only') + '</div></div>' +
-        '<select class="p-role">' + ROLES.map(function (r) {
+    list.forEach(function (p) {
+      var initials = String(p.name || '?').split(/\s+/).map(function (w) { return w[0]; })
+        .join('').slice(0, 2).toUpperCase();
+      h.push('<div class="prow2" data-user="' + p.id + '"' +
+        (p.membership_status === 'inactive' ? ' style="opacity:.55"' : '') + '>' +
+        '<div class="avatar2">' + esc(initials) + '</div>' +
+        '<div style="min-width:0"><div class="slabel">' + esc(p.name) + '</div>' +
+        '<div class="ssub">' + esc(p.email || 'code sign-in only') + '</div></div>' +
+        '<select class="dsel p-role">' + ROLES.map(function (r) {
           return '<option value="' + esc(r.key) + '"' + (r.key === p.role ? ' selected' : '') + '>' +
             esc(r.label) + '</option>';
         }).join('') + '</select>' +
-        '<select class="p-pos"><option value="">None</option>' + CFG.positions.map(function (x) {
+        '<select class="dsel p-pos"><option value="">None</option>' + CFG.positions.map(function (x) {
           return '<option value="' + esc(x.position_key) + '"' +
             (x.position_key === p.position_key ? ' selected' : '') + '>' + esc(x.label) + '</option>';
         }).join('') + '</select>' +
-        '<div class="sub">' + (p.last_login_at ? Shell.when(p.last_login_at) : 'never') + '</div>' +
-        '<div class="row"><button class="btn btn-ghost" data-code="' + p.id +
-        '" style="padding:5px 9px;font-size:10.5px">New code</button>' +
-        '<button class="btn btn-ghost" data-reset="' + p.id +
-        '" style="padding:5px 9px;font-size:10.5px">Reset password</button></div>' +
-        '</div>');
+        '<div class="ssub">' + (p.last_login_at ? Shell.when(p.last_login_at) : 'never') + '</div>' +
+        '<div class="row" style="gap:5px">' +
+        '<button class="visbtn" data-code="' + p.id + '">Code</button>' +
+        '<button class="visbtn" data-reset="' + p.id + '">Reset</button></div>' +
+        '<div></div></div>');
     });
 
-    h.push('<div class="row" style="margin-top:20px">' +
-      '<button class="btn btn-solid" id="savePeople">Save roles and positions</button></div>');
+    h.push('<div class="pad"><button class="btn btn-solid" id="savePeople">' +
+      'Save roles and positions</button></div>');
 
-    $('pane').innerHTML = h.join('');
+    $('mid').innerHTML = h.join('');
+    wirePeople();
 
+    detail('Access', '<div style="font:400 11.5px/1.6 var(--font);color:var(--muted);padding:12px 0">' +
+      'Role decides what someone can see and change. Position decides which lanes they own and which ' +
+      'notifications reach them.</div>' +
+      '<div class="dlbl" style="margin-top:12px">Roles</div>' +
+      [['Owner', 'everything, including this page'],
+       ['Accounting', 'money and reports, no production'],
+       ['Estimator', 'files, money, supplements, imports'],
+       ['Production manager', 'the board and assignments'],
+       ['Parts manager', 'parts and vendors'],
+       ['Front office', 'customers, scheduling, documents'],
+       ['Salesperson', 'leads and the sales app'],
+       ['Technician', 'only the files assigned to them']].map(function (r) {
+        return '<div class="drow"><div class="dk">' + esc(r[0]) + '</div>' +
+          '<div class="dv">' + esc(r[1]) + '</div></div>';
+      }).join(''));
+  }
+
+  function wirePeople() {
     $('addPerson').addEventListener('click', function () {
       var name = $('nName').value.trim();
       if (!name) return say('A name is required.', 'err');
@@ -323,13 +772,12 @@
           : r.tempPassword ? ' Temporary password: ' + r.tempPassword : '';
         say('Added.' + extra, 'ok');
         return reloadPeople();
-      }).catch(fail);
+      }).catch(function (e) { say(e.message, 'err'); });
     });
 
     $('savePeople').addEventListener('click', function () {
-      var rows = Array.prototype.slice.call(document.querySelectorAll('[data-user]'));
       var jobs = [];
-      rows.forEach(function (row) {
+      Array.prototype.forEach.call($('mid').querySelectorAll('[data-user]'), function (row) {
         var id = Number(row.dataset.user);
         var was = PEOPLE.people.filter(function (p) { return p.id === id; })[0];
         var role = row.querySelector('.p-role').value;
@@ -342,169 +790,60 @@
       if (!jobs.length) return say('Nothing changed.', 'ok');
       Promise.all(jobs.map(function (j) {
         return api('/api/admin/people/' + j.id, { method: 'PATCH', body: JSON.stringify(j.body) });
-      })).then(function () { say('Saved.', 'ok'); return reloadPeople(); }).catch(fail);
+      })).then(function () { say('Saved.', 'ok'); return reloadPeople(); })
+        .catch(function (e) { say(e.message, 'err'); });
     });
 
-    Array.prototype.forEach.call(document.querySelectorAll('[data-code]'), function (b) {
+    Array.prototype.forEach.call($('mid').querySelectorAll('[data-code]'), function (b) {
       b.addEventListener('click', function () {
         api('/api/admin/people/' + b.dataset.code + '/code', { method: 'POST' })
           .then(function (r) {
             say('Sign-in code: ' + r.code + ' — write it down, it is shown once.', 'ok');
-          }).catch(fail);
+          }).catch(function (e) { say(e.message, 'err'); });
       });
     });
-    Array.prototype.forEach.call(document.querySelectorAll('[data-reset]'), function (b) {
+
+    Array.prototype.forEach.call($('mid').querySelectorAll('[data-reset]'), function (b) {
       b.addEventListener('click', function () {
         if (!confirm('Reset this password? They will be signed out everywhere.')) return;
         api('/api/admin/people/' + b.dataset.reset + '/reset-password', { method: 'POST' })
-          .then(function (r) { say('Temporary password: ' + r.tempPassword, 'ok'); }).catch(fail);
+          .then(function (r) { say('Temporary password: ' + r.tempPassword, 'ok'); })
+          .catch(function (e) { say(e.message, 'err'); });
       });
     });
   }
 
-  /* -------------------------------------------------------------- groups */
-
-  function renderGroups() {
-    var h = ['<div class="msg" id="msg"></div>'];
-    h.push('<div class="groupnote" style="padding-top:6px">A group holds positions, named people, or ' +
-      'both. <strong>Owned</strong> scope means the group only hears about statuses its positions own — ' +
-      'that is what keeps the painter out of disassembly traffic. <strong>Any</strong> means everything.</div>');
-
-    GROUPS.groups.forEach(function (g) {
-      h.push('<div class="card" data-group="' + g.id + '">');
-      h.push('<div class="row"><input class="g-name" value="' + esc(g.name) + '" style="width:220px">' +
-        '<input class="g-desc" value="' + esc(g.description || '') + '" placeholder="What it is for" style="flex:1;min-width:180px">' +
-        '<button class="btn btn-danger" data-delgroup="' + g.id + '" style="padding:5px 10px;font-size:10.5px">Delete</button></div>');
-
-      h.push('<div class="f-l" style="margin-top:13px">Positions</div><div class="chips">' +
-        CFG.positions.map(function (p) {
-          var on = g.positions.indexOf(p.position_key) >= 0;
-          return '<button class="chip' + (on ? ' on' : '') + '" data-pos="' + esc(p.position_key) +
-            '" data-on="' + (on ? 1 : 0) + '">' + esc(p.label) + '</button>';
-        }).join('') + '</div>');
-
-      h.push('<div class="f-l" style="margin-top:13px">Named people</div><div class="chips">' +
-        GROUPS.staff.map(function (s) {
-          var on = g.users.indexOf(s.user_id) >= 0;
-          return '<button class="chip' + (on ? ' on' : '') + '" data-usr="' + s.user_id +
-            '" data-on="' + (on ? 1 : 0) + '">' + esc(s.display_name) + '</button>';
-        }).join('') + '</div>');
-
-      h.push('<div class="f-l" style="margin-top:15px">Events</div>');
-      GROUPS.events.forEach(function (ev) {
-        var sub = g.events.filter(function (s) { return s.event_key === ev.key; })[0];
-        var on = sub && sub.enabled;
-        h.push('<div class="evrow" data-ev="' + esc(ev.key) + '">' +
-          '<div><div class="log-b">' + esc(ev.label) + '</div>' +
-          (ev.key === 'sms.reply' ? '<div class="sub">Needs SMS, which is not switched on.</div>' : '') +
-          '</div>' +
-          '<select class="ev-scope"' + (on ? '' : ' disabled') + '>' +
-          '<option value="owned"' + (sub && sub.scope === 'owned' ? ' selected' : '') + '>Owned only</option>' +
-          '<option value="any"' + (sub && sub.scope === 'any' ? ' selected' : '') + '>Anything</option>' +
-          '</select>' +
-          '<button class="chip' + (on ? ' on' : '') + '" data-evon="' + (on ? 1 : 0) + '">' +
-          (on ? 'On' : 'Off') + '</button></div>');
-      });
-
-      h.push('<div class="row" style="margin-top:14px">' +
-        '<button class="btn btn-solid" data-savegroup="' + g.id + '" style="padding:6px 13px">Save group</button></div>');
-      h.push('</div>');
-    });
-
-    h.push('<div class="card"><div class="groupname">New group</div>' +
-      '<div class="row" style="margin-top:11px">' +
-      '<input id="gName" placeholder="Name, e.g. Paint bench" style="width:220px">' +
-      '<input id="gDesc" placeholder="What it is for" style="flex:1;min-width:180px">' +
-      '<button class="btn btn-solid" id="addGroup">Create</button></div></div>');
-
-    $('pane').innerHTML = h.join('');
-
-    Array.prototype.forEach.call(document.querySelectorAll('.chip[data-pos], .chip[data-usr]'), function (b) {
-      b.addEventListener('click', function () {
-        var on = b.dataset.on !== '1';
-        b.dataset.on = on ? '1' : '0';
-        b.classList.toggle('on', on);
-      });
-    });
-
-    Array.prototype.forEach.call(document.querySelectorAll('.chip[data-evon]'), function (b) {
-      b.addEventListener('click', function () {
-        var on = b.dataset.evon !== '1';
-        b.dataset.evon = on ? '1' : '0';
-        b.classList.toggle('on', on);
-        b.textContent = on ? 'On' : 'Off';
-        b.closest('.evrow').querySelector('.ev-scope').disabled = !on;
-      });
-    });
-
-    Array.prototype.forEach.call(document.querySelectorAll('[data-savegroup]'), function (b) {
-      b.addEventListener('click', function () {
-        var card = b.closest('[data-group]');
-        var body = {
-          name: card.querySelector('.g-name').value.trim(),
-          description: card.querySelector('.g-desc').value.trim(),
-          positions: Array.prototype.slice.call(card.querySelectorAll('.chip[data-pos]'))
-            .filter(function (c) { return c.dataset.on === '1'; }).map(function (c) { return c.dataset.pos; }),
-          users: Array.prototype.slice.call(card.querySelectorAll('.chip[data-usr]'))
-            .filter(function (c) { return c.dataset.on === '1'; }).map(function (c) { return Number(c.dataset.usr); }),
-          events: Array.prototype.slice.call(card.querySelectorAll('.evrow')).map(function (row) {
-            return {
-              key: row.dataset.ev,
-              enabled: row.querySelector('.chip[data-evon]').dataset.evon === '1',
-              scope: row.querySelector('.ev-scope').value
-            };
-          })
-        };
-        api('/api/admin/notification-groups/' + b.dataset.savegroup, {
-          method: 'PUT', body: JSON.stringify(body)
-        }).then(function () { say('Saved.', 'ok'); return reloadGroups(); }).catch(fail);
-      });
-    });
-
-    Array.prototype.forEach.call(document.querySelectorAll('[data-delgroup]'), function (b) {
-      b.addEventListener('click', function () {
-        if (!confirm('Delete this group? Nobody in it will be notified any more.')) return;
-        api('/api/admin/notification-groups/' + b.dataset.delgroup, { method: 'DELETE' })
-          .then(reloadGroups).catch(fail);
-      });
-    });
-
-    $('addGroup').addEventListener('click', function () {
-      var name = $('gName').value.trim();
-      if (!name) return say('A name is required.', 'err');
-      api('/api/admin/notification-groups', {
-        method: 'POST', body: JSON.stringify({ name: name, description: $('gDesc').value.trim() })
-      }).then(reloadGroups).catch(fail);
-    });
-  }
-
-  /* ------------------------------------------------------------ settings */
+  /* ===================================================== settings */
 
   function renderSettings() {
+    rail('Reference', [{ k: 'tech', t: 'Tech visibility' }, { k: 'caps', t: 'Day limits' }]);
     var s = CFG.settings;
-    var h = ['<div class="msg" id="msg"></div>'];
 
-    h.push('<div class="card"><div class="groupname">Who sees what</div>' +
-      '<div class="row" style="margin-top:12px"><div style="flex:1">' +
-      '<div class="log-b">Technicians see only their own files</div>' +
-      '<div class="groupnote">On: a tech sees only cars assigned to them. Off: every tech sees the ' +
-      'whole board. Estimators, production, front office and the owner always see everything.</div>' +
-      '</div><button class="chip' + (s.tech_sees_own_only !== '0' ? ' on' : '') + '" id="techOwn" ' +
+    $('mid').innerHTML = '<div class="pad">' +
+      '<div class="card2" style="margin:0 0 14px">' +
+      '<div class="card2row" style="grid-template-columns:1fr auto">' +
+      '<div><div style="font:500 12.5px var(--font)">Technicians see only their own files</div>' +
+      '<div class="sub" style="margin-top:4px;max-width:520px">On: a tech sees only cars assigned ' +
+      'to them. Off: every tech sees the whole board. Estimating, production, front office, ' +
+      'accounting and the owner always see everything.</div></div>' +
+      '<button class="pchip' + (s.tech_sees_own_only !== '0' ? ' on' : '') + '" id="techOwn" ' +
       'data-on="' + (s.tech_sees_own_only !== '0' ? 1 : 0) + '">' +
-      (s.tech_sees_own_only !== '0' ? 'On' : 'Off') + '</button></div></div>');
+      (s.tech_sees_own_only !== '0' ? 'On' : 'Off') + '</button></div></div>' +
 
-    h.push('<div class="card"><div class="groupname">Scheduler capacity</div>' +
-      '<div class="groupnote">How many of each per day. The owner can always overbook.</div>' +
-      '<div class="grid3" style="margin-top:12px">' +
+      '<div class="card2" style="margin:0 0 14px">' +
+      '<div class="card2row" style="grid-template-columns:1fr">' +
+      '<div class="dlbl" style="margin:0 0 4px">Scheduler capacity</div>' +
+      '<div class="sub" style="margin-bottom:10px">How many of each per day. The owner can always ' +
+      'overbook; everyone else is refused.</div>' +
+      '<div class="grid3">' +
       ['drop', 'pickup', 'return', 'estimate', 'appraiser'].map(function (k) {
-        return '<div><label class="fl">' + k + 's per day</label>' +
-          '<input type="number" min="0" id="cap_' + k + '" value="' + esc(s['cap_' + k] || '0') + '"></div>';
-      }).join('') + '</div></div>');
+        return '<div><div class="dk">' + k + 's per day</div>' +
+          '<input class="dinput" type="number" min="0" id="cap_' + k + '" value="' +
+          esc(s['cap_' + k] || '0') + '"></div>';
+      }).join('') + '</div></div></div>' +
 
-    h.push('<div class="row" style="margin-top:18px">' +
-      '<button class="btn btn-solid" id="saveSettings">Save settings</button></div>');
-
-    $('pane').innerHTML = h.join('');
+      '<div class="row"><button class="btn btn-solid" id="saveSettings">Save settings</button></div>' +
+      '<div class="msg" id="dMsg"></div></div>';
 
     $('techOwn').addEventListener('click', function () {
       var b = $('techOwn'), on = b.dataset.on !== '1';
@@ -519,40 +858,50 @@
         body['cap_' + k] = $('cap_' + k).value || '0';
       });
       api('/api/config/settings', { method: 'PATCH', body: JSON.stringify(body) })
-        .then(function () { say('Saved.', 'ok'); return reloadConfig(); }).catch(fail);
+        .then(function () { say('Saved.', 'ok'); return reloadConfig(); })
+        .catch(function (e) { say(e.message, 'err'); });
     });
+
+    detail('Shop', '<div class="drow"><div class="dk">Shop type</div>' +
+      '<div class="dv">' + esc(CFG.company.shopType) + '</div></div>' +
+      '<div class="drow"><div class="dk">Timezone</div>' +
+      '<div class="dv">' + esc(CFG.company.timezone) + '</div></div>' +
+      '<div class="drow"><div class="dk">Statuses</div>' +
+      '<div class="dv">' + CFG.statuses.length + '</div></div>' +
+      '<div class="drow"><div class="dk">Lanes</div>' +
+      '<div class="dv">' + CFG.lanes.filter(function (l) { return l.enabled; }).length +
+      ' on of ' + CFG.lanes.length + '</div></div>' +
+      '<div class="sub" style="margin-top:12px">Shop type is set at the platform level, not here. ' +
+      'It decides which status template the shop started from.</div>');
   }
 
-  /* ------------------------------------------------------------- storage */
+  /* ====================================================== storage */
 
   function renderStorage() {
-    $('pane').innerHTML = '<div class="empty">Loading…</div>';
+    rail('Reference', []);
+    $('mid').innerHTML = '<div class="empty">Loading…</div>';
 
     api('/api/storage').then(function (d) {
       function bytes(n) {
         if (!n) return '0 B';
-        if (n < 1024 * 1024) return Math.round(n / 1024) + ' KB';
-        if (n < 1024 * 1024 * 1024) return (n / 1024 / 1024).toFixed(1) + ' MB';
-        return (n / 1024 / 1024 / 1024).toFixed(2) + ' GB';
+        if (n < 1048576) return Math.round(n / 1024) + ' KB';
+        if (n < 1073741824) return (n / 1048576).toFixed(1) + ' MB';
+        return (n / 1073741824).toFixed(2) + ' GB';
       }
 
-      var h = ['<div class="msg" id="msg"></div>'];
-      h.push('<div class="groupnote" style="padding-top:6px">Photos are shrunk on the phone before they ' +
-        'upload — a 2048px version to keep and a small thumbnail for grids — so a car with two hundred ' +
-        'photos costs about 80 MB rather than 800.</div>');
-
-      h.push('<div class="kpis" style="padding:16px 0;border-bottom:1px solid var(--whisper)">' +
-        '<div><div class="kpi-v">' + bytes(d.bytes) + '</div><div class="kpi-k">on disk</div></div>' +
-        '<div><div class="kpi-v">' + d.files.toLocaleString('en-US') + '</div>' +
-        '<div class="kpi-k">files</div></div>' +
-        '<div><div class="kpi-v">' + d.images.toLocaleString('en-US') + '</div>' +
-        '<div class="kpi-k">photos</div></div>' +
-        '<div><div class="kpi-v">' + (d.files ? bytes(Math.round(d.bytes / d.files)) : '—') + '</div>' +
-        '<div class="kpi-k">average file</div></div></div>');
-
-      h.push('<div class="sec">By kind</div>');
       var max = Math.max.apply(null, d.byType.map(function (t) { return Number(t.bytes); }).concat([1]));
-      h.push('<table><thead><tr><th>Kind</th><th class="num">Files</th>' +
+
+      $('mid').innerHTML = '<div class="kpis" style="border-top:none">' +
+        '<div><div class="kpi-v">' + bytes(d.bytes) + '</div><div class="kpi-k">On disk</div></div>' +
+        '<div><div class="kpi-v">' + d.files.toLocaleString('en-US') + '</div>' +
+        '<div class="kpi-k">Files</div></div>' +
+        '<div><div class="kpi-v">' + d.images.toLocaleString('en-US') + '</div>' +
+        '<div class="kpi-k">Photos</div></div>' +
+        '<div><div class="kpi-v">' + (d.files ? bytes(Math.round(d.bytes / d.files)) : '—') + '</div>' +
+        '<div class="kpi-k">Average file</div></div><div class="kpi-tail"></div></div>' +
+
+        '<div class="pad"><div class="dlbl">By kind</div>' +
+        '<table style="margin-top:6px"><thead><tr><th>Kind</th><th class="num">Files</th>' +
         '<th class="num">Size</th><th></th></tr></thead><tbody>' +
         d.byType.map(function (t) {
           var pct = Math.round((Number(t.bytes) / max) * 100);
@@ -560,29 +909,32 @@
             '<td class="num">' + t.n + '</td>' +
             '<td class="num">' + bytes(Number(t.bytes)) + '</td>' +
             '<td><div style="height:6px;background:var(--whisper);border-radius:3px">' +
-            '<div style="height:100%;width:' + pct + '%;background:var(--acc);border-radius:3px"></div>' +
-            '</div></td></tr>';
-        }).join('') + '</tbody></table>');
+            '<div style="height:100%;width:' + pct + '%;background:var(--acc);border-radius:3px">' +
+            '</div></div></td></tr>';
+        }).join('') + '</tbody></table></div>';
 
-      $('pane').innerHTML = h.join('');
+      detail('Storage', '<div style="font:400 11.5px/1.6 var(--font);color:var(--muted);padding:12px 0">' +
+        'Photos are shrunk on the phone before they upload — a 2048px version to keep and a small ' +
+        'thumbnail for grids — so a car with two hundred photos costs about 80 MB rather than 800.' +
+        '</div><div class="sub">Watch this against the disk on the server, not the database size. ' +
+        'Photos are what grows.</div>');
     }).catch(function (e) {
-      $('pane').innerHTML = '<div class="empty">' + esc(e.message) + '</div>';
+      $('mid').innerHTML = '<div class="empty">' + esc(e.message) + '</div>';
     });
   }
 
-  /* ------------------------------------------------------------- helpers */
+  /* ===================================================== plumbing */
 
   function say(t, k) {
-    var m = $('msg');
-    if (!m) return;
+    var m = $('dMsg');
+    if (!m) return alert(t);
     m.textContent = t;
     m.className = 'msg ' + k;
   }
-  function fail(e) { say(e.message, 'err'); }
   function reloadConfig() { return api('/api/config').then(function (c) { CFG = c; render(); }); }
-  function reloadPeople() { return api('/api/config/people').then(function (p) { PEOPLE = p; renderPeople(); }); }
+  function reloadPeople() { return api('/api/config/people').then(function (p) { PEOPLE = p; render(); }); }
   function reloadGroups() {
-    return api('/api/admin/notification-groups').then(function (g) { GROUPS = g; renderGroups(); });
+    return api('/api/admin/notification-groups').then(function (g) { GROUPS = g; render(); });
   }
 })();
 </script>
