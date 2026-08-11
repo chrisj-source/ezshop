@@ -101,13 +101,24 @@ export function readDbf(buf: Buffer, memo?: Buffer | null): DbfTable {
   return { fields, rows, recordCount };
 }
 
-/** dBase III memo: 512-byte blocks, content ends at 0x1A 0x1A. */
+/** dBase memo: fixed-size blocks; dBase IV prefixes each with FF FF 08 00 + length. */
 function readMemo(dbt: Buffer, block: number): string | null {
-  const start = block * 512;
+  const blockSize = dbt.length > 22 ? (dbt.readUInt16LE(20) || 512) : 512;
+  const start = block * blockSize;
   if (start >= dbt.length) return null;
-  let end = start;
-  while (end < dbt.length - 1 && !(dbt[end] === 0x1a && dbt[end + 1] === 0x1a)) end++;
-  const text = dbt.subarray(start, end).toString('latin1').replace(/\r/g, '\n').trim();
+
+  let from = start;
+  let end = dbt.length;
+  if (dbt[start] === 0xff && dbt[start + 1] === 0xff) {
+    const len = dbt.readUInt32LE(start + 4);
+    from = start + 8;
+    if (len > 8 && start + len <= dbt.length) end = start + len;
+  }
+  for (let i = from; i < end - 1; i++) {
+    if (dbt[i] === 0x1a && dbt[i + 1] === 0x1a) { end = i; break; }
+  }
+
+  const text = dbt.subarray(from, end).toString('latin1').replace(/\r/g, '\n').trim();
   return text || null;
 }
 
@@ -115,37 +126,53 @@ function readMemo(dbt: Buffer, block: number): string | null {
  * Field names drift between estimating systems and versions, so every read
  * goes through a candidate list rather than a hard-coded name. Tries exact
  * match, then prefix, then "contains".
+ *
+ * `want` keeps the fuzzy passes honest: CCC's .lin table pairs LBR_OP with a
+ * logical LBR_OP_J, and a prefix match would otherwise hand back `false`.
  */
-export function pick(row: DbfRow | undefined, names: string[]): string | number | boolean | null {
+export function pick(
+  row: DbfRow | undefined,
+  names: string[],
+  want?: 'string' | 'number'
+): string | number | boolean | null {
   if (!row) return null;
   const keys = Object.keys(row);
 
-  for (const want of names) {
-    const w = want.toUpperCase();
-    if (row[w] !== undefined && row[w] !== null && row[w] !== '') return row[w];
+  const ok = (v: unknown): boolean => {
+    if (v === undefined || v === null || v === '') return false;
+    if (!want) return true;
+    if (typeof v === 'boolean') return false;
+    if (want === 'number') return typeof v === 'number' ||
+      !isNaN(Number(String(v).replace(/[$,]/g, '')));
+    return true;
+  };
+
+  for (const want_ of names) {
+    const w = want_.toUpperCase();
+    if (ok(row[w])) return row[w];
   }
-  for (const want of names) {
-    const w = want.toUpperCase();
-    const hit = keys.find(k => k.startsWith(w) && row[k] !== null && row[k] !== '');
+  for (const want_ of names) {
+    const w = want_.toUpperCase();
+    const hit = keys.find(k => k.startsWith(w) && ok(row[k]));
     if (hit) return row[hit];
   }
-  for (const want of names) {
-    const w = want.toUpperCase();
-    const hit = keys.find(k => k.includes(w) && row[k] !== null && row[k] !== '');
+  for (const want_ of names) {
+    const w = want_.toUpperCase();
+    const hit = keys.find(k => k.includes(w) && ok(row[k]));
     if (hit) return row[hit];
   }
   return null;
 }
 
 export function pickStr(row: DbfRow | undefined, names: string[]): string | null {
-  const v = pick(row, names);
+  const v = pick(row, names, 'string');
   if (v === null || v === undefined) return null;
   const s = String(v).trim();
   return s || null;
 }
 
 export function pickNum(row: DbfRow | undefined, names: string[]): number | null {
-  const v = pick(row, names);
+  const v = pick(row, names, 'number');
   if (v === null || v === undefined || v === '') return null;
   const n = typeof v === 'number' ? v : Number(String(v).replace(/[$,]/g, ''));
   return isNaN(n) ? null : n;

@@ -482,7 +482,7 @@ CREATE TABLE ems_imports (
   match_confidence ENUM('exact','likely','none') NOT NULL DEFAULT 'none',
   state           ENUM('pending','accepted','rejected','failed','superseded') NOT NULL DEFAULT 'pending',
   parse_error     VARCHAR(500)  NULL,
-  storage_key     VARCHAR(255)  NULL COMMENT 'the raw file set on disk',
+  storage_key     VARCHAR(255)  NULL COMMENT 'folder holding the raw file set on disk',
   received_at     DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
   decided_at      DATETIME      NULL,
   decided_by      BIGINT UNSIGNED NULL,

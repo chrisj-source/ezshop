@@ -28,6 +28,16 @@ export function storageKey(companyId: number, ext: string): string {
   return path.posix.join(String(companyId), month, name);
 }
 
+/**
+ * A folder for a set of files that belong together (an EMS import is 15-20
+ * files). The database stores this one short key, not a list of file keys —
+ * joining twenty keys into a VARCHAR is how the EMS upload used to fail.
+ */
+export function storagePrefix(companyId: number, kind: string): string {
+  const month = new Date().toISOString().slice(0, 7);
+  return path.posix.join(String(companyId), month, kind, crypto.randomBytes(8).toString('hex'));
+}
+
 export function absolutePath(key: string): string {
   const resolved = path.resolve(config.storageDir, key);
   const root = path.resolve(config.storageDir);

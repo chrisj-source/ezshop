@@ -80,7 +80,8 @@ export interface EmsEstimate {
 
 export const LABOR_TYPES: Record<string, string> = {
   LAB: 'Body', LAR: 'Paint', LAM: 'Mechanical', LAF: 'Frame', LAS: 'Structural',
-  LAD: 'Diagnostic', LAE: 'Electrical', LAG: 'Glass', LAU: 'PDR', LAT: 'Total'
+  LAD: 'Diagnostic', LAE: 'Electrical', LAG: 'Glass', LAU: 'PDR',
+  LA1: 'Aluminum', LA2: 'Aluminum structural', LAT: 'Total'
 };
 
 export const PART_TYPES: Record<string, string> = {
@@ -106,13 +107,18 @@ const SYSTEM_NAME: Record<string, string> = {
 
 export type FileSet = Map<string, Buffer>;
 
+/** Files in an estimate folder that are not EMS tables. */
+const NOT_A_TABLE = new Set(['lock', 'log', 'bak', 'tmp', 'ini', 'db']);
+
 /** Group uploaded files by their EMS extension, ignoring byte-identical copies. */
 export function groupSet(files: Array<{ filename: string; buffer: Buffer }>): {
   set: FileSet; envelopeName: string | null; skipped: string[];
 } {
   const set: FileSet = new Map();
+  const bases = new Map<string, string>();
   const skipped: string[] = [];
   let envelopeName: string | null = null;
+  let firstBase: string | null = null;
 
   for (const f of files) {
     const m = /^(.*?)(?:-[0-9a-f]{4,})?\.([a-z0-9]{2,4})$/i.exec(f.filename.trim());
@@ -121,14 +127,23 @@ export function groupSet(files: Array<{ filename: string; buffer: Buffer }>): {
     const base = m[1];
     const ext = m[2].toLowerCase();
 
-    if (ext === 'env' && !envelopeName) envelopeName = base;
-    if (!envelopeName) envelopeName = base;
+    // CCC leaves a lock file in the export folder; it is not a table.
+    if (NOT_A_TABLE.has(ext)) continue;
 
-    if (set.has(ext)) { skipped.push(f.filename); continue; }
+    if (ext === 'env') envelopeName = base;
+    if (!firstBase) firstBase = base;
+
+    if (set.has(ext)) {
+      // A second copy of the same table under a -hash name is CCC's own
+      // duplicate and expected. A different estimate's table is not.
+      if (bases.get(ext) !== base) skipped.push(f.filename);
+      continue;
+    }
     set.set(ext, f.buffer);
+    bases.set(ext, base);
   }
 
-  return { set, envelopeName, skipped };
+  return { set, envelopeName: envelopeName ?? firstBase, skipped };
 }
 
 function table(set: FileSet, ext: string, warnings: string[]): DbfRow[] {
@@ -149,12 +164,26 @@ function table(set: FileSet, ext: string, warnings: string[]): DbfRow[] {
 const cents = (v: number | null): number | null =>
   v === null ? null : Math.round(v * 100);
 
+/** Two of these are often null; the sum is null only when both are. */
+function sumCents(a: number | null, b: number | null): number | null {
+  if (a === null && b === null) return null;
+  return Math.round(((a ?? 0) + (b ?? 0)) * 100);
+}
+
+/** CCC writes the model year two digits wide. */
+function modelYear(v: string | null): number | null {
+  const n = Number((v ?? '').trim());
+  if (!n || isNaN(n)) return null;
+  if (n >= 1900) return n;
+  return n < 60 ? 2000 + n : 1900 + n;
+}
+
 export function parseEms(files: Array<{ filename: string; buffer: Buffer }>): EmsEstimate {
   const warnings: string[] = [];
   const { set, envelopeName, skipped } = groupSet(files);
 
   if (skipped.length) {
-    warnings.push(`${skipped.length} duplicate or unrecognised file${skipped.length === 1 ? '' : 's'} ignored.`);
+    warnings.push(`${skipped.length} file${skipped.length === 1 ? '' : 's'} from a different estimate or of an unknown kind ignored.`);
   }
   if (!set.size) throw new Error('No EMS files found in that upload.');
 
@@ -165,7 +194,6 @@ export function parseEms(files: Array<{ filename: string; buffer: Buffer }>): Em
   const ttl = table(set, 'ttl', warnings)[0];
   const stl = table(set, 'stl', warnings);
   const lin = table(set, 'lin', warnings);
-  const pfl = table(set, 'pfl', warnings);
   const ven = table(set, 'ven', warnings);
 
   if (!env) warnings.push('No envelope (.env) in the set — RO number and supplement flag may be missing.');
@@ -177,36 +205,63 @@ export function parseEms(files: Array<{ filename: string; buffer: Buffer }>): Em
 
   const dateStr = pickStr(env, ['CREATE_DT', 'CREATED', 'DATE']);
   const timeStr = pickStr(env, ['CREATE_TM', 'CREATE_TIME']);
+  const clock = /^(\d{2})(\d{2})(\d{2})?$/.exec(timeStr ?? '');
 
-  const laborByType = pfl.map(r => {
-    const type = (pickStr(r, ['LBR_TYPE', 'LABOR_TYPE', 'TYPE']) ?? '').toUpperCase();
-    return {
-      type,
-      label: LABOR_TYPES[type] ?? type,
-      hours: pickNum(r, ['LBR_HRS', 'HOURS', 'HRS']),
-      amountCents: cents(pickNum(r, ['LBR_AMT', 'AMOUNT', 'AMT']))
-    };
-  }).filter(x => x.type);
+  // Labour and parts subtotals both live in .stl, keyed by family (LA, PA) and
+  // code (LAB, LAR, PAO …). The .pf* files are the shop's rate and tax profile,
+  // not this estimate's numbers.
+  const sub = stl.map(r => ({
+    family: (pickStr(r, ['TTL_TYPE']) ?? '').toUpperCase(),
+    code: (pickStr(r, ['TTL_TYPECD']) ?? '').toUpperCase(),
+    amountCents: cents(pickNum(r, ['TTL_AMT', 'NT_AMT', 'T_AMT'])) ?? 0,
+    hours: pickNum(r, ['TTL_HRS', 'NT_HRS', 'T_HRS'])
+  }));
 
-  const partsByType = stl.map(r => {
-    const type = (pickStr(r, ['PART_TYPE', 'TYPE']) ?? '').toUpperCase();
-    const amt = cents(pickNum(r, ['PART_AMT', 'AMOUNT', 'AMT', 'TOTAL']));
-    return { type, label: PART_TYPES[type] ?? type, amountCents: amt ?? 0 };
-  }).filter(x => x.type && x.type !== 'PAT' && x.amountCents > 0);
+  const laborByType = sub
+    .filter(s => s.family === 'LA' && s.code && s.code !== 'LAT' && (s.amountCents > 0 || (s.hours ?? 0) > 0))
+    .map(s => ({
+      type: s.code,
+      label: LABOR_TYPES[s.code] ?? s.code,
+      hours: s.hours,
+      amountCents: s.amountCents
+    }));
+
+  const partsByType = sub
+    .filter(s => s.family === 'PA' && s.code && s.code !== 'PAT' && s.amountCents > 0)
+    .map(s => ({ type: s.code, label: PART_TYPES[s.code] ?? s.code, amountCents: s.amountCents }));
+
+  const laborTotalRow = sub.find(s => s.code === 'LAT');
+
+  // CCC writes one .lin record per labour operation, so a part with body and
+  // paint time appears twice carrying the same price. Charging both double-bills
+  // the parts total, so the price stays on the first record only. ACT_PRICE is
+  // the charged price: when PRICE_INC says the part is included in another
+  // line, ACT_PRICE is 0 and DB_PRICE is not — never fall back to DB_PRICE.
+  const priced = new Set<string>();
 
   const lines: EmsLine[] = lin.map(r => {
-    const isSublet = pickBool(r, ['MISC_SUBLT', 'SUBLET', 'SUBLT']);
-    const subletAmt = cents(pickNum(r, ['MISC_AMT', 'SUBLET_AMT'])) ?? 0;
+    const isSublet = pickBool(r, ['MISC_SUBLT']);
+    const subletAmt = cents(pickNum(r, ['MISC_AMT'])) ?? 0;
+    const lineNo = pickNum(r, ['LINE_NO', 'LINE_REF', 'UNQ_SEQ', 'SEQ_NO']);
+    const partNumber = pickStr(r, ['OEM_PARTNO', 'ALT_PARTNO', 'OEM_PART_NO', 'PART_NO']);
+    let priceCents = cents(pickNum(r, ['ACT_PRICE', 'PART_PRICE', 'UNIT_PRICE'])) ?? 0;
+
+    if (priceCents > 0) {
+      const key = `${lineNo}|${partNumber}|${priceCents}`;
+      if (priced.has(key)) priceCents = 0;
+      else priced.add(key);
+    }
+
     return {
-      lineNo: pickNum(r, ['LINE_NO', 'LN_NO', 'SEQ_NO', 'SEQ']),
-      operation: pickStr(r, ['OP_CODE', 'LBR_OP', 'OPERATION', 'OP']),
-      description: pickStr(r, ['LINE_DESC', 'DESC', 'DESCRIPTION', 'PART_DESC']),
-      partNumber: pickStr(r, ['OEM_PART_NO', 'PART_NO', 'PARTNO', 'OEM_PART']),
-      partType: pickStr(r, ['PART_TYPE', 'PARTTYPE']),
-      qty: pickNum(r, ['QTY', 'QUANTITY']) ?? 1,
-      priceCents: cents(pickNum(r, ['PART_PRICE', 'UNIT_PRICE', 'PRICE', 'AMT'])) ?? 0,
-      laborHours: pickNum(r, ['LBR_HRS', 'HOURS', 'HRS']),
-      laborType: pickStr(r, ['LBR_TYPE', 'LABOR_TYPE']),
+      lineNo,
+      operation: pickStr(r, ['LBR_OP', 'OP_CODE', 'OPERATION']),
+      description: pickStr(r, ['LINE_DESC', 'DESCRIPTION', 'PART_DESC']),
+      partNumber,
+      partType: pickStr(r, ['PART_TYPE']),
+      qty: pickNum(r, ['PART_QTY', 'QTY', 'QUANTITY']) || 1,
+      priceCents,
+      laborHours: pickNum(r, ['MOD_LB_HRS', 'DB_HRS', 'LBR_HRS']),
+      laborType: pickStr(r, ['MOD_LBR_TY', 'LBR_TYPE', 'LABOR_TYPE']),
       isSublet,
       subletAmountCents: isSublet ? subletAmt : 0
     };
@@ -220,62 +275,69 @@ export function parseEms(files: Array<{ filename: string; buffer: Buffer }>): Em
     roNumber: pickStr(env, ['RO_ID', 'RO_NO', 'RONUM', 'REPAIR_ORD']),
     supplementNo: suppNo,
     supplementSeq: suppSeq,
-    createdAt: dateStr ? `${dateStr}${timeStr ? ' ' + timeStr : ''}` : null,
+    createdAt: dateStr
+      ? `${dateStr}${clock ? ` ${clock[1]}:${clock[2]}:${clock[3] ?? '00'}` : timeStr ? ' ' + timeStr : ''}`
+      : null,
     emsVersion: pickStr(env, ['EMS_VER', 'VERSION']),
 
     vin,
-    year: pickNum(veh, ['V_MODEL_YR', 'MODEL_YR', 'YEAR', 'V_YEAR']),
-    make: pickStr(veh, ['V_MAKE', 'MAKE', 'MAKE_DESC']),
-    model: pickStr(veh, ['V_MODEL', 'MODEL', 'MODEL_DESC']),
-    bodyStyle: pickStr(veh, ['V_BODY_STYLE', 'BODY_STYLE', 'BODY']),
-    engine: pickStr(veh, ['V_ENGINE', 'ENGINE', 'ENG_DESC']),
-    mileage: pickNum(veh, ['V_MILEAGE', 'MILEAGE', 'ODOMETER', 'MILES']),
-    color: pickStr(veh, ['V_COLOR', 'COLOR', 'EXT_COLOR', 'PAINT_DESC']),
-    paintCode: pickStr(veh, ['V_PAINT_CODE', 'PAINT_CODE', 'PNT_CODE']),
-    plate: pickStr(veh, ['V_LICENSE', 'LICENSE', 'PLATE', 'TAG']),
-    plateState: pickStr(veh, ['V_LIC_STATE', 'LIC_STATE', 'PLATE_ST']),
+    year: modelYear(pickStr(veh, ['V_MODEL_YR', 'MODEL_YR', 'V_YEAR', 'YEAR'])),
+    make: pickStr(veh, ['V_MAKEDESC', 'V_MAKECODE', 'V_MAKE', 'MAKE']),
+    model: pickStr(veh, ['V_MODEL', 'MODEL']),
+    bodyStyle: pickStr(veh, ['V_BSTYLE', 'V_BODY_STYLE', 'BODY_STYLE']),
+    engine: pickStr(veh, ['V_ENGINE', 'ENGINE']),
+    mileage: pickNum(veh, ['V_MILEAGE', 'MILEAGE', 'ODOMETER']),
+    color: pickStr(veh, ['V_COLOR', 'COLOR', 'TRIM_COLOR']),
+    paintCode: pickStr(veh, ['PAINT_CD1', 'V_PAINT_CODE', 'PAINT_CODE']),
+    plate: pickStr(veh, ['PLATE_NO', 'V_LICENSE', 'LICENSE']),
+    plateState: pickStr(veh, ['PLATE_ST', 'V_LIC_STATE', 'LIC_STATE']),
 
     customerName: joinName(
-      pickStr(ad1, ['OWNER_FIRST', 'OWN_FIRST', 'INSD_FIRST', 'FIRST_NAME']),
-      pickStr(ad1, ['OWNER_LAST', 'OWN_LAST', 'INSD_LAST', 'LAST_NAME']),
-      pickStr(ad1, ['OWNER_NAME', 'OWN_NAME', 'INSURED', 'INSD_NAME'])
+      pickStr(ad1, ['OWNR_FN', 'INSD_FN', 'OWNER_FIRST', 'FIRST_NAME']),
+      pickStr(ad1, ['OWNR_LN', 'INSD_LN', 'OWNER_LAST', 'LAST_NAME']),
+      pickStr(ad1, ['OWNR_CO_NM', 'INSD_CO_NM'])
     ),
-    customerPhone: pickStr(ad1, ['OWNER_PH', 'OWN_PHONE', 'PHONE', 'INSD_PH', 'DAY_PHONE']),
-    customerAddress: pickStr(ad1, ['OWNER_ADDR', 'OWN_ADDR', 'ADDRESS', 'INSD_ADDR']),
-    customerCity: pickStr(ad1, ['OWNER_CITY', 'OWN_CITY', 'CITY']),
-    customerState: pickStr(ad1, ['OWNER_STATE', 'OWN_STATE', 'STATE']),
-    customerZip: pickStr(ad1, ['OWNER_ZIP', 'OWN_ZIP', 'ZIP']),
+    customerPhone: pickStr(ad1, ['OWNR_PH1', 'INSD_PH1', 'OWNR_PH2', 'INSD_PH2']),
+    customerAddress: pickStr(ad1, ['OWNR_ADDR1', 'INSD_ADDR1', 'ADDRESS']),
+    customerCity: pickStr(ad1, ['OWNR_CITY', 'INSD_CITY', 'CITY']),
+    customerState: pickStr(ad1, ['OWNR_ST', 'INSD_ST', 'STATE']),
+    customerZip: pickStr(ad1, ['OWNR_ZIP', 'INSD_ZIP', 'ZIP']),
 
-    insurer: pickStr(ad1, ['INS_CO_NAME', 'INS_CO', 'INSURER', 'CARRIER']),
+    insurer: pickStr(ad1, ['INS_CO_NM', 'INS_CO_NAME', 'INSURER', 'CARRIER']),
     policyNumber: pickStr(ad1, ['POLICY_NO', 'POLICY']),
-    claimNumber: pickStr(ad1, ['CLAIM_NO', 'CLAIM']),
+    claimNumber: pickStr(ad1, ['CLM_NO', 'CLAIM_NO', 'ASGN_NO']),
     deductibleCents: cents(pickNum(ad1, ['DED_AMT', 'DEDUCT', 'DEDUCTIBLE'])),
-    deductibleWaived: /^[YW]/i.test(String(pickStr(ad1, ['DED_STATUS', 'DED_WAIVED']) ?? '')) &&
-      /^W/i.test(String(pickStr(ad1, ['DED_STATUS']) ?? '')),
-    dateOfLoss: normDate(pickStr(ad1, ['LOSS_DT', 'DATE_LOSS', 'LOSS_DATE'])),
-    catCode: pickStr(ad1, ['CAT_CODE', 'CATASTROPHE', 'CAT']),
-    adjuster: pickStr(ad1, ['ADJ_NAME', 'ADJUSTER']),
-    estimator: pickStr(ad2, ['EST_NAME', 'ESTIMATOR', 'APPRAISER']),
+    deductibleWaived: /^W/i.test(String(pickStr(ad1, ['DED_STATUS']) ?? '')),
+    dateOfLoss: normDate(pickStr(ad1, ['LOSS_DATE', 'LOSS_DT', 'DATE_LOSS'])),
+    catCode: pickStr(ad1, ['CAT_NO', 'LOSS_CAT', 'CAT_CODE']),
+    adjuster: joinName(
+      pickStr(ad1, ['CLM_CT_FN', 'ADJ_FIRST']),
+      pickStr(ad1, ['CLM_CT_LN', 'ADJ_LAST']),
+      pickStr(ad1, ['ADJ_NAME', 'ADJUSTER'])
+    ),
+    estimator: pickStr(ad2, ['RF_ESTIMTR', 'EST_NAME', 'ESTIMATOR']) ??
+      joinName(pickStr(ad2, ['EST_CT_FN']), pickStr(ad2, ['EST_CT_LN']), null),
 
-    grossCents: cents(pickNum(ttl, ['GROSS_TOT', 'GROSS', 'TOTAL_GROSS'])),
-    netCents: cents(pickNum(ttl, ['NET_TOT', 'NET', 'TOTAL_NET'])),
+    grossCents: cents(pickNum(ttl, ['G_TTL_AMT', 'GROSS_TOT', 'TOTAL_GROSS'])),
+    netCents: cents(pickNum(ttl, ['N_TTL_AMT', 'NET_TOT', 'TOTAL_NET'])),
     previousNetCents: cents(pickNum(ttl, ['PREV_NET', 'PREVIOUS_NET'])),
-    supplementCents: cents(pickNum(ttl, ['SUPP_AMT', 'SUPPLEMENT_AMT', 'SUPP_TOT'])),
-    taxCents: cents(pickNum(ttl, ['TAX_TOT', 'TAX', 'SALES_TAX'])),
-    customerPayCents: cents(pickNum(ttl, ['CUST_PAY', 'CUSTOMER_PAY'])),
+    supplementCents: cents(pickNum(ttl, ['SUPP_AMT', 'N_SUPP_ANT', 'SUPP_TOT'])),
+    taxCents: sumCents(pickNum(ttl, ['G_TAX', 'TAX_TOT', 'SALES_TAX']), pickNum(ttl, ['GST_AMT'])),
+    customerPayCents: cents(pickNum(ttl, ['G_CUST_AMT', 'CUST_PAY', 'CUSTOMER_PAY'])),
 
-    laborHoursTotal: laborByType.reduce((a, l) => a + (l.hours ?? 0), 0) ||
-      lines.reduce((a, l) => a + (l.laborHours ?? 0), 0) || null,
+    laborHoursTotal: laborTotalRow?.hours ??
+      (laborByType.reduce((a, l) => a + (l.hours ?? 0), 0) ||
+        lines.reduce((a, l) => a + (l.laborHours ?? 0), 0) || null),
     laborByType,
     partsByType,
 
     lines,
     vendors: ven.map(r => ({
-      name: pickStr(r, ['VEN_NAME', 'NAME', 'VENDOR']) ?? '',
-      phone: pickStr(r, ['VEN_PHONE', 'PHONE']),
-      kind: pickStr(r, ['VEN_TYPE', 'TYPE'])
+      name: pickStr(r, ['VND_CO_NM', 'VEN_NAME', 'VENDOR']) ?? '',
+      phone: pickStr(r, ['VND_PH1', 'VND_CT_PH', 'VEN_PHONE']),
+      kind: pickStr(r, ['VND_TYPE', 'VEN_TYPE'])
     })).filter(v => v.name),
-    damageMemo: pickStr(lin[0], ['DMG_MEMO', 'MEMO', 'DAMAGE']),
+    damageMemo: pickStr(veh, ['DMG_MEMO', 'V_MEMO']),
 
     warnings
   };
@@ -288,9 +350,9 @@ export function parseEms(files: Array<{ filename: string; buffer: Buffer }>): Em
 }
 
 function joinName(first: string | null, last: string | null, whole: string | null): string | null {
-  if (whole) return whole;
   const parts = [first, last].filter(Boolean);
-  return parts.length ? parts.join(' ') : null;
+  if (parts.length) return parts.join(' ');
+  return whole ?? null;
 }
 
 /** EMS dates arrive as MM-DD-YYYY or YYYY-MM-DD depending on the system. */

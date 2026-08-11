@@ -3,7 +3,7 @@ import { RowDataPacket, ResultSetHeader } from 'mysql2/promise';
 import { tq, texec, tqOne, withTenantTx } from '../db/tenant';
 import { requireCompany, requireFeature } from '../middleware/context';
 import { parseEms, EmsEstimate, partTypeToEnum } from '../lib/ems';
-import { extensionOf, storageKey, writeBuffer } from '../lib/storage';
+import { extensionOf, storagePrefix, writeBuffer } from '../lib/storage';
 import { notify } from '../notify';
 
 /**
@@ -44,15 +44,20 @@ export async function registerEms(app: FastifyInstance): Promise<void> {
       return reply.code(400).send({ error: (e as Error).message, importId: res.insertId });
     }
 
-    // Keep the raw set so a bad parse can be re-run after a fix.
-    const keys: string[] = [];
-    for (const f of files) {
-      const key = storageKey(cid, extensionOf(f.filename));
-      await writeBuffer(key, f.buffer);
-      keys.push(key);
+    // Keep the raw set so a bad parse can be re-run after a fix. One folder per
+    // import: the row stores the folder, not a list of twenty file keys.
+    const prefix = storagePrefix(cid, 'ems');
+    for (let i = 0; i < files.length; i++) {
+      const name = String(i + 1).padStart(2, '0') + '.' + extensionOf(files[i].filename);
+      await writeBuffer(prefix + '/' + name, files[i].buffer);
     }
 
     const match = await findMatch(cid, est);
+
+    // EMS fields are wider than our columns (CCC's RO_ID is 40 chars, the model
+    // description 50) — clip rather than let a long value throw.
+    const clip = (v: string | null, n: number): string | null =>
+      v === null || v === undefined ? null : v.slice(0, n);
 
     const res = await texec(cid, `
       INSERT INTO ems_imports
@@ -60,17 +65,19 @@ export async function registerEms(app: FastifyInstance): Promise<void> {
          customer_name, vehicle_text, supplement_seq, total_cents, line_count,
          matched_ro_id, match_confidence, state, storage_key)
       VALUES ('upload', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
-      [est.estimatingSystem, est.envelopeName, est.roNumber, est.claimNumber, est.vin,
-       est.customerName, [est.year, est.make, est.model].filter(Boolean).join(' ') || null,
+      [clip(est.estimatingSystem, 32), clip(est.envelopeName, 190), clip(est.roNumber, 32),
+       clip(est.claimNumber, 64), clip(est.vin, 24), clip(est.customerName, 160),
+       clip([est.year, est.make, est.model].filter(Boolean).join(' ') || null, 160),
        est.supplementSeq, est.grossCents ?? est.netCents, est.lines.length,
-       match.roId, match.confidence, keys.join(',')]
+       match.roId, match.confidence, prefix]
     );
     const importId = res.insertId;
 
     if (est.lines.length) {
       const rows = est.lines.map(l => [
-        importId, l.lineNo, l.operation, l.description?.slice(0, 255) ?? null,
-        l.partNumber, l.partType, l.qty, l.priceCents, l.laborHours, l.laborType, 1
+        importId, l.lineNo, clip(l.operation, 32), clip(l.description, 255),
+        clip(l.partNumber, 64), clip(l.partType, 24),
+        Math.max(1, Math.round(l.qty)), l.priceCents, l.laborHours, clip(l.laborType, 24), 1
       ]);
       await texec(cid, `
         INSERT INTO ems_import_lines
@@ -344,11 +351,14 @@ async function findMatch(cid: number, k: MatchKeys): Promise<{ roId: number | nu
       WHERE v.vin = ? AND r.closed_at IS NULL ORDER BY r.opened_at DESC LIMIT 1`, [k.vin]);
     if (hit) return { roId: hit.id, confidence: 'exact', how: 'VIN' };
 
-    // Wholesale files are numbered off the last six of the VIN.
-    const tail = k.vin.slice(-6);
-    const byTail = await tqOne<RowDataPacket & { id: number }>(cid,
-      'SELECT id FROM repair_orders WHERE ro_number = ? AND closed_at IS NULL', [tail]);
-    if (byTail) return { roId: byTail.id, confidence: 'likely', how: 'last six of the VIN' };
+    // Wholesale files are numbered off the tail of the VIN — and CCC's own
+    // RO_ID field is often the last eight, not a shop RO number at all.
+    for (const n of [8, 6]) {
+      const tail = k.vin.slice(-n);
+      const byTail = await tqOne<RowDataPacket & { id: number }>(cid,
+        'SELECT id FROM repair_orders WHERE ro_number = ? AND closed_at IS NULL', [tail]);
+      if (byTail) return { roId: byTail.id, confidence: 'likely', how: `last ${n === 8 ? 'eight' : 'six'} of the VIN` };
+    }
   }
 
   if (k.claimNumber) {
