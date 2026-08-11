@@ -14,7 +14,7 @@ export async function registerParts(app: FastifyInstance): Promise<void> {
     if (!requireFeature(ctx, 'parts', reply)) return;
 
     const q = req.query as { state?: string; roId?: string };
-    const where: string[] = ['r.closed_at IS NULL'];
+    const where: string[] = ['r.closed_at IS NULL', 'r.voided_at IS NULL'];
     const params: unknown[] = [];
 
     if (q.state) { where.push('p.state = ?'); params.push(q.state); }
@@ -53,7 +53,7 @@ export async function registerParts(app: FastifyInstance): Promise<void> {
         SUM(p.state IN ('ordered','partial') AND p.eta < CURDATE()) AS late,
         COUNT(DISTINCT IF(p.gating = 1 AND p.state IN ('need','ordered','partial','backordered'), p.ro_id, NULL)) AS files_waiting
       FROM parts_lines p JOIN repair_orders r ON r.id = p.ro_id
-      WHERE r.closed_at IS NULL
+      WHERE r.closed_at IS NULL AND r.voided_at IS NULL
     `);
 
     return {
@@ -250,6 +250,76 @@ export async function registerParts(app: FastifyInstance): Promise<void> {
     );
 
     return { ok: true, id: res.insertId };
+  });
+
+  /**
+   * Parts bought against a file that was later voided. They stay here until
+   * somebody says what happened to each one — the list is the only durable
+   * record that money is sitting on a shelf.
+   */
+  app.get('/api/parts/returns', async (req, reply) => {
+    const ctx = requireCompany(req, reply);
+    if (!ctx) return;
+    if (!requireFeature(ctx, 'parts', reply)) return;
+
+    const rows = await tq<RowDataPacket[]>(ctx.company!.id, `
+      SELECT p.id, p.ro_id, p.description, p.part_number, p.part_type, p.qty, p.state,
+             p.price_cents, p.cost_cents, p.po_number, p.invoice_no, p.ordered_at,
+             p.return_flagged_at, p.note,
+             v.name AS vendor_name,
+             COALESCE(vd.ro_number, r.ro_number) AS ro_number,
+             r.voided_at, vd.reason AS void_reason
+      FROM parts_lines p
+      JOIN repair_orders r ON r.id = p.ro_id
+      LEFT JOIN vendors v ON v.id = p.vendor_id
+      LEFT JOIN ro_voids vd ON vd.id = (
+        SELECT MAX(x.id) FROM ro_voids x WHERE x.ro_id = p.ro_id)
+      WHERE p.return_flagged_at IS NOT NULL AND p.return_cleared_at IS NULL
+      ORDER BY p.return_flagged_at DESC, p.id`);
+
+    return {
+      returns: rows.map(r => scrubMoney(r as Record<string, unknown>, ctx.caps)),
+      count: rows.length
+    };
+  });
+
+  /**
+   * Clear one off the list: returned to the vendor, or kept on the shelf.
+   * Either way it stops asking.
+   */
+  app.post('/api/parts/:id/return-cleared', async (req, reply) => {
+    const ctx = requireCompany(req, reply);
+    if (!ctx) return;
+    if (!requireFeature(ctx, 'parts', reply)) return;
+    if (!ctx.caps.manageParts) return reply.code(403).send({ error: 'Not permitted' });
+
+    const id = Number((req.params as { id: string }).id);
+    const cid = ctx.company!.id;
+    const b = req.body as { outcome?: 'returned' | 'kept'; note?: string };
+    const outcome = b.outcome === 'kept' ? 'kept' : 'returned';
+
+    const line = await tqOne<RowDataPacket & { ro_id: number; description: string }>(
+      cid, `SELECT ro_id, description, return_flagged_at FROM parts_lines WHERE id = ?`, [id]);
+    if (!line) return reply.code(404).send({ error: 'No such part line' });
+    if (!line.return_flagged_at) return reply.code(409).send({ error: 'That line is not flagged for return.' });
+
+    await texec(cid, `
+      UPDATE parts_lines
+      SET return_cleared_at = NOW(),
+          state = ?,
+          note = COALESCE(NULLIF(?, ''), note)
+      WHERE id = ?`,
+      [outcome === 'returned' ? 'returned' : 'not_needed', (b.note ?? '').trim().slice(0, 255), id]);
+
+    await texec(cid,
+      `INSERT INTO ro_notes (ro_id, kind, body, user_id, user_name) VALUES (?, 'auto', ?, ?, ?)`,
+      [line.ro_id,
+       outcome === 'returned'
+         ? `“${line.description}” returned to the vendor.`
+         : `“${line.description}” kept on the shelf.`,
+       ctx.user.id, ctx.user.name]);
+
+    return { ok: true, outcome };
   });
 
   app.patch('/api/sublets/:id', async (req, reply) => {

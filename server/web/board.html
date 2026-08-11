@@ -1029,6 +1029,19 @@
     { k: 'paint', t: 'Paint tech' }, { k: 'ri', t: 'R&I tech' }, { k: 'detail', t: 'Detail tech' }
   ];
 
+  var VOID_REASONS = ['Duplicate', 'Opened by mistake', 'Customer never showed'];
+
+  function statusOptions(sel) {
+    return GROUPS.map(function (g) {
+      var o = STATUSES.filter(function (st) { return st.group_id === g.group_id; })
+        .map(function (st) {
+          return '<option value="' + esc(st.slot_id) + '"' +
+            (sel === st.slot_id ? ' selected' : '') + '>' + esc(st.label) + '</option>';
+        }).join('');
+      return o ? '<optgroup label="' + esc(g.label) + '">' + o + '</optgroup>' : '';
+    }).join('');
+  }
+
   function f2(label, value, num) {
     return '<div><div class="fl2">' + esc(label) + '</div>' +
       '<div class="fv2' + (num ? ' num' : '') + '">' +
@@ -1047,13 +1060,32 @@
       (KIND[r.status_kind] || 'var(--acc)') + ';border-color:' +
       (KIND[r.status_kind] || 'var(--acc)') + '">' + esc(r.status_label || 'No status') + '</span>';
     $('dSub').textContent = daysIn(r) + ' days in shop' +
-      (r.target_days ? ' · target ' + r.target_days : '');
+      (r.target_days ? ' · target ' + r.target_days : '') +
+      (Number(r.voided_days) ? ' · ' + r.voided_days + ' voided' : '');
     $('dDocs').textContent = 'Documents ' + d.documents.length +
       ' file' + (d.documents.length === 1 ? '' : 's');
     $('dParts').hidden = ME.features.indexOf('parts') < 0;
 
     /* ---- left column: the file itself ---- */
     var L = [];
+
+    if (r.voided_at) {
+      var v0 = (d.voids || [])[0] || {};
+      L.push('<div class="log" style="border-color:var(--stopped);margin-bottom:14px">' +
+        '<div class="row" style="gap:7px;align-items:baseline">' +
+        '<span class="flag" style="color:var(--stopped);border:1px solid var(--stopped)">voided</span>' +
+        '<span style="font:400 11px var(--font);color:var(--muted)">' +
+        esc(v0.reason || 'No reason recorded') + '</span>' +
+        '<span class="log-m" style="margin:0 0 0 auto">' + when(r.voided_at) + '</span></div>' +
+        '<div class="log-b" style="margin-top:4px;color:var(--muted)">Was RO ' +
+        esc(v0.ro_number || r.ro_number) + ', that number is free to reuse. ' +
+        (v0.voided_by_name ? 'Voided by ' + esc(v0.voided_by_name) + '. ' : '') +
+        (Number(v0.parts_flagged) ? v0.parts_flagged + ' ordered part line' +
+          (Number(v0.parts_flagged) === 1 ? '' : 's') + ' flagged for return. ' : '') +
+        'The cycle clock is stopped.</div>' +
+        (v0.note ? '<div class="log-b" style="margin-top:4px">' + esc(v0.note) + '</div>' : '') +
+        '</div>');
+    }
 
     L.push('<div class="sec">Customer</div><div class="fieldset">');
     L.push(f2('Name', r.customer_name), f2('Phone', r.customer_phone, 1),
@@ -1271,19 +1303,39 @@
 
     R.push('<div class="sec">Update this RO</div>');
     R.push('<div class="stack"><select id="newStatus" style="width:100%">' +
-      '<option value="">Select a new status…</option>' +
-      GROUPS.map(function (g) {
-        var o = STATUSES.filter(function (st) { return st.group_id === g.group_id; })
-          .map(function (st) {
-            return '<option value="' + esc(st.slot_id) + '">' + esc(st.label) + '</option>';
-          }).join('');
-        return o ? '<optgroup label="' + esc(g.label) + '">' + o + '</optgroup>' : '';
-      }).join('') + '</select>' +
+      '<option value="">Select a new status…</option>' + statusOptions(null) + '</select>' +
       '<textarea id="newNote" placeholder="Add a note — call with the adjuster, customer, parts vendor…"></textarea>' +
       '<div class="row"><button class="btn btn-solid" id="saveStatus">Add a note or pick a status</button>' +
       '<span class="sub" style="flex:1;min-width:120px">Notifies whoever owns the status it lands in.</span>' +
       '</div></div>');
     R.push('<div class="msg" id="dMsg"></div>');
+
+    if (r.voided_at && d.canVoid) {
+      R.push('<div class="sec">Bring it back</div>');
+      R.push('<div class="stack">' +
+        '<input type="text" id="vNumber" placeholder="New RO number — blank takes the next in sequence" ' +
+        'style="width:100%">' +
+        '<select id="vSlot" style="width:100%">' + statusOptions(r.status_slot) + '</select>' +
+        '<label class="row" style="gap:7px;align-items:center">' +
+        '<input type="checkbox" id="vParts" checked>' +
+        '<span class="sub" style="text-transform:none;letter-spacing:0">Bring the cancelled parts lines back as needed</span>' +
+        '</label>' +
+        '<div class="row"><button class="btn btn-solid" id="doReopen">Reopen this file</button>' +
+        '<span class="sub" style="flex:1;min-width:120px">Same file, new number. Documents, notes, ' +
+        'history, dates and money all come with it.</span></div></div>');
+    } else if (!r.voided_at && d.canVoid) {
+      R.push('<div class="sec">Void this file</div>');
+      R.push('<div class="stack">' +
+        '<select id="vReason" style="width:100%">' +
+        VOID_REASONS.map(function (x) {
+          return '<option value="' + esc(x) + '">' + esc(x) + '</option>';
+        }).join('') + '<option value="other">Something else — say why below</option></select>' +
+        '<input type="text" id="vNote" placeholder="Anything worth recording" style="width:100%">' +
+        '<div class="row"><button class="btn btn-danger" id="doVoid">Void RO ' + esc(r.ro_number) +
+        '</button><span class="sub" style="flex:1;min-width:120px">Cancels the parts, flags anything ' +
+        'already ordered for return, frees the number and takes it off the board. Nobody is notified — ' +
+        'it is in the log.</span></div></div>');
+    }
 
     R.push('<div class="sec">Notes and history</div>');
     if (!d.notes.length) R.push('<div class="sub">Nothing recorded yet.</div>');
@@ -1304,7 +1356,8 @@
   }
 
   function daysIn(r) {
-    return Math.floor((Date.now() - new Date(r.opened_at).getTime()) / 86400000);
+    var days = Math.floor((Date.now() - new Date(r.opened_at).getTime()) / 86400000);
+    return Math.max(days - (Number(r.voided_days) || 0), 0);
   }
 
   function wireDrawer() {
@@ -1366,8 +1419,42 @@
         .then(reopen).catch(function (e) { say(e.message, 'err'); });
     });
 
-    var ap = $('addPromise');
-    if (ap) ap.addEventListener('click', function () {
+    var dv = $('doVoid');
+    if (dv) dv.addEventListener('click', function () {
+      var pick = $('vReason').value;
+      var note = $('vNote').value.trim();
+      var reason = pick === 'other' ? note : pick;
+      if (!reason) return say('Say why it is being voided.', 'err');
+      if (!confirm('Void this file? Parts already ordered get flagged for return, the number goes ' +
+        'back in the pool, and it comes off the board.')) return;
+
+      api('/api/ro/' + OPEN + '/void', {
+        method: 'POST', body: JSON.stringify({ reason: reason, note: note || undefined })
+      }).then(function (res) {
+        closeRo();
+        return load().then(function () {
+          Shell.refreshCount();
+          if (res.partsFlagged) {
+            alert(res.partsFlagged + ' ordered part line' + (res.partsFlagged === 1 ? '' : 's') +
+              ' flagged for return. They are on the returns list on the parts screen.');
+          }
+        });
+      }).catch(function (e) { say(e.message, 'err'); });
+    });
+
+    var dr = $('doReopen');
+    if (dr) dr.addEventListener('click', function () {
+      api('/api/ro/' + OPEN + '/reopen', {
+        method: 'POST',
+        body: JSON.stringify({
+          slot: $('vSlot').value,
+          roNumber: $('vNumber').value.trim() || undefined,
+          restoreParts: $('vParts').checked
+        })
+      }).then(reopen).catch(function (e) { say(e.message, 'err'); });
+    });
+
+    var ap = $('addPromise');    if (ap) ap.addEventListener('click', function () {
       var body = $('promiseText').value.trim();
       if (!body) return say('Write what was promised.', 'err');
       api('/api/ro/' + OPEN + '/promises', { method: 'POST', body: JSON.stringify({ body: body }) })

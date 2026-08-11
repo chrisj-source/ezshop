@@ -42,6 +42,12 @@ const DELETE_DOCS: Role[] = ['owner', 'estimator'];
 /** May accept or reject an EMS import. */
 const ACCEPT_IMPORT: Role[] = ['owner', 'estimator', 'production_manager'];
 
+/**
+ * May void a repair order and bring one back. Owner and admin only — in the
+ * current role set that is the owner; widen this list, not the endpoint.
+ */
+const VOID_RO: Role[] = ['owner'];
+
 export interface Caps {
   money: boolean;
   seesAllRepairOrders: boolean;
@@ -50,6 +56,7 @@ export interface Caps {
   admin: boolean;
   deleteDocuments: boolean;
   acceptImports: boolean;
+  voidRepairOrders: boolean;
   editAssignments: boolean;
   manageParts: boolean;
   manageLeads: boolean;
@@ -67,6 +74,7 @@ export function capsFor(role: Role, opts: { techSeesOwnOnly: boolean }): Caps {
     admin: ADMIN.includes(role),
     deleteDocuments: DELETE_DOCS.includes(role),
     acceptImports: ACCEPT_IMPORT.includes(role),
+    voidRepairOrders: VOID_RO.includes(role),
     editAssignments: ['owner', 'production_manager', 'estimator'].includes(role),
     manageParts: ['owner', 'parts_manager', 'estimator', 'production_manager'].includes(role),
     manageLeads: ['owner', 'front_office', 'salesperson', 'estimator'].includes(role),

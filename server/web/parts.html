@@ -129,7 +129,7 @@
 <script>
 (function () {
   var api = Shell.api, esc = Shell.esc;
-  var ME = null, PARTS = [], VENDORS = [], OPEN = {}, ALL_OPEN = false;
+  var ME = null, PARTS = [], VENDORS = [], RETURNS = [], OPEN = {}, ALL_OPEN = false;
 
   /* One tone per part state, used by the legend, the segments and the chips. */
   var TONE = {
@@ -198,7 +198,12 @@
   }).catch(function (e) { if (e.message !== 'signed out') console.error(e); });
 
   function load() {
-    return api('/api/parts').then(function (d) {
+    return Promise.all([
+      api('/api/parts'),
+      api('/api/parts/returns').catch(function () { return { returns: [] }; })
+    ]).then(function (res) {
+      var d = res[0];
+      RETURNS = res[1].returns || [];
       PARTS = d.parts;
       VENDORS = d.vendors;
       $('fVendor').innerHTML = '<option value="">Vendor: All</option>' +
@@ -326,14 +331,45 @@
 
   /* ---------------------------------------------------------- render */
 
+  /**
+   * Parts bought against a file that was later voided. Money on a shelf: it
+   * stays here until somebody says the part went back or is being kept.
+   */
+  function returnsHtml() {
+    if (!RETURNS.length) return '';
+    return '<div class="grouphead" style="margin-top:0">' +
+      '<div class="gdot" style="background:var(--stopped)"></div>' +
+      '<div class="gname">To return</div>' +
+      '<div class="sub">' + RETURNS.length + '</div>' +
+      '<div class="sub" style="margin-left:auto">ordered against a file that was voided</div></div>' +
+      RETURNS.map(function (l) {
+        return '<div class="pgrid prow" style="grid-template-columns:1fr">' +
+          '<div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">' +
+          '<div style="min-width:0;flex:1">' +
+          '<div class="cellmain">' + esc(l.description) +
+          (l.part_number ? ' <span class="cellsub" style="display:inline">' + esc(l.part_number) + '</span>' : '') +
+          '</div><div class="cellsub">RO ' + esc(l.ro_number || '') +
+          ' · ' + esc(l.void_reason || 'voided') +
+          (l.vendor_name ? ' · ' + esc(l.vendor_name) : '') +
+          (l.po_number ? ' · PO ' + esc(l.po_number) : '') +
+          (ME.caps.money && l.cost_cents ? ' · ' + money(l.cost_cents) : '') + '</div></div>' +
+          (ME.caps.manageParts
+            ? '<button class="linebtn" data-retok="' + l.id + '">Returned</button>' +
+              '<button class="linebtn" data-retkeep="' + l.id + '">Keeping it</button>'
+            : '') + '</div></div>';
+      }).join('');
+  }
+
   function render() {
     var files = byRo();
+    var ret = returnsHtml();
 
     if (!files.length) {
-      $('body').innerHTML = '<div class="empty">' +
+      $('body').innerHTML = ret + '<div class="empty">' +
         (PARTS.length ? 'Nothing matches those filters.'
           : 'No parts on any open file yet.<br>Add them from a repair order, or accept an estimate ' +
             'on the Import screen — the lines come across with it.') + '</div>';
+      wireLines();
       return;
     }
 
@@ -345,7 +381,7 @@
       (ME.caps.money ? '<div class="hide-md" style="text-align:right">Cost</div>'
         : '<div class="hide-md" style="text-align:right">Received</div>') + '</div>';
 
-    var html = head;
+    var html = ret + head;
 
     GROUPS.forEach(function (g) {
       var mine = files.filter(function (f) { return f.group === g.k; });
@@ -471,6 +507,23 @@
   }
 
   function wireLines() {
+    Array.prototype.forEach.call($('body').querySelectorAll('[data-retok]'), function (b) {
+      b.addEventListener('click', function (e) {
+        e.stopPropagation();
+        api('/api/parts/' + b.dataset.retok + '/return-cleared', {
+          method: 'POST', body: JSON.stringify({ outcome: 'returned' })
+        }).then(load);
+      });
+    });
+
+    Array.prototype.forEach.call($('body').querySelectorAll('[data-retkeep]'), function (b) {
+      b.addEventListener('click', function (e) {
+        e.stopPropagation();
+        api('/api/parts/' + b.dataset.retkeep + '/return-cleared', {
+          method: 'POST', body: JSON.stringify({ outcome: 'kept' })
+        }).then(load);
+      });
+    });
     Array.prototype.forEach.call($('body').querySelectorAll('[data-recv]'), function (b) {
       b.addEventListener('click', function (e) {
         e.stopPropagation();

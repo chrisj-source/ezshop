@@ -11,8 +11,8 @@ import { tenantPool, tq } from './db/tenant';
  */
 
 export type EventKey =
-  | 'status.change' | 'parts.arrived' | 'parts.late' | 'supp.decision'
-  | 'age.red' | 'assign.file' | 'sms.reply';
+  | 'status.change' | 'parts.arrived' | 'parts.late' | 'parts.return'
+  | 'supp.decision' | 'age.red' | 'assign.file' | 'sms.reply';
 
 export interface NotifyInput {
   companyId: number;

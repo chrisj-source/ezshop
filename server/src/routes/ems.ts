@@ -341,14 +341,15 @@ interface MatchKeys { roNumber: string | null; vin: string | null; claimNumber: 
 async function findMatch(cid: number, k: MatchKeys): Promise<{ roId: number | null; confidence: 'exact' | 'likely' | 'none'; how: string | null }> {
   if (k.roNumber) {
     const hit = await tqOne<RowDataPacket & { id: number }>(cid,
-      'SELECT id FROM repair_orders WHERE ro_number = ? AND closed_at IS NULL', [k.roNumber]);
+      'SELECT id FROM repair_orders WHERE ro_number = ? AND closed_at IS NULL AND voided_at IS NULL', [k.roNumber]);
     if (hit) return { roId: hit.id, confidence: 'exact', how: 'RO number' };
   }
 
   if (k.vin) {
     const hit = await tqOne<RowDataPacket & { id: number }>(cid, `
       SELECT r.id FROM repair_orders r JOIN vehicles v ON v.id = r.vehicle_id
-      WHERE v.vin = ? AND r.closed_at IS NULL ORDER BY r.opened_at DESC LIMIT 1`, [k.vin]);
+      WHERE v.vin = ? AND r.closed_at IS NULL AND r.voided_at IS NULL
+      ORDER BY r.opened_at DESC LIMIT 1`, [k.vin]);
     if (hit) return { roId: hit.id, confidence: 'exact', how: 'VIN' };
 
     // Wholesale files are numbered off the tail of the VIN — and CCC's own
@@ -356,14 +357,14 @@ async function findMatch(cid: number, k: MatchKeys): Promise<{ roId: number | nu
     for (const n of [8, 6]) {
       const tail = k.vin.slice(-n);
       const byTail = await tqOne<RowDataPacket & { id: number }>(cid,
-        'SELECT id FROM repair_orders WHERE ro_number = ? AND closed_at IS NULL', [tail]);
+        'SELECT id FROM repair_orders WHERE ro_number = ? AND closed_at IS NULL AND voided_at IS NULL', [tail]);
       if (byTail) return { roId: byTail.id, confidence: 'likely', how: `last ${n === 8 ? 'eight' : 'six'} of the VIN` };
     }
   }
 
   if (k.claimNumber) {
     const hit = await tqOne<RowDataPacket & { id: number }>(cid,
-      'SELECT id FROM repair_orders WHERE claim_number = ? AND closed_at IS NULL', [k.claimNumber]);
+      'SELECT id FROM repair_orders WHERE claim_number = ? AND closed_at IS NULL AND voided_at IS NULL', [k.claimNumber]);
     if (hit) return { roId: hit.id, confidence: 'likely', how: 'claim number' };
   }
 
@@ -390,7 +391,7 @@ async function candidates(cid: number, k: MatchKeys): Promise<RowDataPacket[]> {
     LEFT JOIN vehicles v ON v.id = r.vehicle_id
     LEFT JOIN clients c ON c.id = r.client_id
     LEFT JOIN statuses s ON s.slot_id = r.status_slot
-    WHERE r.closed_at IS NULL ${where.length ? 'AND (' + where.join(' OR ') + ')' : ''}
+    WHERE r.closed_at IS NULL AND r.voided_at IS NULL ${where.length ? 'AND (' + where.join(' OR ') + ')' : ''}
     ORDER BY r.opened_at DESC
     LIMIT 25`, params);
 }

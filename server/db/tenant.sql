@@ -182,15 +182,44 @@ CREATE TABLE repair_orders (
   approved_at       DATETIME      NULL,
   delivered_at      DATETIME      NULL,
   closed_at         DATETIME      NULL,
+  voided_at         DATETIME      NULL COMMENT 'own flag, not a status and not a hold',
+  voided_days       INT           NOT NULL DEFAULT 0 COMMENT 'days spent voided, subtracted from days in shop',
+  reopen_count      INT           NOT NULL DEFAULT 0,
   created_by        BIGINT UNSIGNED NULL,
   updated_at        DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   UNIQUE KEY uq_ro_number (ro_number),
   KEY ix_ro_open (closed_at, status_slot),
+  KEY ix_ro_voided (voided_at),
   KEY ix_ro_client (client_id),
   KEY ix_ro_vehicle (vehicle_id),
   CONSTRAINT fk_ro_client FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE SET NULL,
   CONSTRAINT fk_ro_vehicle FOREIGN KEY (vehicle_id) REFERENCES vehicles(id) ON DELETE SET NULL,
   CONSTRAINT fk_ro_status FOREIGN KEY (status_slot) REFERENCES statuses(slot_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- One row per void, kept after a reopen so the void report can show what was
+-- voided, why, by whom, and which of them came back. The file itself is the
+-- same record throughout: void and reopen are states it passes through.
+CREATE TABLE ro_voids (
+  id                BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  ro_id             BIGINT UNSIGNED NOT NULL,
+  ro_number         VARCHAR(32)   NOT NULL COMMENT 'number the file held when it was voided',
+  reason            VARCHAR(48)   NOT NULL,
+  note              VARCHAR(255)  NULL,
+  status_slot       VARCHAR(64)   NULL COMMENT 'slot it was sitting in',
+  amount_cents      BIGINT        NOT NULL DEFAULT 0,
+  parts_cancelled   INT           NOT NULL DEFAULT 0,
+  parts_flagged     INT           NOT NULL DEFAULT 0 COMMENT 'already ordered, flagged for return',
+  voided_at         DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  voided_by         BIGINT UNSIGNED NULL,
+  voided_by_name    VARCHAR(120)  NULL,
+  reopened_at       DATETIME      NULL,
+  reopened_by       BIGINT UNSIGNED NULL,
+  reopened_by_name  VARCHAR(120)  NULL,
+  reopened_number   VARCHAR(32)   NULL COMMENT 'number it came back under',
+  KEY ix_voids_ro (ro_id),
+  KEY ix_voids_when (voided_at),
+  CONSTRAINT fk_voids_ro FOREIGN KEY (ro_id) REFERENCES repair_orders(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE ro_assignments (
@@ -337,10 +366,13 @@ CREATE TABLE parts_lines (
   ordered_at      DATE          NULL,
   eta             DATE          NULL,
   received_at     DATE          NULL,
+  return_flagged_at DATETIME    NULL COMMENT 'ordered against a file that was voided',
+  return_cleared_at DATETIME    NULL,
   note            VARCHAR(255)  NULL,
   updated_at      DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   KEY ix_parts_ro (ro_id, state),
   KEY ix_parts_eta (eta, state),
+  KEY ix_parts_returns (return_flagged_at, return_cleared_at),
   CONSTRAINT fk_parts_ro FOREIGN KEY (ro_id) REFERENCES repair_orders(id) ON DELETE CASCADE,
   CONSTRAINT fk_parts_vendor FOREIGN KEY (vendor_id) REFERENCES vendors(id) ON DELETE SET NULL,
   CONSTRAINT fk_parts_supp FOREIGN KEY (supplement_id) REFERENCES supplements(id) ON DELETE SET NULL
@@ -432,7 +464,7 @@ CREATE TABLE notification_group_members (
 
 CREATE TABLE notification_subscriptions (
   group_id        BIGINT UNSIGNED NOT NULL,
-  event_key       VARCHAR(32)   NOT NULL COMMENT 'status.change, parts.arrived, parts.late, supp.decision, age.red, assign.file, sms.reply',
+  event_key       VARCHAR(32)   NOT NULL COMMENT 'status.change, parts.arrived, parts.late, parts.return, supp.decision, age.red, assign.file, sms.reply',
   enabled         TINYINT(1)    NOT NULL DEFAULT 1,
   scope           VARCHAR(48)   NULL COMMENT 'owned | any | picked',
   scope_detail    JSON          NULL COMMENT 'picked slot ids, ETA offsets',

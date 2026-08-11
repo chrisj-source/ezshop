@@ -3,6 +3,7 @@ import { RowDataPacket } from 'mysql2/promise';
 import { mq } from '../db/master';
 import { tq, tqOne } from '../db/tenant';
 import { requireCompany, requireFeature } from '../middleware/context';
+import { scrubMoney } from '../permissions';
 
 /**
  * Reports.
@@ -44,9 +45,9 @@ function resolveWindow(q: { window?: string; from?: string; to?: string }): Rang
 
 /** The WHERE clause every report shares. */
 function scope(r: Range): { sql: string; params: unknown[] } {
-  if (r.openOnly) return { sql: 'r.closed_at IS NULL', params: [] };
+  if (r.openOnly) return { sql: 'r.closed_at IS NULL AND r.voided_at IS NULL', params: [] };
   return {
-    sql: '(r.opened_at >= ? AND r.opened_at < DATE_ADD(?, INTERVAL 1 DAY))',
+    sql: 'r.voided_at IS NULL AND (r.opened_at >= ? AND r.opened_at < DATE_ADD(?, INTERVAL 1 DAY))',
     params: [r.from, r.to]
   };
 }
@@ -76,7 +77,8 @@ export async function registerReports(app: FastifyInstance): Promise<void> {
         { key: 'approval', label: 'By approval date', money: true, note: 'What was approved when.' },
         { key: 'revenue', label: 'Revenue', money: true, note: 'Labour, parts, sublet, materials.' },
         { key: 'leads', label: 'Leads', money: false, note: 'Sources, close rate, response time.' },
-        { key: 'clients', label: 'By client', money: true, note: 'Volume and value per wholesale account.' }
+        { key: 'clients', label: 'By client', money: true, note: 'Volume and value per wholesale account.' },
+        { key: 'voids', label: 'Voided', money: false, note: 'What was voided, why, and what came back.' }
       ],
       caps: ctx.caps
     };
@@ -97,7 +99,7 @@ export async function registerReports(app: FastifyInstance): Promise<void> {
       SELECT COALESCE(l.label, 'Not in a lane') AS lane,
              COUNT(*) AS files,
              SUM(r.on_hold = 1) AS on_hold,
-             AVG(DATEDIFF(COALESCE(r.delivered_at, NOW()), r.opened_at)) AS avg_days,
+             AVG(GREATEST(DATEDIFF(COALESCE(r.delivered_at, NOW()), r.opened_at) - r.voided_days, 0)) AS avg_days,
              SUM(TIMESTAMPDIFF(HOUR, r.status_since, NOW()) >= COALESCE(st.age_red_hours, 999999)) AS stalled,
              SUM(r.labor_hours) AS hours
       FROM repair_orders r
@@ -109,7 +111,7 @@ export async function registerReports(app: FastifyInstance): Promise<void> {
 
     const blocked = await tq<RowDataPacket[]>(ctx.company!.id, `
       SELECT r.id, r.ro_number, st.label AS status_label,
-             DATEDIFF(NOW(), r.opened_at) AS days_in_shop,
+             GREATEST(DATEDIFF(NOW(), r.opened_at) - r.voided_days, 0) AS days_in_shop,
              TIMESTAMPDIFF(HOUR, r.status_since, NOW()) AS hours_in_status,
              r.hold_reason, r.on_hold,
              c.name AS customer_name,
@@ -120,7 +122,7 @@ export async function registerReports(app: FastifyInstance): Promise<void> {
       LEFT JOIN statuses st ON st.slot_id = r.status_slot
       LEFT JOIN clients c ON c.id = r.client_id
       LEFT JOIN vehicles v ON v.id = r.vehicle_id
-      WHERE r.closed_at IS NULL
+      WHERE r.closed_at IS NULL AND r.voided_at IS NULL
         AND (r.on_hold = 1
              OR TIMESTAMPDIFF(HOUR, r.status_since, NOW()) >= COALESCE(st.age_red_hours, 999999))
       ORDER BY hours_in_status DESC
@@ -131,7 +133,7 @@ export async function registerReports(app: FastifyInstance): Promise<void> {
              SUM(r.closed_at IS NULL) AS open_files,
              SUM(r.delivered_at IS NOT NULL) AS delivered,
              SUM(r.labor_hours) AS hours,
-             AVG(DATEDIFF(COALESCE(r.delivered_at, NOW()), r.opened_at)) AS avg_days
+             AVG(GREATEST(DATEDIFF(COALESCE(r.delivered_at, NOW()), r.opened_at) - r.voided_days, 0)) AS avg_days
       FROM repair_orders r WHERE ${s.sql}`, s.params);
 
     return {
@@ -161,7 +163,7 @@ export async function registerReports(app: FastifyInstance): Promise<void> {
     // flagged as counting toward cycle. The gap between them is the wait.
     const files = await tq<RowDataPacket[]>(ctx.company!.id, `
       SELECT r.id, r.ro_number, r.opened_at, r.delivered_at, r.approved_at,
-             DATEDIFF(COALESCE(r.delivered_at, NOW()), r.opened_at) AS days_in_shop,
+             GREATEST(DATEDIFF(COALESCE(r.delivered_at, NOW()), r.opened_at) - r.voided_days, 0) AS days_in_shop,
              DATEDIFF(COALESCE(r.delivered_at, NOW()), COALESCE(r.approved_at, r.opened_at)) AS days_since_approval,
              r.labor_hours,
              c.name AS customer_name,
@@ -194,7 +196,7 @@ export async function registerReports(app: FastifyInstance): Promise<void> {
     const byPath = await tq<RowDataPacket[]>(ctx.company!.id, `
       SELECT r.repair_path,
              COUNT(*) AS files,
-             AVG(DATEDIFF(COALESCE(r.delivered_at, NOW()), r.opened_at)) AS avg_days,
+             AVG(GREATEST(DATEDIFF(COALESCE(r.delivered_at, NOW()), r.opened_at) - r.voided_days, 0)) AS avg_days,
              AVG(r.labor_hours) AS avg_hours
       FROM repair_orders r WHERE ${s.sql}
       GROUP BY r.repair_path`, s.params);
@@ -233,7 +235,7 @@ export async function registerReports(app: FastifyInstance): Promise<void> {
              sf.efficiency,
              COUNT(DISTINCT a.ro_id) AS files,
              SUM(r.labor_hours) AS flagged_hours,
-             AVG(DATEDIFF(COALESCE(r.delivered_at, NOW()), r.opened_at)) AS avg_days,
+             AVG(GREATEST(DATEDIFF(COALESCE(r.delivered_at, NOW()), r.opened_at) - r.voided_days, 0)) AS avg_days,
              SUM(r.closed_at IS NULL) AS open_files
       FROM ro_assignments a
       JOIN repair_orders r ON r.id = a.ro_id
@@ -282,7 +284,7 @@ export async function registerReports(app: FastifyInstance): Promise<void> {
              SUM(TIMESTAMPDIFF(HOUR, r.status_since, NOW()) >= COALESCE(st.age_red_hours, 999999)) AS over_red
       FROM statuses st
       JOIN status_groups g ON g.group_id = st.group_id
-      LEFT JOIN repair_orders r ON r.status_slot = st.slot_id AND r.closed_at IS NULL
+      LEFT JOIN repair_orders r ON r.status_slot = st.slot_id AND r.closed_at IS NULL AND r.voided_at IS NULL
       GROUP BY st.slot_id, st.label, st.owner_role, g.label, st.age_yellow_hours,
                st.age_red_hours, g.sort_order, st.sort_order
       HAVING files > 0
@@ -292,7 +294,7 @@ export async function registerReports(app: FastifyInstance): Promise<void> {
       SELECT st.owner_role, COUNT(r.id) AS files,
              SUM(TIMESTAMPDIFF(HOUR, r.status_since, NOW()) >= COALESCE(st.age_red_hours, 999999)) AS over_red
       FROM statuses st
-      JOIN repair_orders r ON r.status_slot = st.slot_id AND r.closed_at IS NULL
+      JOIN repair_orders r ON r.status_slot = st.slot_id AND r.closed_at IS NULL AND r.voided_at IS NULL
       GROUP BY st.owner_role ORDER BY files DESC`);
 
     return { statuses: rows, byOwner };
@@ -331,7 +333,7 @@ export async function registerReports(app: FastifyInstance): Promise<void> {
              COALESCE(SUM(r.amount_cents), 0) AS gross_cents,
              COALESCE(SUM(r.labor_hours), 0) AS hours
       FROM repair_orders r
-      WHERE r.opened_at > DATE_SUB(CURDATE(), INTERVAL 12 MONTH)
+      WHERE r.voided_at IS NULL AND r.opened_at > DATE_SUB(CURDATE(), INTERVAL 12 MONTH)
       GROUP BY month ORDER BY month`);
 
     const supplements = await tq<RowDataPacket[]>(ctx.company!.id, `
@@ -430,20 +432,20 @@ export async function registerReports(app: FastifyInstance): Promise<void> {
              COALESCE(SUM(r.amount_cents), 0) AS gross_cents,
              COALESCE(SUM(r.labor_hours), 0) AS hours
       FROM repair_orders r
-      WHERE r.approved_at IS NOT NULL
+      WHERE r.voided_at IS NULL AND r.approved_at IS NOT NULL
         AND r.approved_at >= ? AND r.approved_at < DATE_ADD(?, INTERVAL 1 DAY)
       GROUP BY DATE(r.approved_at) ORDER BY day DESC`, [r.from, r.to]);
 
     const waiting = await tq<RowDataPacket[]>(ctx.company!.id, `
       SELECT r.id, r.ro_number, r.amount_cents, st.label AS status_label,
-             DATEDIFF(NOW(), r.opened_at) AS days_in_shop,
+             GREATEST(DATEDIFF(NOW(), r.opened_at) - r.voided_days, 0) AS days_in_shop,
              ins.name AS insurer_name,
              c.name AS customer_name
       FROM repair_orders r
       LEFT JOIN statuses st ON st.slot_id = r.status_slot
       LEFT JOIN clients ins ON ins.id = r.insurer_client_id
       LEFT JOIN clients c ON c.id = r.client_id
-      WHERE r.closed_at IS NULL AND r.approved_at IS NULL
+      WHERE r.closed_at IS NULL AND r.voided_at IS NULL AND r.approved_at IS NULL
       ORDER BY days_in_shop DESC LIMIT 50`);
 
     return { window: r, days: rows, waiting };
@@ -462,7 +464,7 @@ export async function registerReports(app: FastifyInstance): Promise<void> {
              COUNT(r.id) AS files,
              COALESCE(SUM(r.amount_cents), 0) AS gross_cents,
              AVG(r.amount_cents) AS avg_ticket,
-             AVG(DATEDIFF(COALESCE(r.delivered_at, NOW()), r.opened_at)) AS avg_days,
+             AVG(GREATEST(DATEDIFF(COALESCE(r.delivered_at, NOW()), r.opened_at) - r.voided_days, 0)) AS avg_days,
              SUM(r.closed_at IS NULL) AS open_files
       FROM clients c
       JOIN repair_orders r ON r.client_id = c.id
@@ -495,5 +497,62 @@ export async function registerReports(app: FastifyInstance): Promise<void> {
       GROUP BY reason ORDER BY n DESC`, [r.from, r.to]);
 
     return { window: r, bySource, lostReasons: lost };
+  });
+
+  /* ---------------------------------------------------------------- voids */
+
+  /**
+   * What got voided, why, by whom — and which of them came back. Voided files
+   * are out of every other report, so this is the only place they surface.
+   */
+  app.get('/api/reports/voids', async (req, reply) => {
+    const ctx = requireCompany(req, reply);
+    if (!ctx) return;
+    if (!ctx.caps.viewReports) return reply.code(403).send({ error: 'Not permitted' });
+
+    const r = resolveWindow(req.query as never);
+
+    const rows = await tq<RowDataPacket[]>(ctx.company!.id, `
+      SELECT v.id, v.ro_id, v.ro_number, v.reason, v.note, v.amount_cents,
+             v.parts_cancelled, v.parts_flagged,
+             v.voided_at, v.voided_by_name,
+             v.reopened_at, v.reopened_by_name, v.reopened_number,
+             st.label AS status_label,
+             c.name AS customer_name,
+             CONCAT_WS(' ', vh.year, vh.make, vh.model) AS vehicle,
+             (SELECT COUNT(*) FROM parts_lines p
+               WHERE p.ro_id = v.ro_id AND p.return_flagged_at IS NOT NULL
+                 AND p.return_cleared_at IS NULL) AS returns_open
+      FROM ro_voids v
+      JOIN repair_orders ro ON ro.id = v.ro_id
+      LEFT JOIN statuses st ON st.slot_id = v.status_slot
+      LEFT JOIN clients c ON c.id = ro.client_id
+      LEFT JOIN vehicles vh ON vh.id = ro.vehicle_id
+      WHERE v.voided_at >= ? AND v.voided_at < DATE_ADD(?, INTERVAL 1 DAY)
+      ORDER BY v.voided_at DESC`, [r.from, r.to]);
+
+    const byReason = await tq<RowDataPacket[]>(ctx.company!.id, `
+      SELECT reason, COUNT(*) AS n,
+             SUM(reopened_at IS NOT NULL) AS reopened,
+             COALESCE(SUM(amount_cents), 0) AS amount_cents
+      FROM ro_voids
+      WHERE voided_at >= ? AND voided_at < DATE_ADD(?, INTERVAL 1 DAY)
+      GROUP BY reason ORDER BY n DESC`, [r.from, r.to]);
+
+    const reopened = rows.filter(v => v.reopened_at !== null).length;
+
+    return {
+      window: r,
+      voids: rows.map(v => scrubMoney(v as Record<string, unknown>, ctx.caps)),
+      byReason: byReason.map(v => scrubMoney(v as Record<string, unknown>, ctx.caps)),
+      totals: {
+        voided: rows.length,
+        // A file that came back was voided, and is counted here as its own thing
+        // rather than quietly dropping off the tally.
+        reopened,
+        stillVoided: rows.length - reopened,
+        returnsOpen: rows.reduce((a, v) => a + Number(v.returns_open ?? 0), 0)
+      }
+    };
   });
 }

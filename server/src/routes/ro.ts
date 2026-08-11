@@ -33,7 +33,7 @@ export async function registerRepairOrders(app: FastifyInstance): Promise<void> 
 
     if (!ro) return reply.code(404).send({ error: 'No such repair order' });
 
-    const [assigned, notes, history, promises, supplements, sublets, parts, docs] = await Promise.all([
+    const [assigned, notes, history, promises, supplements, sublets, parts, docs, voids] = await Promise.all([
       tq<RowDataPacket[]>(cid, `SELECT position_key, user_id, display_name, assigned_at FROM ro_assignments WHERE ro_id = ?`, [id]),
       tq<RowDataPacket[]>(cid, `SELECT id, kind, body, user_name, created_at FROM ro_notes WHERE ro_id = ? ORDER BY created_at DESC, id DESC`, [id]),
       tq<RowDataPacket[]>(cid, `SELECT id, from_slot, to_slot, from_label, to_label, lane_changed, reason, is_rework, user_name, created_at
@@ -48,7 +48,10 @@ export async function registerRepairOrders(app: FastifyInstance): Promise<void> 
                                 FROM parts_lines p LEFT JOIN vendors v ON v.id = p.vendor_id
                                 WHERE p.ro_id = ? ORDER BY p.id`, [id]),
       tq<RowDataPacket[]>(cid, `SELECT id, doc_type, label, mime_type, size_bytes, is_money_doc, uploaded_name, created_at
-                                FROM documents WHERE ro_id = ? AND deleted_at IS NULL ORDER BY created_at DESC`, [id])
+                                FROM documents WHERE ro_id = ? AND deleted_at IS NULL ORDER BY created_at DESC`, [id]),
+      tq<RowDataPacket[]>(cid, `SELECT id, ro_number, reason, note, status_slot, parts_cancelled, parts_flagged,
+                                       voided_at, voided_by_name, reopened_at, reopened_by_name, reopened_number
+                                FROM ro_voids WHERE ro_id = ? ORDER BY id DESC`, [id])
     ]);
 
     const assignedMap: Record<string, { userId: number | null; name: string | null }> = {};
@@ -65,7 +68,9 @@ export async function registerRepairOrders(app: FastifyInstance): Promise<void> 
       supplements: ctx.caps.money ? supplements : supplements.map(s => scrubMoney(s as Record<string, unknown>, ctx.caps)),
       sublets: sublets.map(s => scrubMoney(s as Record<string, unknown>, ctx.caps)),
       parts: parts.map(p => scrubMoney(p as Record<string, unknown>, ctx.caps)),
-      documents: ctx.caps.money ? docs : docs.filter(d => d.is_money_doc !== 1)
+      documents: ctx.caps.money ? docs : docs.filter(d => d.is_money_doc !== 1),
+      voids,
+      canVoid: ctx.caps.voidRepairOrders
     };
   });
 
@@ -469,6 +474,215 @@ export async function registerRepairOrders(app: FastifyInstance): Promise<void> 
     }
 
     return { ok: true };
+  });
+
+  /**
+   * Void a file. Not a status and not a hold: the file keeps the slot it was in
+   * and the flag takes it off the board. Parts still needed are cancelled;
+   * anything already ordered is flagged for return and the desk hears about it.
+   * The number is released so it can be reused straight away.
+   */
+  app.post('/api/ro/:id/void', async (req, reply) => {
+    const ctx = requireCompany(req, reply);
+    if (!ctx) return;
+    if (!ctx.caps.voidRepairOrders) return reply.code(403).send({ error: 'Not permitted' });
+
+    const id = Number((req.params as { id: string }).id);
+    const cid = ctx.company!.id;
+    const b = req.body as { reason?: string; note?: string };
+    const reason = (b.reason ?? '').trim();
+    if (!reason) return reply.code(400).send({ error: 'A reason is required to void a file.' });
+
+    const result = await withTenantTx(cid, async (c) => {
+      const [rows] = await c.query<RowDataPacket[]>(
+        `SELECT r.id, r.ro_number, r.status_slot, r.amount_cents, r.voided_at, r.closed_at,
+                s.label AS status_label
+         FROM repair_orders r LEFT JOIN statuses s ON s.slot_id = r.status_slot
+         WHERE r.id = ? FOR UPDATE`, [id]);
+      const ro = rows[0];
+      if (!ro) return { error: 'No such repair order', code: 404 };
+      if (ro.voided_at) return { error: 'That file is already voided.', code: 409 };
+
+      // Parts still on paper go away; parts already bought have to come back.
+      const [cancelled] = await c.query<ResultSetHeader>(
+        `UPDATE parts_lines SET state = 'not_needed', gating = 0
+         WHERE ro_id = ? AND state = 'need'`, [id]);
+      const [flagged] = await c.query<ResultSetHeader>(
+        `UPDATE parts_lines SET return_flagged_at = NOW(), return_cleared_at = NULL, gating = 0
+         WHERE ro_id = ? AND state IN ('ordered','partial','received','backordered')
+           AND return_flagged_at IS NULL`, [id]);
+
+      const [v] = await c.query<ResultSetHeader>(
+        `INSERT INTO ro_voids
+           (ro_id, ro_number, reason, note, status_slot, amount_cents,
+            parts_cancelled, parts_flagged, voided_by, voided_by_name)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [id, ro.ro_number, reason.slice(0, 48), (b.note ?? '').trim().slice(0, 255) || null,
+         ro.status_slot, ro.amount_cents ?? 0, cancelled.affectedRows, flagged.affectedRows,
+         ctx.user.id, ctx.user.name]);
+
+      // The number goes back in the pool. uq_ro_number still has to hold, so the
+      // row parks on a placeholder until a reopen gives it a real one.
+      await c.query(
+        `UPDATE repair_orders
+         SET voided_at = NOW(), ro_number = ?,
+             on_hold = 0, hold_reason = NULL, hold_owner = NULL, hold_since = NULL
+         WHERE id = ?`,
+        [`VOID-${id}`, id]);
+
+      if (ro.status_slot) {
+        await c.query(
+          `INSERT INTO ro_status_history
+             (ro_id, from_slot, to_slot, from_label, to_label, reason, user_id, user_name)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          [id, ro.status_slot, ro.status_slot, ro.status_label, ro.status_label,
+           `Voided — ${reason}`, ctx.user.id, ctx.user.name]);
+      }
+
+      await c.query(
+        `INSERT INTO ro_notes (ro_id, kind, body, user_id, user_name) VALUES (?, 'auto', ?, ?, ?)`,
+        [id, `RO ${ro.ro_number} voided — ${reason}.` +
+             (flagged.affectedRows ? ` ${flagged.affectedRows} ordered part line${flagged.affectedRows === 1 ? '' : 's'} flagged for return.` : '') +
+             (cancelled.affectedRows ? ` ${cancelled.affectedRows} line${cancelled.affectedRows === 1 ? '' : 's'} cancelled.` : '') +
+             ` The number is free to reuse.`,
+         ctx.user.id, ctx.user.name]);
+
+      await c.query(
+        `INSERT INTO audit_log (user_id, user_name, entity, entity_id, action, detail)
+         VALUES (?, ?, 'repair_order', ?, 'void', ?)`,
+        [ctx.user.id, ctx.user.name, id, JSON.stringify({
+          roNumber: ro.ro_number, reason, note: b.note ?? null,
+          statusSlot: ro.status_slot, voidId: v.insertId,
+          partsCancelled: cancelled.affectedRows, partsFlagged: flagged.affectedRows
+        })]);
+
+      return {
+        voidId: v.insertId, roNumber: ro.ro_number as string,
+        partsCancelled: cancelled.affectedRows, partsFlagged: flagged.affectedRows
+      };
+    });
+
+    if ('error' in result) return reply.code(result.code).send({ error: result.error });
+
+    // The void itself goes unannounced — it is in the log. The returns are not:
+    // somebody has to send those parts back.
+    if (result.partsFlagged) {
+      await notify({
+        companyId: cid,
+        event: 'parts.return',
+        roId: id,
+        title: `Returns to make — RO ${result.roNumber} voided`,
+        body: `${result.partsFlagged} ordered part line${result.partsFlagged === 1 ? '' : 's'} to send back. They stay on the returns list until cleared.`,
+        actorUserId: ctx.user.id,
+        dedupeKey: `void-return:${result.voidId}`
+      }).catch(e => req.log.error(e));
+    }
+
+    return { ok: true, ...result };
+  });
+
+  /**
+   * Bring a voided file back. Same record, renumbered — its old number may
+   * already be in use. Everything it carried comes with it; whoever reopens
+   * picks the slot and says whether the cancelled parts come back.
+   */
+  app.post('/api/ro/:id/reopen', async (req, reply) => {
+    const ctx = requireCompany(req, reply);
+    if (!ctx) return;
+    if (!ctx.caps.voidRepairOrders) return reply.code(403).send({ error: 'Not permitted' });
+
+    const id = Number((req.params as { id: string }).id);
+    const cid = ctx.company!.id;
+    const b = req.body as { slot?: string; roNumber?: string; restoreParts?: boolean };
+    if (!b.slot) return reply.code(400).send({ error: 'Pick the status it comes back into.' });
+
+    const slot = await tqOne<RowDataPacket & { label: string }>(cid,
+      'SELECT slot_id, label FROM statuses WHERE slot_id = ?', [b.slot]);
+    if (!slot) return reply.code(400).send({ error: 'No such status.' });
+
+    const result = await withTenantTx(cid, async (c) => {
+      const [rows] = await c.query<RowDataPacket[]>(
+        `SELECT id, ro_number, voided_at, voided_days FROM repair_orders WHERE id = ? FOR UPDATE`, [id]);
+      const ro = rows[0];
+      if (!ro) return { error: 'No such repair order', code: 404 };
+      if (!ro.voided_at) return { error: 'That file is not voided.', code: 409 };
+
+      const [vrows] = await c.query<RowDataPacket[]>(
+        `SELECT id, ro_number FROM ro_voids WHERE ro_id = ? AND reopened_at IS NULL
+         ORDER BY id DESC LIMIT 1`, [id]);
+      const voidRow = vrows[0];
+
+      let roNumber = (b.roNumber ?? '').trim();
+      if (roNumber) {
+        const [dup] = await c.query<RowDataPacket[]>(
+          'SELECT id FROM repair_orders WHERE ro_number = ? AND id <> ?', [roNumber, id]);
+        if (dup.length) return { error: `RO ${roNumber} is already taken.`, code: 409 };
+      } else {
+        // Next in the shop's own sequence. Shops that number off the VIN have no
+        // sequence to follow, so they are asked to type one.
+        const [seq] = await c.query<RowDataPacket[]>(
+          `SELECT MAX(CAST(ro_number AS UNSIGNED)) AS top FROM repair_orders
+           WHERE ro_number REGEXP '^[0-9]+$'`);
+        const top = Number(seq[0]?.top ?? 0);
+        if (!top) {
+          return {
+            error: 'This shop does not number in sequence — type the number it should come back as.',
+            code: 400
+          };
+        }
+        roNumber = String(top + 1);
+      }
+
+      // The clock was stopped while it sat voided, so those days come off the
+      // days in shop rather than the original date in being rewritten.
+      await c.query(
+        `UPDATE repair_orders
+         SET ro_number = ?, voided_at = NULL, reopen_count = reopen_count + 1,
+             voided_days = voided_days + GREATEST(DATEDIFF(NOW(), voided_at), 0),
+             status_slot = ?, status_since = NOW()
+         WHERE id = ?`, [roNumber, b.slot, id]);
+
+      if (voidRow) {
+        await c.query(
+          `UPDATE ro_voids SET reopened_at = NOW(), reopened_by = ?, reopened_by_name = ?,
+                               reopened_number = ? WHERE id = ?`,
+          [ctx.user.id, ctx.user.name, roNumber, voidRow.id]);
+      }
+
+      let restored = 0;
+      if (b.restoreParts) {
+        const [r] = await c.query<ResultSetHeader>(
+          `UPDATE parts_lines SET state = 'need', gating = 1
+           WHERE ro_id = ? AND state = 'not_needed'`, [id]);
+        restored = r.affectedRows;
+      }
+
+      await c.query(
+        `INSERT INTO ro_status_history
+           (ro_id, from_slot, to_slot, to_label, reason, user_id, user_name)
+         VALUES (?, NULL, ?, ?, ?, ?, ?)`,
+        [id, b.slot, slot.label,
+         `Reopened from void as RO ${roNumber}`, ctx.user.id, ctx.user.name]);
+
+      await c.query(
+        `INSERT INTO ro_notes (ro_id, kind, body, user_id, user_name) VALUES (?, 'auto', ?, ?, ?)`,
+        [id, `Reopened as RO ${roNumber}, was ${voidRow?.ro_number ?? ro.ro_number}. ` +
+             `Back in ${slot.label}.` +
+             (restored ? ` ${restored} cancelled part line${restored === 1 ? '' : 's'} restored.` : ' Parts not restored.'),
+         ctx.user.id, ctx.user.name]);
+
+      await c.query(
+        `INSERT INTO audit_log (user_id, user_name, entity, entity_id, action, detail)
+         VALUES (?, ?, 'repair_order', ?, 'reopen', ?)`,
+        [ctx.user.id, ctx.user.name, id, JSON.stringify({
+          roNumber, wasRoNumber: voidRow?.ro_number ?? null, slot: b.slot, partsRestored: restored
+        })]);
+
+      return { roNumber, slot: b.slot, partsRestored: restored };
+    });
+
+    if ('error' in result) return reply.code(result.code).send({ error: result.error });
+    return { ok: true, ...result };
   });
 }
 

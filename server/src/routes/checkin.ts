@@ -245,7 +245,7 @@ export async function registerCheckin(app: FastifyInstance): Promise<void> {
     const ctx = requireCompany(req, reply);
     if (!ctx) return;
     const row = await tqOne<RowDataPacket & { ro_number: string }>(ctx.company!.id,
-      `SELECT ro_number FROM repair_orders ORDER BY id DESC LIMIT 1`);
+      `SELECT ro_number FROM repair_orders WHERE voided_at IS NULL ORDER BY id DESC LIMIT 1`);
 
     if (!row) return { suggestion: String(new Date().getFullYear()).slice(2) + '0001' };
 

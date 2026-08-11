@@ -161,7 +161,7 @@
       ({
         production: production, cycle: cycle, technician: technician, status: status,
         revenue: revenue, salesperson: salesperson, approval: approval,
-        clients: clients, leads: leads
+        clients: clients, leads: leads, voids: voids
       }[TAB] || function () {
         $('pane').innerHTML = '<div class="empty">Not built yet.</div>';
       })(d);
@@ -592,6 +592,56 @@
     if (!d.lostReasons.length) h.push('<div class="sub">Nothing lost in this window.</div>');
     else h.push(table([{ t: 'Reason' }, { t: 'Count', num: true }],
       d.lostReasons.map(function (r) { return [esc(r.reason), Number(r.n)]; })));
+
+    $('pane').innerHTML = h.join('');
+  }
+
+  /* ------------------------------------------------------------- voided */
+
+  function voids(d) {
+    var h = [];
+    h.push(bignums([
+      { v: d.totals.voided, k: 'Voided' },
+      { v: d.totals.stillVoided, k: 'Still voided' },
+      { v: d.totals.reopened, k: 'Came back' },
+      { v: d.totals.returnsOpen, k: 'Returns open',
+        tone: d.totals.returnsOpen ? 'var(--stopped)' : '' }
+    ]));
+
+    h.push('<div class="sec">Why</div>');
+    if (!d.byReason.length) h.push('<div class="sub">Nothing voided in this window.</div>');
+    else h.push(table(
+      [{ t: 'Reason' }, { t: 'Files', num: true }, { t: 'Came back', num: true }]
+        .concat(ME.caps.viewMoneyReports ? [{ t: 'Value', num: true }] : []),
+      d.byReason.map(function (r) {
+        return [esc(r.reason), Number(r.n), Number(r.reopened)]
+          .concat(ME.caps.viewMoneyReports ? [money(r.amount_cents)] : []);
+      })));
+
+    if (d.voids.length) {
+      h.push('<div class="sec">Every void</div>');
+      h.push('<div class="sub" style="margin-bottom:8px">Voided files are out of every other ' +
+        'report. A file that came back kept its history and took a new number.</div>');
+      h.push(table(
+        [{ t: 'Was RO' }, { t: 'Vehicle' }, { t: 'Reason' }, { t: 'Voided' }, { t: 'By' },
+         { t: 'Returns', num: true }, { t: 'Came back as' }],
+        d.voids.map(function (v) {
+          return [
+            '<a href="/board.html?ro=' + v.ro_id + '">' + esc(v.ro_number) + '</a>',
+            esc([v.vehicle, v.customer_name].filter(Boolean).join(' · ') || '—'),
+            esc(v.reason) + (v.note ? ' <span style="color:var(--dim)">' + esc(v.note) + '</span>' : ''),
+            shortDate(v.voided_at),
+            esc(v.voided_by_name || '—'),
+            Number(v.returns_open)
+              ? '<span style="color:var(--stopped)">' + v.returns_open + '</span>'
+              : '—',
+            v.reopened_at
+              ? esc(v.reopened_number || 'yes') + ' <span style="color:var(--dim)">' +
+                shortDate(v.reopened_at) + '</span>'
+              : '<span style="color:var(--dim)">no</span>'
+          ];
+        })));
+    }
 
     $('pane').innerHTML = h.join('');
   }

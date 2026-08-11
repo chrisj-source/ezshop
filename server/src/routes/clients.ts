@@ -49,7 +49,7 @@ export async function registerClients(app: FastifyInstance): Promise<void> {
              c.address, c.city, c.state, c.zip, c.terms, c.is_drp, c.adjuster_desk,
              c.platform_locked, c.active, c.created_at,
              (SELECT COUNT(*) FROM repair_orders r
-               WHERE r.client_id = c.id AND r.closed_at IS NULL) AS open_files,
+               WHERE r.client_id = c.id AND r.closed_at IS NULL AND r.voided_at IS NULL) AS open_files,
              (SELECT COUNT(*) FROM repair_orders r
                WHERE r.client_id = c.id AND YEAR(r.opened_at) = YEAR(CURDATE())) AS ytd_files
       FROM clients c
@@ -176,7 +176,7 @@ export async function registerClients(app: FastifyInstance): Promise<void> {
 
     const id = Number((req.params as { id: string }).id);
     const open = await tqOne<RowDataPacket & { n: number }>(ctx.company!.id,
-      'SELECT COUNT(*) AS n FROM repair_orders WHERE client_id = ? AND closed_at IS NULL', [id]);
+      'SELECT COUNT(*) AS n FROM repair_orders WHERE client_id = ? AND closed_at IS NULL AND voided_at IS NULL', [id]);
 
     await texec(ctx.company!.id, 'UPDATE clients SET active = 0 WHERE id = ?', [id]);
     return { ok: true, openFiles: Number(open?.n ?? 0) };

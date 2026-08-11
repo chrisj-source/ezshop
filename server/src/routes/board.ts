@@ -42,8 +42,8 @@ export async function registerBoard(app: FastifyInstance): Promise<void> {
     }
 
     const closedClause = wantClosed
-      ? 'r.closed_at IS NOT NULL AND r.closed_at > DATE_SUB(NOW(), INTERVAL 90 DAY)'
-      : 'r.closed_at IS NULL';
+      ? 'r.closed_at IS NOT NULL AND r.voided_at IS NULL AND r.closed_at > DATE_SUB(NOW(), INTERVAL 90 DAY)'
+      : 'r.closed_at IS NULL AND r.voided_at IS NULL';
 
     const rows = await tq<BoardRow[]>(ctx.company!.id, `
       SELECT
@@ -77,7 +77,7 @@ export async function registerBoard(app: FastifyInstance): Promise<void> {
       ctx.company!.id,
       `SELECT a.ro_id, a.position_key, a.display_name FROM ro_assignments a
        JOIN repair_orders r ON r.id = a.ro_id
-       WHERE ${wantClosed ? 'r.closed_at IS NOT NULL' : 'r.closed_at IS NULL'}`
+       WHERE r.voided_at IS NULL AND ${wantClosed ? 'r.closed_at IS NOT NULL' : 'r.closed_at IS NULL'}`
     );
 
     const byRo = new Map<number, Record<string, string | null>>();
@@ -165,7 +165,7 @@ export async function registerBoard(app: FastifyInstance): Promise<void> {
         COALESCE(SUM(r.amount_cents), 0) AS severity_cents
       FROM repair_orders r
       LEFT JOIN statuses s ON s.slot_id = r.status_slot
-      WHERE r.closed_at IS NULL
+      WHERE r.closed_at IS NULL AND r.voided_at IS NULL
     `);
 
     return {
