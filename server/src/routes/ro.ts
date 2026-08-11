@@ -562,7 +562,7 @@ export async function registerRepairOrders(app: FastifyInstance): Promise<void> 
       };
     });
 
-    if ('error' in result) return reply.code(result.code).send({ error: result.error });
+    if ('error' in result) return reply.code(result.code ?? 400).send({ error: result.error });
 
     // The void itself goes unannounced — it is in the log. The returns are not:
     // somebody has to send those parts back.
@@ -681,7 +681,7 @@ export async function registerRepairOrders(app: FastifyInstance): Promise<void> 
       return { roNumber, slot: b.slot, partsRestored: restored };
     });
 
-    if ('error' in result) return reply.code(result.code).send({ error: result.error });
+    if ('error' in result) return reply.code(result.code ?? 400).send({ error: result.error });
     return { ok: true, ...result };
   });
 }
