@@ -73,18 +73,26 @@ export async function registerBoard(app: FastifyInstance): Promise<void> {
       ORDER BY r.opened_at DESC
     `, params);
 
-    const assignments = await tq<Array<RowDataPacket & { ro_id: number; position_key: string; display_name: string | null }>>(
+    const assignments = await tq<Array<RowDataPacket & {
+      ro_id: number; position_key: string; display_name: string | null; user_id: number | null;
+    }>>(
       ctx.company!.id,
-      `SELECT a.ro_id, a.position_key, a.display_name FROM ro_assignments a
+      `SELECT a.ro_id, a.position_key, a.display_name, a.user_id FROM ro_assignments a
        JOIN repair_orders r ON r.id = a.ro_id
        WHERE r.voided_at IS NULL AND ${wantClosed ? 'r.closed_at IS NOT NULL' : 'r.closed_at IS NULL'}`
     );
 
     const byRo = new Map<number, Record<string, string | null>>();
+    // Who by name for display, and by id so the board can filter to one person.
+    const idsByRo = new Map<number, Record<string, number | null>>();
     for (const a of assignments) {
       const m = byRo.get(a.ro_id) ?? {};
       m[a.position_key] = a.display_name;
       byRo.set(a.ro_id, m);
+
+      const ids = idsByRo.get(a.ro_id) ?? {};
+      ids[a.position_key] = a.user_id;
+      idsByRo.set(a.ro_id, ids);
     }
 
     const now = Date.now();
@@ -133,7 +141,8 @@ export async function registerBoard(app: FastifyInstance): Promise<void> {
         supplementsOpen: r.supp_open,
         amount_cents: r.amount_cents,
         laborHours: Number(r.labor_hours),
-        assigned: byRo.get(r.id) ?? {}
+        assigned: byRo.get(r.id) ?? {},
+        assignedIds: idsByRo.get(r.id) ?? {}
       }, ctx.caps);
     });
 

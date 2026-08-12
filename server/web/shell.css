@@ -157,6 +157,20 @@ select { appearance:none; padding-right:24px;
   background-position:calc(100% - 13px) 52%, calc(100% - 9px) 52%;
   background-size:4px 4px, 4px 4px; background-repeat:no-repeat; }
 select:hover, input:hover, textarea:hover { border-color:var(--muted); }
+
+/* Native dropdowns render their own list: white on grey by default, which is
+   hard to read. The group headings are the shop's lanes, so they take the gold
+   used everywhere else and the options sit on the page's own dark ground. */
+select option {
+  background:var(--bg); color:var(--text);
+  font:400 12px var(--font); padding:6px 8px;
+}
+select optgroup {
+  background:var(--surf); color:var(--acc2);
+  font:600 11px var(--font); font-style:normal;
+  letter-spacing:.08em; text-transform:uppercase;
+}
+select optgroup option { color:var(--text); text-transform:none; letter-spacing:0; }
 .filters input[type=search] { min-width:200px; max-width:240px; }
 textarea { padding:8px 10px; font-size:12px; }
 select { cursor:pointer; }

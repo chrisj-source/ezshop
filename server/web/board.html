@@ -6,7 +6,7 @@
 <meta name="theme-color" content="#1c2740">
 <title>Board — Easy Shop</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/shell.css?v=6">
+<link rel="stylesheet" href="/shell.css?v=7">
 <style>
   /* ---- shared ---- */
   .ro { font-weight:500; font-variant-numeric:tabular-nums; }
@@ -31,6 +31,65 @@
   .colhead {
     font:600 8.5px var(--font); letter-spacing:.13em; text-transform:uppercase;
     color:var(--acc2); padding:9px 12px 6px;
+  }
+
+  /* ---- printing ---- */
+  /* The sheet is the view already on screen: same rows, same filter, chrome
+     stripped. Landscape letter, because nine columns need the width. */
+  .printhead { display:none; }
+  .writein { display:none; }
+
+  @page { size: letter landscape; margin: 12mm 10mm; }
+
+  @media print {
+    :root { --text:#111; --muted:#333; --dim:#555; --line:#999; --whisper:#ddd; }
+    html, body { background:#fff !important; color:#111 !important; height:auto; }
+    body { display:block; }
+
+    .bar, .hairline, .filters, .kpis, .scrim, .modal, .guard, .lightbox,
+    .tabbar, .sheet, .colpanel, .impbanner, .legend, .cardsum, .tailrow { display:none !important; }
+
+    main { display:block; overflow:visible; }
+    .tablewrap, .cyclewrap { padding:0; overflow:visible; }
+
+    .printhead {
+      display:flex; align-items:baseline; gap:14px;
+      border-bottom:1.5px solid #111; padding-bottom:6px; margin-bottom:10px;
+    }
+    .phshop { font:600 13pt 'Inter',sans-serif; color:#111; }
+    .phwhat { font:400 9.5pt 'Inter',sans-serif; color:#333; }
+
+    .gridhead, .cyclehead {
+      background:#fff !important; color:#111 !important; border-bottom:1px solid #111;
+      position:static; height:auto; padding:0 0 4px;
+    }
+    .lanehead {
+      background:#fff !important; position:static; border:none; border-bottom:1px solid #111;
+      padding:9pt 0 3pt; break-after:avoid; page-break-after:avoid;
+    }
+    .lanename { color:#111 !important; }
+
+    .gridrow, .cyclerow {
+      break-inside:avoid; page-break-inside:avoid;
+      border-bottom:1px solid #ccc; padding:5pt 0; min-height:0;
+      color:#111 !important; cursor:default;
+    }
+    .gridrow *, .cyclerow *, .lanehead * { color:#111 !important; }
+    .cellsub, .sub, .log-m { color:#555 !important; }
+    .edge, .track, .pip { display:none !important; }
+    .flag, .pill { border-color:#999 !important; }
+
+    /* The progression bars survive: they are the point of the cycle sheet. */
+    .pseg { print-color-adjust:exact; -webkit-print-color-adjust:exact; }
+
+    /* A ruled column to write in. The grid gets one more track: rows carry the
+       widened template in --printcols so an inline style cannot win. */
+    .writein { display:block; border-bottom:1px solid #999; height:1.4em; align-self:end; }
+    .gridhead, .gridrow { grid-template-columns:var(--printcols) !important; }
+    .cyclehead, .cyclerow { grid-template-columns:210px 240px 1fr 70px 60px 1.7in !important; }
+
+    .cards, .empty { display:none !important; }
+    a[href]::after { content:none !important; }
   }
 
   /* ---- table view ---- */
@@ -188,6 +247,30 @@
     .cardline { display:flex; align-items:center; gap:7px; margin-top:8px; flex-wrap:wrap; }
     .lanehead { padding:8px 14px; }
     .assigngrid { grid-template-columns:1fr; }
+
+    /* The modal header is a single desktop row; squeezed onto a phone every
+       item wrapped to one word per line and the row ran off the side. Two
+       rows instead: the file on top, its status and actions scrolling under. */
+    .mhead {
+      display:grid; grid-template-columns:auto auto 1fr auto; grid-auto-rows:min-content;
+      align-items:center; gap:4px 9px; height:auto; padding:9px 12px;
+    }
+    .mhead > * { min-width:0; }
+    #dVeh, #dSub {
+      grid-column:1 / -1; margin-left:0;
+      overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+    }
+    #dStatus, #dParts, #dDocs {
+      grid-row:3; white-space:nowrap;
+    }
+    #dStatus { grid-column:1 / span 2; }
+    #dParts { grid-column:3; justify-self:start; }
+    #dDocs { grid-column:4; }
+    .mhead .close { grid-row:1; grid-column:4; }
+    .mhead .spacer { display:none; }
+    #dParts, #dDocs {
+      overflow:hidden; text-overflow:ellipsis; font-size:11px; padding:7px 9px;
+    }
     .cardsum {
       position:sticky; top:0; z-index:2; display:flex; align-items:center; gap:12px;
       padding:7px 14px; background:var(--surf);
@@ -196,6 +279,7 @@
       overflow-x:auto; scrollbar-width:none;
     }
     .cardsum::-webkit-scrollbar { display:none; }
+    #fPrint { display:none; }
     .cardsum b { font:500 12px var(--font); font-variant-numeric:tabular-nums; color:var(--text); }
   }
 </style>
@@ -234,6 +318,10 @@
   <input type="search" id="fSearch" placeholder="Search RO #, VIN, plate, name…">
   <select id="fStatus"></select>
   <select id="fGroup"><option value="">All stages</option></select>
+  <select id="fTech"><option value="">Everyone</option></select>
+  <label class="row" style="font:400 11.5px var(--font);color:var(--muted);gap:5px">
+    <input type="checkbox" id="fDone"> Complete
+  </label>
   <label class="row" style="font:400 11.5px var(--font);color:var(--muted);gap:5px">
     <input type="checkbox" id="fClosed"> Closed
   </label>
@@ -242,8 +330,14 @@
     <div class="colpanel" id="colPanel" hidden></div>
   </div>
   <div class="spacer"></div>
+  <button class="btn btn-ghost" id="fPrint">Print list</button>
   <a class="btn btn-ghost" href="/import.html" id="importLink" hidden>Import EMS</a>
   <button class="btn" id="newRo">+ New RO</button>
+</div>
+
+<div class="printhead" id="printHead" aria-hidden="true">
+  <div class="phshop" id="phShop">—</div>
+  <div class="phwhat" id="phWhat">—</div>
 </div>
 
 <div class="kpis" id="kpis"></div>
@@ -259,7 +353,7 @@
     <div class="legend" id="legend"></div>
     <div class="cyclehead">
       <div>Vehicle</div><div>Current status</div><div id="progHead">Progression</div>
-      <div>Days</div><div style="text-align:right">Variance</div>
+      <div>Days</div><div style="text-align:right">Variance</div><div class="writein"></div>
     </div>
     <div id="cycleBody"></div>
   </div>
@@ -299,7 +393,7 @@
 </div>
 
 <script src="/photos.js?v=5"></script>
-<script src="/shell.js?v=6"></script>
+<script src="/shell.js?v=7"></script>
 <script>
 (function () {
   var api = Shell.api, esc = Shell.esc;
@@ -326,6 +420,25 @@
     { k: 'promised', t: 'Promised',            w: 88,  on: false },
     { k: 'status',   t: 'Status / last update', w: 260, on: true, lock: true, flex: true }
   ];
+
+  /**
+   * Which lanes each position owns — the same map the server enforces with, in
+   * permissions.ts. It decides what a technician's pipeline is: pick a painter
+   * and the list is prep, paint and buff, not the whole shop.
+   */
+  var POSITION_LANES = {
+    pdr: ['pdr'],
+    body: ['body'],
+    paint: ['prep', 'paint', 'buff'],
+    ri: ['reassembly'],
+    detail: ['detail']
+  };
+
+  /** A car nobody can start: no body tech and no paint tech on it. */
+  function needsTech(f) {
+    var a = f.assigned || {};
+    return !a.body && !a.paint;
+  }
 
   function $(id) { return document.getElementById(id); }
   function money(c) {
@@ -406,6 +519,7 @@
     });
     $('fStatus').innerHTML = '';
     fillStatusFilter('');
+    fillTechFilter();
     renderColPanel();
     syncView();
     return load();
@@ -425,6 +539,53 @@
       em.hidden = false;
     }
   });
+
+  /**
+   * Everyone, one technician, or the files that still need one. Grouped by
+   * position so the list reads as the shop is organised.
+   */
+  function fillTechFilter() {
+    var s = $('fTech');
+    var byPos = {};
+    STAFF.forEach(function (st) {
+      if (!st.position_key || !POSITION_LANES[st.position_key]) return;
+      (byPos[st.position_key] = byPos[st.position_key] || []).push(st);
+    });
+
+    var labels = { pdr: 'PDR', body: 'Body', paint: 'Paint', ri: 'R&I', detail: 'Detail' };
+
+    s.innerHTML = '<option value="">Everyone</option>' +
+      '<option value="none">Needs a tech</option>' +
+      Object.keys(POSITION_LANES).filter(function (k) { return byPos[k]; }).map(function (k) {
+        return '<optgroup label="' + esc(labels[k] || k) + '">' +
+          byPos[k].map(function (st) {
+            return '<option value="u' + st.user_id + ':' + k + '">' + esc(st.display_name) + '</option>';
+          }).join('') + '</optgroup>';
+      }).join('');
+
+    // A technician's own board opens on their own work.
+    if (ME.positionKey && POSITION_LANES[ME.positionKey]) {
+      var mine = 'u' + ME.user.id + ':' + ME.positionKey;
+      if (s.querySelector('option[value="' + mine + '"]')) s.value = mine;
+    }
+  }
+
+  /** The picked technician, as { userId, position, lanes } — or null. */
+  function pickedTech() {
+    var v = $('fTech').value;
+    if (!v || v === 'none') return null;
+    var bits = v.slice(1).split(':');
+    return { userId: Number(bits[0]), position: bits[1], lanes: POSITION_LANES[bits[1]] || [] };
+  }
+
+  /** Statuses at Vehicle Ready or past it. */
+  function completeSlots() {
+    var ready = STATUSES.filter(function (s) { return /vehicle ready/i.test(s.label || ''); })[0];
+    var from = ready ? Number(ready.sort_order) : null;
+    return STATUSES.filter(function (s) {
+      return from == null ? s.kind === 'complete' : Number(s.sort_order) >= from;
+    }).map(function (s) { return s.slot_id; });
+  }
 
   function fillStatusFilter(groupId) {
     var s = $('fStatus');
@@ -488,9 +649,22 @@
 
   function filtered() {
     var g = $('fGroup').value, st = $('fStatus').value, q = $('fSearch').value.trim().toLowerCase();
+    var tech = pickedTech();
+    var wantNone = $('fTech').value === 'none';
+    var done = $('fDone').checked ? completeSlots() : null;
+
     var out = FILES.filter(function (f) {
       if (g && f.group !== g) return false;
       if (st && f.statusSlot !== st) return false;
+      if (done && done.indexOf(f.statusSlot) < 0) return false;
+      if (wantNone && !needsTech(f)) return false;
+      if (tech) {
+        var ids = f.assignedIds || {};
+        var mine = Object.keys(ids).some(function (k) {
+          return String(ids[k]) === String(tech.userId);
+        });
+        if (!mine) return false;
+      }
       if (q && [f.ro, f.customer, f.vehicle, f.vin, f.insurer].join(' ').toLowerCase().indexOf(q) < 0) return false;
       return true;
     });
@@ -531,13 +705,14 @@
   function buildHead() {
     var head = $('gridHead');
     head.style.gridTemplateColumns = gridTemplate();
+    head.style.setProperty('--printcols', gridTemplate() + ' 1.7in');
     head.innerHTML = '<div></div>' + activeCols().map(function (c) {
       var arrow = SORT.key === c.k
         ? '<span class="harrow">' + (SORT.dir === 'asc' ? '\u2191' : '\u2193') + '</span>' : '';
       return '<div' + (c.num ? ' style="text-align:right"' : '') + '>' +
         '<span class="hlabel" data-sort="' + c.k + '">' + esc(c.t) + arrow + '</span>' +
         '<span class="hgrip" data-grip="' + c.k + '"></span></div>';
-    }).join('');
+    }).join('') + '<div class="writein"></div>';
 
     Array.prototype.forEach.call(head.querySelectorAll('[data-sort]'), function (el) {
       el.addEventListener('click', function () {
@@ -619,6 +794,8 @@
     if (f.supplementsOpen) out += '<span class="flag" style="color:var(--move);border:1px solid var(--move)" ' +
       'title="Supplement open">Supp</span>';
     if (f.roType === 'wholesale') out += '<span class="flag" style="color:var(--dim);border:1px solid var(--line)">WS</span>';
+    if (needsTech(f)) out += '<span class="flag" style="color:var(--acc);border:1px solid var(--acc)" ' +
+      'title="No body tech and no paint tech on this file">Needs tech</span>';
 
     // A file that has not moved in days says so, in its own right.
     var days = Math.floor(Number(f.hoursInStatus || 0) / 24);
@@ -724,9 +901,11 @@
 
     $('gridBody').innerHTML = rows.map(function (f) {
       var edge = tone(f);
-      return '<div class="gridrow" data-id="' + f.id + '" style="grid-template-columns:' + t + '">' +
+      return '<div class="gridrow" data-id="' + f.id + '" style="grid-template-columns:' + t +
+        ';--printcols:' + t + ' 1.7in">' +
         '<div><div class="edge" style="background:' + edge + '"></div></div>' +
-        cols.map(function (c) { return cellFor(c, f); }).join('') + '</div>';
+        cols.map(function (c) { return cellFor(c, f); }).join('') +
+        '<div class="writein"></div></div>';
     }).join('') +
     '<div class="tailrow"><div>' + rows.length + ' of ' + FILES.length + ' files</div></div>';
 
@@ -783,15 +962,25 @@
         esc(l.t) + '</div>';
     }).join('') + '<div class="legitem" style="margin-left:auto">' + rows.length + ' files</div>';
 
-    // Group by lane, unlaned last, in lane order.
+    // Group by lane, unlaned last, in lane order. With a technician picked the
+    // lanes they own come first; their cars that have moved on sit in their own
+    // group at the end rather than vanishing.
+    var tech = pickedTech();
     var buckets = {};
     rows.forEach(function (f) {
       var key = f.lane || '__none';
+      if (tech && f.lane && tech.lanes.indexOf(f.lane) < 0) key = '__elsewhere';
       (buckets[key] = buckets[key] || []).push(f);
     });
 
     var order = LANES.map(function (l) { return l.lane_key; }).filter(function (k) { return buckets[k]; });
+    if (tech) {
+      order.sort(function (a, c) {
+        return (tech.lanes.indexOf(a) < 0 ? 1 : 0) - (tech.lanes.indexOf(c) < 0 ? 1 : 0);
+      });
+    }
     if (buckets.__none) order.push('__none');
+    if (buckets.__elsewhere) order.push('__elsewhere');
 
     if (!order.length) {
       $('cycleBody').innerHTML = '<div class="empty">Nothing to show.</div>';
@@ -801,7 +990,9 @@
     var n = 0;
     $('cycleBody').innerHTML = order.map(function (key) {
       var list = buckets[key];
-      var label = key === '__none' ? 'Not in a production lane' : laneLabel(key);
+      var label = key === '__none' ? 'Not in a production lane'
+        : key === '__elsewhere' ? 'Elsewhere in the shop'
+        : laneLabel(key);
       var late = list.filter(function (f) { return variance(f) > 0; }).length;
       n++;
 
@@ -851,7 +1042,8 @@
 
       '<div class="num" style="font:500 12px var(--font);color:' +
       (v == null ? 'var(--dim)' : over ? 'var(--stopped)' : 'var(--done)') + '">' +
-      (v == null ? '—' : (v > 0 ? '+' : '') + v + 'd') + '</div></div>';
+      (v == null ? '—' : (v > 0 ? '+' : '') + v + 'd') + '</div>' +
+      '<div class="writein"></div></div>';
   }
 
   function bindRows() {
@@ -872,14 +1064,49 @@
       $('cards').innerHTML = '';
       $('cycleBody').innerHTML = '';
       $('empty').hidden = false;
+      syncPrintHead(0);
       $('empty').innerHTML = FILES.length ? 'Nothing matches those filters.'
         : 'No repair orders yet.<br>Use <strong>New RO</strong> or <strong>Check-in</strong>.';
       return;
     }
     $('empty').hidden = true;
 
+    syncPrintHead(rows.length);
     if (VIEW === 'table') renderTable(rows);
     else renderCycle(rows);
+  }
+
+  /**
+   * What the sheet says it is. Written on every render so printing from the
+   * browser's own menu says the same thing as the button.
+   */
+  function describeFilter(n) {
+    var bits = [];
+    var st = $('fStatus');
+    if (st.value) bits.push(st.options[st.selectedIndex].textContent);
+    var g = $('fGroup');
+    if (g.value) bits.push(g.options[g.selectedIndex].textContent);
+
+    var t = $('fTech');
+    if (t.value === 'none') bits.push('needing a tech');
+    else if (t.value) bits.push('assigned to ' + t.options[t.selectedIndex].textContent);
+
+    if ($('fDone').checked) bits.push('complete');
+    if ($('fClosed').checked) bits.push('closed files');
+    var q = $('fSearch').value.trim();
+    if (q) bits.push('matching “' + q + '”');
+
+    return n + ' file' + (n === 1 ? '' : 's') +
+      (bits.length ? ' · ' + bits.join(' · ') : ' · everything on the board') +
+      ' · ' + (VIEW === 'cycle' ? 'cycle view' : 'table view');
+  }
+
+  function syncPrintHead(n) {
+    $('phShop').textContent = (ME.company ? ME.company.name : 'Easy Shop') + ' — repair orders';
+    $('phWhat').textContent = describeFilter(n) + ' · printed ' +
+      new Date().toLocaleDateString('en-US',
+        { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' }) + ' ' +
+      new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
   }
 
   function syncView() {
@@ -1164,8 +1391,12 @@
     $('dSub').textContent = daysIn(r) + ' days in shop' +
       (r.target_days ? ' · target ' + r.target_days : '') +
       (Number(r.voided_days) ? ' · ' + r.voided_days + ' voided' : '');
-    $('dDocs').textContent = 'Documents ' + d.documents.length +
-      ' file' + (d.documents.length === 1 ? '' : 's');
+    // Room for the sentence on a desk, not on a phone.
+    var tight = window.matchMedia('(max-width:820px)').matches;
+    $('dParts').textContent = tight ? 'Parts' : 'Open parts for this RO';
+    $('dDocs').textContent = tight
+      ? 'Docs ' + d.documents.length
+      : 'Documents ' + d.documents.length + ' file' + (d.documents.length === 1 ? '' : 's');
     $('dParts').hidden = ME.features.indexOf('parts') < 0;
 
     /* ---- left column: the file itself ---- */
@@ -1774,7 +2005,10 @@
   on('fGroup', 'change', function () { fillStatusFilter(this.value); render(); });
   on('fStatus', 'change', render);
   on('fSearch', 'input', render);
+  on('fTech', 'change', render);
+  on('fDone', 'change', render);
   on('fClosed', 'change', function () { load(); });
+  on('fPrint', 'click', function () { window.print(); });
   on('refresh', 'click', function () { load(); });
   on('scrim', 'click', tryCloseRo);
   on('dClose', 'click', tryCloseRo);
