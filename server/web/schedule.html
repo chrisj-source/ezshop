@@ -6,7 +6,7 @@
 <meta name="theme-color" content="#1c2740">
 <title>Schedule — Easy Shop</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/shell.css?v=5">
+<link rel="stylesheet" href="/shell.css?v=6">
 <style>
   .navrow { display:flex; align-items:center; gap:10px; padding:11px 18px; flex:none; }
   .arrow {
@@ -86,6 +86,24 @@
   .apx:hover { color:var(--text); }
   .daynone { font:400 10.5px var(--font); color:var(--dim); padding:4px 2px; }
 
+  /* Time off is a layer over the day, not an appointment: no card, no border,
+     a hatched strip that says the person is not available. */
+  .offstrip {
+    display:flex; align-items:center; gap:6px; padding:5px 7px; border-radius:4px;
+    background:repeating-linear-gradient(135deg, var(--chip) 0 6px, transparent 6px 12px);
+    border:1px dashed var(--line); font:400 10.5px var(--font); color:var(--muted);
+  }
+  .offstrip b { font:500 10.5px var(--font); color:var(--text); }
+  .offrow {
+    display:flex; align-items:center; gap:10px; padding:9px 0;
+    border-bottom:1px solid var(--whisper);
+  }
+  .clashbox {
+    border:1px solid var(--acc); border-radius:5px; padding:9px 11px; margin-top:10px;
+    font:400 11.5px/1.6 var(--font); color:var(--muted);
+  }
+  .clashbox ul { margin:6px 0 0; padding-left:17px; }
+
   /* Booking form: month picker beside the fields, as the mockup lays it out. */
   .bookgrid { display:grid; grid-template-columns:246px 1fr; gap:16px; }
   .calhead { display:flex; align-items:center; gap:8px; margin-bottom:8px; }
@@ -139,6 +157,7 @@
   <div class="vdiv"></div>
   <div style="display:flex;gap:6px" id="typeFilters"></div>
   <div class="spacer"></div>
+  <button class="btn btn-ghost" id="offBtn" hidden>Time off</button>
   <button class="btn btn-ghost" id="limitsBtn" hidden>Day limits</button>
   <button class="btn" id="bookBtn">Book</button>
 </div>
@@ -162,11 +181,11 @@
   <div class="dbody" id="dBody"></div>
 </aside>
 
-<script src="/shell.js?v=5"></script>
+<script src="/shell.js?v=6"></script>
 <script>
 (function () {
   var api = Shell.api, esc = Shell.esc;
-  var ME = null, META = null, DATA = null, FROM = null, TYPE = null;
+  var ME = null, META = null, DATA = null, FROM = null, TYPE = null, STAFF = [];
   var CAL_MONTH = null, PICKED = null, BOOK_KIND = null, OPENINGS = null;
 
   var TONE = {
@@ -203,8 +222,11 @@
       return null;
     }
     Shell.mount({ me: me, active: 'schedule' });
-    if (me.caps.admin) $('limitsBtn').hidden = false;
-    return api('/api/schedule-meta');
+    if (me.caps.admin) { $('limitsBtn').hidden = false; $('offBtn').hidden = false; }
+    return Promise.all([
+      api('/api/schedule-meta'),
+      api('/api/config').then(function (c) { STAFF = c.staff || []; }).catch(function () {})
+    ]).then(function (r) { return r[0]; });
   }).then(function (m) {
     if (!m) return;
     META = m;
@@ -269,6 +291,9 @@
       if (META.closedDays.indexOf(weekday) >= 0) continue;
 
       var mine = shown.filter(function (a) { return iso(new Date(a.starts_at)) === key; });
+      var off = (DATA.timeOff || []).filter(function (o) {
+        return iso(new Date(o.starts_on)) <= key && iso(new Date(o.ends_on)) >= key;
+      });
       var used = DATA.used[key] || {};
       var isToday = key === todayIso;
       var past = new Date(key + 'T23:59') < new Date(todayIso + 'T00:00');
@@ -293,6 +318,13 @@
         '</div></div>' +
 
         '<div class="daybody">' +
+        off.map(function (o) {
+          return '<div class="offstrip" title="' + esc(o.reason || 'Off') + '">' +
+            '<b>' + esc(o.display_name) + '</b> off' +
+            (o.start_time ? ' ' + String(o.start_time).slice(0, 5) + '–' +
+              String(o.end_time || '').slice(0, 5) : ' all day') +
+            (o.reason ? ' · ' + esc(o.reason) : '') + '</div>';
+        }).join('') +
         mine.map(function (a) {
           var isPast = new Date(a.starts_at).getTime() < now;
           return '<div class="appt' + (isPast ? ' past' : '') + '" data-appt="' + a.id + '" ' +
@@ -332,7 +364,14 @@
       b.addEventListener('click', function (e) {
         e.stopPropagation();
         if (!confirm('Cancel this appointment?')) return;
-        api('/api/schedule/' + b.dataset.cancel, { method: 'DELETE' }).then(load);
+        b.disabled = true;
+        api('/api/schedule/' + b.dataset.cancel, { method: 'DELETE' })
+          .then(load)
+          .catch(function (err) {
+            b.disabled = false;
+            $('weekSummary').textContent = 'Could not cancel: ' + err.message;
+            $('weekSummary').style.color = 'var(--stopped)';
+          });
       });
     });
     Array.prototype.forEach.call($('week').querySelectorAll('[data-add]'), function (b) {
@@ -377,6 +416,11 @@
       '<div><label class="fl">Phone</label><input id="bPhone" type="tel" style="width:100%"></div>' +
       '<div><label class="fl">Vehicle</label><input id="bVehicle" placeholder="2020 Silverado" style="width:100%"></div>' +
       '<div><label class="fl">Time</label><input id="bTime" type="time" value="09:00" style="width:100%"></div>' +
+      '<div><label class="fl">Who is it for</label><select id="bWho" style="width:100%">' +
+      '<option value="">Nobody in particular</option>' +
+      STAFF.map(function (st) {
+        return '<option value="' + st.user_id + '">' + esc(st.display_name) + '</option>';
+      }).join('') + '</select></div>' +
       '</div>' +
       '<div style="margin-top:12px"><label class="fl">Note</label>' +
       '<textarea id="bNote" placeholder="Hail damage, wants an estimate"></textarea></div>');
@@ -514,6 +558,7 @@
         phone: $('bPhone').value.trim() || undefined,
         vehicleText: $('bVehicle').value.trim() || undefined,
         note: $('bNote').value.trim() || undefined,
+        assignedUserId: $('bWho') && $('bWho').value ? Number($('bWho').value) : undefined,
         override: override
       })
     }).then(function (r) {
@@ -527,7 +572,20 @@
       });
     }).catch(function (e) {
       msg.className = 'msg err';
-      if (/full/i.test(e.message) && ME.caps.admin) {
+      var d = e.data || {};
+
+      // Two different warnings, both overridable rather than refusals: the day
+      // is full, or the person is off or already booked at that hour.
+      if (d.conflict) {
+        msg.innerHTML = '<div class="clashbox"><div style="color:var(--acc)">' +
+          esc(e.message) + '</div><ul>' +
+          (d.clashes || []).map(function (c) { return '<li>' + esc(c.text) + '</li>'; }).join('') +
+          '</ul><div class="row" style="margin-top:10px">' +
+          '<button class="btn btn-solid" id="ovr">Book it anyway</button>' +
+          '<span class="sub" style="flex:1;min-width:120px">The override is recorded on the ' +
+          'appointment.</span></div></div>';
+        $('ovr').addEventListener('click', function () { submit(true); });
+      } else if (/full/i.test(e.message) && ME.caps.admin) {
         msg.innerHTML = esc(e.message) +
           ' <button class="btn btn-ghost" id="ovr" style="padding:4px 9px;font-size:10.5px;margin-left:6px">' +
           'Overbook anyway</button>';
@@ -549,7 +607,12 @@
         { weekday: 'long', month: 'long', day: 'numeric' }) + ' at ' + timeOf(a.starts_at));
 
     var h = ['<div class="sec">Details</div><div class="grid2">'];
+    var who = STAFF.filter(function (st) {
+      return String(st.user_id) === String(a.assigned_user_id);
+    })[0];
+
     [['Phone', a.phone], ['Vehicle', a.vehicle_text || a.ro_vehicle],
+     ['For', who ? who.display_name : null], ['Booked over', a.override_note],
      ['Repair order', a.ro_number], ['Lead', a.lead_number],
      ['Status', a.status_label], ['Reminders', a.remind_1d || a.remind_12h ? 'on' : 'off'],
      ['Note', a.note]].forEach(function (p) {
@@ -584,9 +647,141 @@
 
     $('cancelAppt').addEventListener('click', function () {
       if (!confirm('Cancel this appointment?')) return;
+      var btn = $('cancelAppt');
+      btn.disabled = true;
       api('/api/schedule/' + id, { method: 'DELETE' })
-        .then(function () { closeDrawer(); return load(); });
+        .then(function () { closeDrawer(); return load(); })
+        .catch(function (e) {
+          btn.disabled = false;
+          $('aMsg').textContent = e.message;
+          $('aMsg').className = 'msg err';
+        });
     });
+  }
+
+  /* -------------------------------------------------------- employee time off */
+
+  /**
+   * Blocking time out is deliberately not a booking: it is a layer over the
+   * week saying someone is not available. Owner only, and a clash with work
+   * already booked warns rather than refuses.
+   */
+  function openTimeOff() {
+    show('Time off', 'Block out days or hours an employee is not available');
+    $('dBody').innerHTML = '<div class="empty">Loading…</div>';
+
+    api('/api/time-off?days=120').then(function (d) {
+      var h = ['<div class="sec">Block time out</div>'];
+
+      h.push('<div class="grid2">' +
+        '<div><label class="fl">Who</label><select id="oWho" style="width:100%">' +
+        STAFF.map(function (st) {
+          return '<option value="' + st.user_id + '">' + esc(st.display_name) + '</option>';
+        }).join('') + '</select></div>' +
+        '<div><label class="fl">Reason</label>' +
+        '<input id="oReason" placeholder="Vacation, appointment, training" style="width:100%"></div>' +
+        '<div><label class="fl">First day</label>' +
+        '<input type="date" id="oFrom" value="' + iso(new Date()) + '" style="width:100%"></div>' +
+        '<div><label class="fl">Last day</label>' +
+        '<input type="date" id="oTo" value="' + iso(new Date()) + '" style="width:100%"></div>' +
+        '</div>');
+
+      h.push('<label class="row" style="gap:7px;align-items:center;margin-top:12px">' +
+        '<input type="checkbox" id="oPart">' +
+        '<span class="sub" style="text-transform:none;letter-spacing:0">Only part of the day</span>' +
+        '</label>');
+
+      h.push('<div class="row" id="oHours" style="margin-top:9px" hidden>' +
+        '<input type="time" id="oStart" value="08:00">' +
+        '<span class="sub">to</span>' +
+        '<input type="time" id="oEnd" value="12:00"></div>');
+
+      h.push('<div class="row" style="margin-top:16px">' +
+        '<button class="btn btn-solid" id="oSave">Block this time</button>' +
+        '<span class="sub" style="flex:1;min-width:150px">A range of days, or hours within a day. ' +
+        'Work already booked in the window is listed before anything is saved.</span></div>' +
+        '<div class="msg" id="oMsg"></div>');
+
+      h.push('<div class="sec">Blocked ahead</div>');
+      if (!d.timeOff.length) h.push('<div class="sub">Nothing blocked in the next four months.</div>');
+      d.timeOff.forEach(function (o) {
+        var span = iso(new Date(o.starts_on)) === iso(new Date(o.ends_on))
+          ? shortDay(o.starts_on)
+          : shortDay(o.starts_on) + ' – ' + shortDay(o.ends_on);
+        h.push('<div class="offrow"><div style="flex:1;min-width:0">' +
+          '<div style="font:400 12px var(--font)">' + esc(o.display_name) + ' · ' + esc(span) +
+          (o.start_time ? ' · ' + String(o.start_time).slice(0, 5) + '–' +
+            String(o.end_time || '').slice(0, 5) : ' · all day') + '</div>' +
+          '<div class="sub">' + esc(o.reason || 'No reason given') +
+          (o.created_name ? ' · set by ' + esc(o.created_name) : '') + '</div></div>' +
+          '<button class="btn btn-ghost" data-off="' + o.id + '" ' +
+          'style="padding:4px 9px;font-size:10.5px">Remove</button></div>');
+      });
+
+      $('dBody').innerHTML = h.join('');
+
+      $('oPart').addEventListener('change', function () {
+        $('oHours').hidden = !this.checked;
+      });
+      $('oFrom').addEventListener('change', function () {
+        if ($('oTo').value < this.value) $('oTo').value = this.value;
+      });
+
+      $('oSave').addEventListener('click', function () { saveOff(false); });
+
+      Array.prototype.forEach.call($('dBody').querySelectorAll('[data-off]'), function (b) {
+        b.addEventListener('click', function () {
+          api('/api/time-off/' + b.dataset.off, { method: 'DELETE' })
+            .then(function () { openTimeOff(); return load(); })
+            .catch(function (e) {
+              $('oMsg').textContent = e.message;
+              $('oMsg').className = 'msg err';
+            });
+        });
+      });
+    }).catch(function (e) {
+      $('dBody').innerHTML = '<div class="empty">' + esc(e.message) + '</div>';
+    });
+  }
+
+  function saveOff(override) {
+    var part = $('oPart').checked;
+    var msg = $('oMsg');
+
+    api('/api/time-off', {
+      method: 'POST',
+      body: JSON.stringify({
+        userId: Number($('oWho').value),
+        startsOn: $('oFrom').value,
+        endsOn: $('oTo').value,
+        startTime: part ? $('oStart').value : null,
+        endTime: part ? $('oEnd').value : null,
+        reason: $('oReason').value.trim() || undefined,
+        override: override
+      })
+    }).then(function () {
+      closeDrawer();
+      return load();
+    }).catch(function (e) {
+      var d = e.data || {};
+      msg.className = 'msg err';
+      if (d.conflict) {
+        msg.innerHTML = '<div class="clashbox"><div style="color:var(--acc)">' + esc(e.message) +
+          '</div><ul>' +
+          (d.clashes || []).map(function (c) { return '<li>' + esc(c.text) + '</li>'; }).join('') +
+          '</ul><div class="row" style="margin-top:10px">' +
+          '<button class="btn btn-solid" id="oOvr">Block it anyway</button>' +
+          '<span class="sub" style="flex:1;min-width:120px">Those appointments stay booked. ' +
+          'The override is recorded.</span></div></div>';
+        $('oOvr').addEventListener('click', function () { saveOff(true); });
+      } else {
+        msg.textContent = e.message;
+      }
+    });
+  }
+
+  function shortDay(v) {
+    return new Date(v).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
   }
 
   /* ----------------------------------------------------------- day limits */
@@ -680,6 +875,7 @@
   $('thisWeek').addEventListener('click', function () { FROM = iso(mondayOf(new Date())); load(); });
   $('bookBtn').addEventListener('click', function () { openBooking(iso(new Date())); });
   $('limitsBtn').addEventListener('click', openLimits);
+  $('offBtn').addEventListener('click', openTimeOff);
   $('scrim').addEventListener('click', closeDrawer);
   $('dClose').addEventListener('click', closeDrawer);
   document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeDrawer(); });

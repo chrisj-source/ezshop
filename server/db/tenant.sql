@@ -435,12 +435,54 @@ CREATE TABLE appointments (
   remind_12h      TINYINT(1)    NOT NULL DEFAULT 1,
   gcal_event_id   VARCHAR(128)  NULL,
   created_by      BIGINT UNSIGNED NULL,
+  assigned_user_id BIGINT UNSIGNED NULL COMMENT 'whose day this sits in, for conflicts',
+  override_note   VARCHAR(255)  NULL COMMENT 'what was overridden when this was booked',
   created_at      DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
   cancelled_at    DATETIME      NULL,
   KEY ix_appt_day (starts_at, kind),
+  KEY ix_appt_assigned (assigned_user_id, starts_at),
   KEY ix_appt_ro (ro_id),
   CONSTRAINT fk_appt_ro FOREIGN KEY (ro_id) REFERENCES repair_orders(id) ON DELETE SET NULL,
   CONSTRAINT fk_appt_lead FOREIGN KEY (lead_id) REFERENCES leads(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Time an employee is off. A layer over the week, not an appointment type: a
+-- date range, optionally narrowed to hours within the day. Owner maintained.
+CREATE TABLE employee_time_off (
+  id            BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  user_id       BIGINT UNSIGNED NOT NULL,
+  display_name  VARCHAR(120)  NOT NULL COMMENT 'copied so the block reads right if the person leaves',
+  starts_on     DATE          NOT NULL,
+  ends_on       DATE          NOT NULL COMMENT 'inclusive',
+  start_time    TIME          NULL COMMENT 'null = from the start of the day',
+  end_time      TIME          NULL COMMENT 'null = to the end of the day',
+  reason        VARCHAR(120)  NULL,
+  created_by    BIGINT UNSIGNED NULL,
+  created_name  VARCHAR(120)  NULL,
+  created_at    DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  cancelled_at  DATETIME      NULL,
+  KEY ix_off_span (starts_on, ends_on),
+  KEY ix_off_user (user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- The shop's Google Calendar link. Push only: appointments are written out,
+-- nothing is read back in.
+CREATE TABLE calendar_connections (
+  id             BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  provider       VARCHAR(24)   NOT NULL DEFAULT 'google',
+  calendar_id    VARCHAR(190)  NULL COMMENT 'which calendar appointments land on',
+  calendar_name  VARCHAR(190)  NULL,
+  account_email  VARCHAR(190)  NULL,
+  access_token   TEXT          NULL,
+  refresh_token  TEXT          NULL,
+  expires_at     DATETIME      NULL,
+  state          ENUM('connected','error','disconnected') NOT NULL DEFAULT 'connected',
+  last_error     VARCHAR(255)  NULL,
+  last_push_at   DATETIME      NULL,
+  connected_by   BIGINT UNSIGNED NULL,
+  connected_name VARCHAR(120)  NULL,
+  created_at     DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_cal_provider (provider)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ===========================================================================
@@ -504,9 +546,20 @@ CREATE TABLE ems_imports (
   envelope_name   VARCHAR(190)  NULL COMMENT 'the EMS set name, eg a9062516',
   ro_number       VARCHAR(32)   NULL COMMENT 'parsed from the file',
   claim_number    VARCHAR(64)   NULL,
+  insurer_name    VARCHAR(190)  NULL COMMENT 'carrier as the estimate wrote it',
+  policy_number   VARCHAR(64)   NULL,
+  deductible_cents BIGINT       NULL,
+  deductible_waived TINYINT(1)  NOT NULL DEFAULT 0,
+  date_of_loss    DATE          NULL,
+  adjuster        VARCHAR(120)  NULL,
+  estimator       VARCHAR(120)  NULL,
   vin             VARCHAR(24)   NULL,
   customer_name   VARCHAR(160)  NULL,
   vehicle_text    VARCHAR(160)  NULL,
+  vehicle_color   VARCHAR(48)   NULL,
+  plate           VARCHAR(16)   NULL,
+  plate_state     VARCHAR(8)    NULL,
+  mileage         INT           NULL,
   supplement_seq  INT           NULL,
   total_cents     BIGINT        NULL,
   line_count      INT           NULL,

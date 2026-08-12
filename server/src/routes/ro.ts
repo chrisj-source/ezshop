@@ -33,7 +33,7 @@ export async function registerRepairOrders(app: FastifyInstance): Promise<void> 
 
     if (!ro) return reply.code(404).send({ error: 'No such repair order' });
 
-    const [assigned, notes, history, promises, supplements, sublets, parts, docs, voids] = await Promise.all([
+    const [assigned, notes, history, promises, supplements, sublets, parts, docs, voids, insurers] = await Promise.all([
       tq<RowDataPacket[]>(cid, `SELECT position_key, user_id, display_name, assigned_at FROM ro_assignments WHERE ro_id = ?`, [id]),
       tq<RowDataPacket[]>(cid, `SELECT id, kind, body, user_name, created_at FROM ro_notes WHERE ro_id = ? ORDER BY created_at DESC, id DESC`, [id]),
       tq<RowDataPacket[]>(cid, `SELECT id, from_slot, to_slot, from_label, to_label, lane_changed, reason, is_rework, user_name, created_at
@@ -51,7 +51,9 @@ export async function registerRepairOrders(app: FastifyInstance): Promise<void> 
                                 FROM documents WHERE ro_id = ? AND deleted_at IS NULL ORDER BY created_at DESC`, [id]),
       tq<RowDataPacket[]>(cid, `SELECT id, ro_number, reason, note, status_slot, parts_cancelled, parts_flagged,
                                        voided_at, voided_by_name, reopened_at, reopened_by_name, reopened_number
-                                FROM ro_voids WHERE ro_id = ? ORDER BY id DESC`, [id])
+                                FROM ro_voids WHERE ro_id = ? ORDER BY id DESC`, [id]),
+      tq<RowDataPacket[]>(cid, `SELECT id, name FROM clients
+                                WHERE kind = 'insurance' AND active = 1 ORDER BY name`)
     ]);
 
     const assignedMap: Record<string, { userId: number | null; name: string | null }> = {};
@@ -70,6 +72,7 @@ export async function registerRepairOrders(app: FastifyInstance): Promise<void> 
       parts: parts.map(p => scrubMoney(p as Record<string, unknown>, ctx.caps)),
       documents: ctx.caps.money ? docs : docs.filter(d => d.is_money_doc !== 1),
       voids,
+      insurers,
       canVoid: ctx.caps.voidRepairOrders
     };
   });
@@ -432,6 +435,190 @@ export async function registerRepairOrders(app: FastifyInstance): Promise<void> 
     );
 
     return { ok: true };
+  });
+
+  /**
+   * Edit the file's own facts: who the customer is, what the car is, and the
+   * insurance side. Three blocks on the drawer, one save each, but one endpoint
+   * — it all lands in the same three tables and the same note.
+   *
+   * Blank clears a value. The carrier is matched by name against the insurance
+   * clients and created if it is new, so typing "GEICO" on a file that came in
+   * from an estimate does the right thing without a trip to the Clients screen.
+   */
+  app.patch('/api/ro/:id/details', async (req, reply) => {
+    const ctx = requireCompany(req, reply);
+    if (!ctx) return;
+    if (!ctx.caps.editRepairOrders) return reply.code(403).send({ error: 'Not permitted' });
+
+    const id = Number((req.params as { id: string }).id);
+    const cid = ctx.company!.id;
+    const b = req.body as Record<string, string | number | null | undefined>;
+
+    const str = (v: unknown, n: number): string | null => {
+      if (v === null) return null;
+      const s = String(v ?? '').trim();
+      return s ? s.slice(0, n) : null;
+    };
+    const num = (v: unknown): number | null => {
+      if (v === null || v === undefined || String(v).trim() === '') return null;
+      const x = Number(String(v).replace(/[^0-9.]/g, ''));
+      return isNaN(x) ? null : x;
+    };
+
+    const ro = await tqOne<RowDataPacket>(cid,
+      `SELECT r.id, r.client_id, r.vehicle_id, r.insurer_client_id,
+              r.claim_number, r.policy_number, r.date_of_loss, r.adjuster, r.ro_type,
+              c.name AS customer_name, c.phone AS customer_phone, c.email AS customer_email,
+              ins.name AS insurer_name,
+              v.year, v.make, v.model, v.color, v.vin, v.plate, v.plate_state, v.mileage
+       FROM repair_orders r
+       LEFT JOIN clients c ON c.id = r.client_id
+       LEFT JOIN clients ins ON ins.id = r.insurer_client_id
+       LEFT JOIN vehicles v ON v.id = r.vehicle_id
+       WHERE r.id = ?`, [id]);
+    if (!ro) return reply.code(404).send({ error: 'No such repair order' });
+
+    const changes: string[] = [];
+    const changed = (label: string, was: unknown, now: unknown): void => {
+      const a = was === null || was === undefined || was === '' ? null : String(was);
+      const z = now === null || now === undefined || now === '' ? null : String(now);
+      if (a === z) return;
+      changes.push(z === null ? `${label} cleared` : `${label} set to ${z}`);
+    };
+
+    await withTenantTx(cid, async (c) => {
+      /* -------------------------------------------------- customer */
+      const custCols: Array<[string, string, string, number]> = [
+        ['customerName', 'name', 'Name', 190],
+        ['customerPhone', 'phone', 'Phone', 32],
+        ['customerEmail', 'email', 'Email', 190]
+      ];
+      const custSets: string[] = [];
+      const custVals: unknown[] = [];
+      for (const [key, col, label, len] of custCols) {
+        if (b[key] === undefined) continue;
+        const v = str(b[key], len);
+        if (col === 'name' && !v) {
+          throw Object.assign(new Error('A customer needs a name.'), { statusCode: 400 });
+        }
+        changed(label, ro[`customer_${col === 'name' ? 'name' : col}`], v);
+        custSets.push(`${col} = ?`);
+        custVals.push(v);
+      }
+      if (custSets.length && ro.client_id) {
+        custVals.push(ro.client_id);
+        await c.query(`UPDATE clients SET ${custSets.join(', ')} WHERE id = ?`, custVals);
+      }
+
+      /* -------------------------------------------------- vehicle */
+      const vehSets: string[] = [];
+      const vehVals: unknown[] = [];
+      const push = (col: string, label: string, v: unknown): void => {
+        changed(label, ro[col], v);
+        vehSets.push(`${col} = ?`);
+        vehVals.push(v);
+      };
+      if (b.year !== undefined) push('year', 'Year', num(b.year));
+      if (b.make !== undefined) push('make', 'Make', str(b.make, 64));
+      if (b.model !== undefined) push('model', 'Model', str(b.model, 96));
+      if (b.color !== undefined) push('color', 'Colour', str(b.color, 64));
+      if (b.vin !== undefined) push('vin', 'VIN', str(b.vin, 24));
+      if (b.plate !== undefined) push('plate', 'Plate', str(b.plate, 16));
+      if (b.plateState !== undefined) push('plate_state', 'Plate state', str(b.plateState, 8));
+      if (b.mileage !== undefined) push('mileage', 'Mileage', num(b.mileage));
+
+      if (vehSets.length) {
+        if (ro.vehicle_id) {
+          vehVals.push(ro.vehicle_id);
+          await c.query(`UPDATE vehicles SET ${vehSets.join(', ')} WHERE id = ?`, vehVals);
+        } else {
+          // A file checked in without a vehicle row gets one the first time
+          // somebody types into the block.
+          const [v] = await c.query<ResultSetHeader>(
+            `INSERT INTO vehicles (client_id, ${vehSets.map(s => s.split(' = ')[0]).join(', ')})
+             VALUES (?, ${vehSets.map(() => '?').join(', ')})`,
+            [ro.client_id, ...vehVals]);
+          await c.query('UPDATE repair_orders SET vehicle_id = ? WHERE id = ?', [v.insertId, id]);
+        }
+      }
+
+      /* -------------------------------------------- insurance and loss */
+      const roSets: string[] = [];
+      const roVals: unknown[] = [];
+
+      if (b.insurer !== undefined) {
+        const name = str(b.insurer, 190);
+        let insurerId: number | null = null;
+
+        if (name) {
+          const [hit] = await c.query<RowDataPacket[]>(
+            `SELECT id, name FROM clients WHERE kind = 'insurance' AND name = ? LIMIT 1`, [name]);
+          if (hit.length) {
+            insurerId = hit[0].id as number;
+          } else {
+            const [ins] = await c.query<ResultSetHeader>(
+              `INSERT INTO clients (kind, name) VALUES ('insurance', ?)`, [name]);
+            insurerId = ins.insertId;
+            changes.push(`${name} added as a carrier`);
+          }
+        }
+
+        changed('Carrier', ro.insurer_name, name);
+        roSets.push('insurer_client_id = ?');
+        roVals.push(insurerId);
+      }
+
+      if (b.claimNumber !== undefined) {
+        const v = str(b.claimNumber, 64);
+        changed('Claim number', ro.claim_number, v);
+        roSets.push('claim_number = ?'); roVals.push(v);
+      }
+      if (b.policyNumber !== undefined) {
+        const v = str(b.policyNumber, 64);
+        changed('Policy number', ro.policy_number, v);
+        roSets.push('policy_number = ?'); roVals.push(v);
+      }
+      if (b.adjuster !== undefined) {
+        const v = str(b.adjuster, 120);
+        changed('Adjuster', ro.adjuster, v);
+        roSets.push('adjuster = ?'); roVals.push(v);
+      }
+      if (b.dateOfLoss !== undefined) {
+        const raw = str(b.dateOfLoss, 10);
+        if (raw && isNaN(new Date(raw).getTime())) {
+          throw Object.assign(new Error('That date of loss is not a date.'), { statusCode: 400 });
+        }
+        changed('Date of loss', ro.date_of_loss
+          ? new Date(ro.date_of_loss as string).toISOString().slice(0, 10) : null, raw);
+        roSets.push('date_of_loss = ?'); roVals.push(raw);
+      }
+      if (b.roType !== undefined) {
+        const v = String(b.roType);
+        if (!['repair', 'wholesale', 'warranty'].includes(v)) {
+          throw Object.assign(new Error('That is not a file type.'), { statusCode: 400 });
+        }
+        changed('Type', ro.ro_type, v);
+        roSets.push('ro_type = ?'); roVals.push(v);
+      }
+
+      if (roSets.length) {
+        roVals.push(id);
+        await c.query(`UPDATE repair_orders SET ${roSets.join(', ')} WHERE id = ?`, roVals);
+      }
+
+      if (changes.length) {
+        await c.query(
+          `INSERT INTO ro_notes (ro_id, kind, body, user_id, user_name) VALUES (?, 'auto', ?, ?, ?)`,
+          [id, changes.join('. ') + '.', ctx.user.id, ctx.user.name]);
+        await c.query(
+          `INSERT INTO audit_log (user_id, user_name, entity, entity_id, action, detail)
+           VALUES (?, ?, 'repair_order', ?, 'edit_details', ?)`,
+          [ctx.user.id, ctx.user.name, id, JSON.stringify({ changes })]);
+      }
+    });
+
+    return { ok: true, changed: changes.length, changes };
   });
 
   app.put('/api/ro/:id/assign/:position', async (req, reply) => {

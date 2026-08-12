@@ -6,7 +6,7 @@
 <meta name="theme-color" content="#1c2740">
 <title>Admin — Easy Shop</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/shell.css?v=5">
+<link rel="stylesheet" href="/shell.css?v=6">
 <style>
   /* Tabs underline, as in the mockup — not pills. */
   .adminbar {
@@ -176,12 +176,20 @@
   </div>
 </div>
 
-<script src="/shell.js?v=5"></script>
+<script src="/shell.js?v=6"></script>
 <script>
 (function () {
   var api = Shell.api, esc = Shell.esc;
   var ME = null, CFG = null, PEOPLE = null, GROUPS = null, ROLES = [], CTYPES = null;
   var TAB = 'statuses', RAIL = null, SEL = null;
+
+  // Google sends the owner back here after they authorise; land on the tab and
+  // the card they left from.
+  (function () {
+    var q = new URLSearchParams(location.search);
+    if (q.get('tab')) TAB = q.get('tab');
+    if (q.get('calendar')) RAIL = 'cal';
+  })();
 
   var TABS = [
     { k: 'statuses', t: 'Statuses' },
@@ -941,11 +949,19 @@
   /* ===================================================== settings */
 
   function renderSettings() {
-    rail('Reference', [{ k: 'tech', t: 'Tech visibility' }, { k: 'caps', t: 'Day limits' }]);
+    rail('Reference', [
+      { k: 'tech', t: 'Tech visibility' },
+      { k: 'caps', t: 'Day limits' },
+      { k: 'cal', t: 'Google Calendar' }
+    ]);
     var s = CFG.settings;
 
+    // The rail picks which card is on screen, the same way it filters statuses
+    // and lanes. Nothing selected shows all three.
+    function shows(k) { return !RAIL || RAIL === k; }
+
     $('mid').innerHTML = '<div class="pad">' +
-      '<div class="card2" style="margin:0 0 14px">' +
+      (shows('tech') ? '<div class="card2" style="margin:0 0 14px">' +
       '<div class="card2row" style="grid-template-columns:1fr auto">' +
       '<div><div style="font:500 12.5px var(--font)">Technicians see only their own files</div>' +
       '<div class="sub" style="margin-top:4px;max-width:520px">On: a tech sees only cars assigned ' +
@@ -953,9 +969,9 @@
       'accounting and the owner always see everything.</div></div>' +
       '<button class="pchip' + (s.tech_sees_own_only !== '0' ? ' on' : '') + '" id="techOwn" ' +
       'data-on="' + (s.tech_sees_own_only !== '0' ? 1 : 0) + '">' +
-      (s.tech_sees_own_only !== '0' ? 'On' : 'Off') + '</button></div></div>' +
+      (s.tech_sees_own_only !== '0' ? 'On' : 'Off') + '</button></div></div>' : '') +
 
-      '<div class="card2" style="margin:0 0 14px">' +
+      (shows('caps') ? '<div class="card2" style="margin:0 0 14px">' +
       '<div class="card2row" style="grid-template-columns:1fr">' +
       '<div class="dlbl" style="margin:0 0 4px">Scheduler capacity</div>' +
       '<div class="sub" style="margin-bottom:10px">How many of each per day. The owner can always ' +
@@ -965,12 +981,27 @@
         return '<div><div class="dk">' + k + 's per day</div>' +
           '<input class="dinput" type="number" min="0" id="cap_' + k + '" value="' +
           esc(s['cap_' + k] || '0') + '"></div>';
-      }).join('') + '</div></div></div>' +
+      }).join('') + '</div></div></div>' : '') +
+
+      (shows('cal') ? '<div class="card2" style="margin:0 0 14px" id="calCard">' +
+        '<div class="card2row" style="grid-template-columns:1fr">' +
+        '<div class="dlbl" style="margin:0 0 4px">Google Calendar</div>' +
+        '<div class="sub" style="margin-bottom:10px;max-width:560px">Appointments booked here appear ' +
+        'on the shop calendar. Push only: nothing on Google changes this scheduler, and time off is ' +
+        'still entered on the schedule screen. You sign in once with the shop account — there is no ' +
+        'password to share, and staff never see credentials.</div>' +
+        '<div id="calBody" class="sub">Loading…</div></div></div>' : '') +
 
       '<div class="row"><button class="btn btn-solid" id="saveSettings">Save settings</button></div>' +
       '<div class="msg" id="dMsg"></div></div>';
 
-    $('techOwn').addEventListener('click', function () {
+    if (shows('cal')) renderCalendar();
+    if (!shows('tech') || !shows('caps')) {
+      // The Save button writes both cards; hide it when neither is on screen.
+      $('saveSettings').hidden = !shows('tech') && !shows('caps');
+    }
+
+    if ($('techOwn')) $('techOwn').addEventListener('click', function () {
       var b = $('techOwn'), on = b.dataset.on !== '1';
       b.dataset.on = on ? '1' : '0';
       b.classList.toggle('on', on);
@@ -978,9 +1009,10 @@
     });
 
     $('saveSettings').addEventListener('click', function () {
-      var body = { tech_sees_own_only: $('techOwn').dataset.on === '1' ? '1' : '0' };
+      var body = {};
+      if ($('techOwn')) body.tech_sees_own_only = $('techOwn').dataset.on === '1' ? '1' : '0';
       ['drop', 'pickup', 'return', 'estimate', 'appraiser'].forEach(function (k) {
-        body['cap_' + k] = $('cap_' + k).value || '0';
+        if ($('cap_' + k)) body['cap_' + k] = $('cap_' + k).value || '0';
       });
       api('/api/config/settings', { method: 'PATCH', body: JSON.stringify(body) })
         .then(function () { say('Saved.', 'ok'); return reloadConfig(); })
@@ -998,6 +1030,77 @@
       ' on of ' + CFG.lanes.length + '</div></div>' +
       '<div class="sub" style="margin-top:12px">Shop type is set at the platform level, not here. ' +
       'It decides which status template the shop started from.</div>');
+  }
+
+  /** The Google Calendar card: connect, pick a calendar, disconnect. */
+  function renderCalendar() {
+    api('/api/calendar').then(function (c) {
+      var el = $('calBody');
+      if (!el) return;
+
+      if (!c.configured) {
+        el.innerHTML = 'This server has no Google credentials, so there is nothing to connect to yet. ' +
+          'Add <code>GOOGLE_CLIENT_ID</code> and <code>GOOGLE_CLIENT_SECRET</code> to the server\'s ' +
+          '<code>.env</code> and restart — then this card offers a sign-in button.';
+        return;
+      }
+
+      if (!c.connection || c.connection.state === 'disconnected') {
+        el.innerHTML = c.canConnect
+          ? '<a class="btn btn-solid" href="/api/calendar/connect">Connect Google Calendar</a>'
+          : 'Not connected. The owner can connect it.';
+        return;
+      }
+
+      var conn = c.connection;
+      el.innerHTML =
+        '<div class="drow"><div class="dk">Calendar</div><div class="dv">' +
+        esc(conn.calendarName || conn.calendarId || 'not picked yet') + '</div></div>' +
+        '<div class="drow"><div class="dk">State</div><div class="dv" style="color:' +
+        (conn.state === 'connected' ? 'var(--done)' : 'var(--stopped)') + '">' +
+        esc(conn.state) + '</div></div>' +
+        (conn.lastError ? '<div class="drow"><div class="dk">Last error</div><div class="dv">' +
+          esc(conn.lastError) + '</div></div>' : '') +
+        (conn.lastPushAt ? '<div class="drow"><div class="dk">Last sent</div><div class="dv">' +
+          Shell.when(conn.lastPushAt) + '</div></div>' : '') +
+        (c.canConnect
+          ? '<div class="row" style="margin-top:12px">' +
+            '<select id="calPick" style="min-width:220px"><option value="">Loading calendars…</option></select>' +
+            '<button class="btn btn-ghost" id="calSave">Use this calendar</button>' +
+            '<button class="btn btn-danger" id="calOff">Disconnect</button></div>'
+          : '');
+
+      if (!c.canConnect) return;
+
+      api('/api/calendar/calendars').then(function (r) {
+        $('calPick').innerHTML = r.calendars.map(function (x) {
+          return '<option value="' + esc(x.id) + '"' +
+            (x.id === conn.calendarId ? ' selected' : '') + '>' + esc(x.name) + '</option>';
+        }).join('') || '<option value="">No writable calendars</option>';
+      }).catch(function (e) {
+        $('calPick').innerHTML = '<option value="">' + esc(e.message) + '</option>';
+      });
+
+      $('calSave').addEventListener('click', function () {
+        var pick = $('calPick');
+        var id = pick.value;
+        if (!id) return say('Pick a calendar.', 'err');
+        api('/api/calendar', {
+          method: 'PATCH',
+          body: JSON.stringify({ calendarId: id, calendarName: pick.options[pick.selectedIndex].textContent })
+        }).then(function () { say('Saved.', 'ok'); renderCalendar(); })
+          .catch(function (e) { say(e.message, 'err'); });
+      });
+
+      $('calOff').addEventListener('click', function () {
+        if (!confirm('Disconnect Google Calendar? Appointments already sent stay on the calendar.')) return;
+        api('/api/calendar', { method: 'DELETE' })
+          .then(function () { say('Disconnected.', 'ok'); renderCalendar(); })
+          .catch(function (e) { say(e.message, 'err'); });
+      });
+    }).catch(function (e) {
+      if ($('calBody')) $('calBody').textContent = e.message;
+    });
   }
 
   /* ====================================================== storage */

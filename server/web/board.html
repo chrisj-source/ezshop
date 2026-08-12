@@ -6,7 +6,7 @@
 <meta name="theme-color" content="#1c2740">
 <title>Board — Easy Shop</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/shell.css?v=5">
+<link rel="stylesheet" href="/shell.css?v=6">
 <style>
   /* ---- shared ---- */
   .ro { font-weight:500; font-variant-numeric:tabular-nums; }
@@ -48,14 +48,22 @@
   }
   .lanehead {
     display:flex; align-items:center; gap:9px; padding:8px 18px; background:var(--surf);
+    position:sticky; top:0; z-index:2;
     border-top:1px solid var(--whisper); border-bottom:1px solid var(--whisper);
   }
   .lanen { font:500 9.5px var(--font); font-variant-numeric:tabular-nums; color:var(--acc); }
   .lanename { font:500 12px var(--font); letter-spacing:.06em; text-transform:uppercase; }
   .cyclerow {
     display:grid; grid-template-columns:250px 286px 1fr 96px 88px; gap:14px; align-items:center;
-    padding:0 18px; height:52px; border-bottom:1px solid var(--whisper); cursor:pointer;
+    padding:7px 18px; min-height:52px; border-bottom:1px solid var(--whisper); cursor:pointer;
   }
+  /* A CCC vehicle line runs to fifty characters. Two lines, then an ellipsis —
+     the full text is on the row's title attribute and in the drawer. */
+  .cyclerow .cell {
+    display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical;
+    overflow:hidden; line-height:1.3;
+  }
+  .cyclerow .sub { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .cyclerow:hover { background:var(--surf); }
   .progress { display:flex; gap:3px; align-items:center; }
   .pseg { height:6px; flex:1; border-radius:1px; min-width:4px; }
@@ -108,6 +116,20 @@
   .fv2.num { font-variant-numeric:tabular-nums; }
   .secline { border-bottom:1px solid var(--whisper); margin-bottom:12px; padding-bottom:9px; }
 
+  /* ---- collapsible fact blocks ---- */
+  .sec.fold { cursor:pointer; user-select:none; display:flex; align-items:center; gap:8px; }
+  .sec.fold:hover .foldcue { color:var(--acc); }
+  .foldcue {
+    font:400 10px var(--font); color:var(--dim); margin-left:auto; letter-spacing:0;
+    text-transform:none; display:flex; align-items:center; gap:5px;
+  }
+  .foldcue .chev { display:inline-block; transition:transform .12s ease; }
+  .sec.fold.shut .foldcue .chev { transform:rotate(-90deg); }
+  .foldbody[hidden] { display:none; }
+  .savehint {
+    font:400 11px var(--font); color:var(--dim); margin:9px 0 2px;
+  }
+
   @media (max-width:1100px) {
     .mbody { grid-template-columns:1fr; }
     .mright { border-left:none; border-top:1px solid var(--line); }
@@ -149,6 +171,7 @@
 
   /* ---- mobile: cards instead of a table ---- */
   .cards { display:none; }
+  .cardsum { display:none; }
   @media (max-width:820px) {
     .gridhead, .gridrow, .tailrow, .cyclehead, .cyclerow { display:none; }
     .cards { display:block; }
@@ -165,6 +188,15 @@
     .cardline { display:flex; align-items:center; gap:7px; margin-top:8px; flex-wrap:wrap; }
     .lanehead { padding:8px 14px; }
     .assigngrid { grid-template-columns:1fr; }
+    .cardsum {
+      position:sticky; top:0; z-index:2; display:flex; align-items:center; gap:12px;
+      padding:7px 14px; background:var(--surf);
+      border-top:1px solid var(--whisper); border-bottom:1px solid var(--whisper);
+      font:400 11px var(--font); color:var(--dim); white-space:nowrap;
+      overflow-x:auto; scrollbar-width:none;
+    }
+    .cardsum::-webkit-scrollbar { display:none; }
+    .cardsum b { font:500 12px var(--font); font-variant-numeric:tabular-nums; color:var(--text); }
   }
 </style>
 </head>
@@ -267,7 +299,7 @@
 </div>
 
 <script src="/photos.js?v=5"></script>
-<script src="/shell.js?v=5"></script>
+<script src="/shell.js?v=6"></script>
 <script>
 (function () {
   var api = Shell.api, esc = Shell.esc;
@@ -380,7 +412,19 @@
   }).then(function () {
     var deep = new URLSearchParams(location.search).get('ro');
     if (deep) openRo(Number(deep));
-  }).catch(function (e) { if (e.message !== 'signed out') console.error(e); });
+  }).catch(function (e) {
+    if (e.message === 'signed out') return;
+    console.error(e);
+    // A blank board and a broken board look the same, so say which it is.
+    var em = $('empty');
+    if (em) {
+      em.innerHTML = 'The board could not load.<br>' +
+        '<span class="sub">' + esc(e.message) + '</span><br><br>' +
+        'If this is right after a deploy, the database is probably a migration behind — ' +
+        'run <code>npm run build &amp;&amp; npm run migrate</code> on the server.';
+      em.hidden = false;
+    }
+  });
 
   function fillStatusFilter(groupId) {
     var s = $('fStatus');
@@ -399,7 +443,10 @@
       .then(function (r) { FILES = r[0].files; renderKpis(r[1]); render(); });
   }
 
+  var SUMMARY = null;
+
   function renderKpis(s) {
+    SUMMARY = s;
     var cells = [{ v: s.inList, k: 'In list' }];
     if (s.severityCents != null) cells.push({ v: money0(s.severityCents), k: 'Severity' });
     cells.push(
@@ -683,7 +730,14 @@
     }).join('') +
     '<div class="tailrow"><div>' + rows.length + ' of ' + FILES.length + ' files</div></div>';
 
-    $('cards').innerHTML = rows.map(function (f) {
+    // The KPI band is off on a phone; the numbers that matter ride here, stuck
+    // to the top of the list.
+    var sum = SUMMARY ? '<div class="cardsum"><span><b>' + rows.length + '</b> shown</span>' +
+      '<span><b>' + SUMMARY.onHold + '</b> on hold</span>' +
+      '<span><b>' + SUMMARY.pastTarget + '</b> past target</span>' +
+      '<span><b>' + SUMMARY.avgDays + 'd</b> average</span></div>' : '';
+
+    $('cards').innerHTML = sum + rows.map(function (f) {
       return '<button class="card" data-id="' + f.id + '">' +
         '<div class="cardtop"><div class="cardro">' + esc(f.ro) + '</div>' +
         '<div class="carddays" style="color:' + AGE[f.age] + '">' + f.daysInShop + 'd' +
@@ -898,6 +952,11 @@
       .filter(function (el) { return el.value !== el.dataset.was; });
     if (dates.length) out.push(dates.length + ' date change' + (dates.length === 1 ? '' : 's'));
 
+    var edits = Array.prototype.slice.call(document.querySelectorAll('[data-edit]'))
+      .filter(function (el) { return el.value !== el.dataset.was; });
+    if (edits.length) out.push(edits.length + ' edit' + (edits.length === 1 ? '' : 's') +
+      ' to the customer, vehicle or insurance');
+
     ['m_amount', 'm_deduct', 'm_hours'].forEach(function (id) {
       var el = $(id);
       if (el && el.value !== el.dataset.was) out.push('an edit to ' +
@@ -942,6 +1001,18 @@
     });
     if (dateN) jobs.push(function () {
       return api('/api/ro/' + OPEN + '/dates', { method: 'PATCH', body: JSON.stringify(dateBody) });
+    });
+
+    var detailBody = {}, detailN = 0;
+    Array.prototype.forEach.call(document.querySelectorAll('[data-edit]'), function (el) {
+      if (el.value === el.dataset.was) return;
+      detailBody[el.dataset.edit] = el.value.trim() === '' ? null : el.value.trim();
+      detailN++;
+    });
+    if (detailN) jobs.push(function () {
+      return api('/api/ro/' + OPEN + '/details', {
+        method: 'PATCH', body: JSON.stringify(detailBody)
+      });
     });
 
     var moneyBody = {}, moneyN = 0;
@@ -1048,6 +1119,37 @@
       esc(value == null || value === '' ? '—' : value) + '</div></div>';
   }
 
+  /** An editable field in one of the drawer's fact blocks. */
+  function ef(key, label, value, opts) {
+    opts = opts || {};
+    var v = value == null ? '' : String(value);
+    return '<div><label class="fl2" for="e_' + key + '">' + esc(label) + '</label>' +
+      '<input type="' + (opts.type || 'text') + '" id="e_' + key + '" data-edit="' + key + '" ' +
+      (opts.list ? 'list="' + opts.list + '" ' : '') +
+      (opts.placeholder ? 'placeholder="' + esc(opts.placeholder) + '" ' : '') +
+      'data-was="' + esc(v) + '" value="' + esc(v) + '" style="width:100%"></div>';
+  }
+
+  function esel(key, label, value, options) {
+    return '<div><label class="fl2" for="e_' + key + '">' + esc(label) + '</label>' +
+      '<select id="e_' + key + '" data-edit="' + key + '" data-was="' + esc(value || '') +
+      '" style="width:100%">' +
+      options.map(function (o) {
+        return '<option value="' + esc(o[0]) + '"' + (o[0] === value ? ' selected' : '') +
+          '>' + esc(o[1]) + '</option>';
+      }).join('') + '</select></div>';
+  }
+
+  /**
+   * Blocks used to carry their own Save. They do not any more: everything in
+   * the modal is written when it closes, through the same guard that already
+   * listed what was unsaved. The line each block used to explain itself with
+   * stays — it is the part people actually read.
+   */
+  function saveRow(id, hint) {
+    return '<div class="savehint">' + esc(hint) + '</div>';
+  }
+
   function renderDrawer(d) {
     var r = d.ro;
 
@@ -1087,24 +1189,64 @@
         '</div>');
     }
 
-    L.push('<div class="sec">Customer</div><div class="fieldset">');
-    L.push(f2('Name', r.customer_name), f2('Phone', r.customer_phone, 1),
-      f2('Email', r.customer_email));
-    L.push('</div>');
+    var canEdit = ME.caps.editRepairOrders && !r.voided_at;
 
-    L.push('<div class="sec">Vehicle</div><div class="fieldset">');
-    L.push(f2('Year', r.year, 1), f2('Make', r.make), f2('Model', r.model));
-    L.push(f2('Colour', r.color), f2('VIN', r.vin, 1),
-      f2('Plate', r.plate ? (r.plate_state ? r.plate_state + ' ' : '') + r.plate : null, 1));
-    L.push(f2('Mileage', r.mileage ? Number(r.mileage).toLocaleString('en-US') : null, 1));
-    L.push('</div>');
+    L.push('<div class="sec">Customer</div>');
+    if (canEdit) {
+      L.push('<div class="fieldset">' +
+        ef('customerName', 'Name', r.customer_name) +
+        ef('customerPhone', 'Phone', r.customer_phone, { type: 'tel' }) +
+        ef('customerEmail', 'Email', r.customer_email, { type: 'email' }) +
+        '</div>' + saveRow('cust', 'Edits the client record, not just this file.'));
+    } else {
+      L.push('<div class="fieldset">' +
+        f2('Name', r.customer_name) + f2('Phone', r.customer_phone, 1) +
+        f2('Email', r.customer_email) + '</div>');
+    }
 
-    L.push('<div class="sec">Insurance and loss</div><div class="fieldset">');
-    L.push(f2('Carrier', r.insurer_name), f2('Claim number', r.claim_number, 1),
-      f2('Policy number', r.policy_number, 1));
-    L.push(f2('Date of loss', r.date_of_loss ? shopDate(r.date_of_loss) : null, 1),
-      f2('Adjuster', r.adjuster), f2('Type', r.ro_type));
-    L.push('</div>');
+    L.push('<div class="sec">Vehicle</div>');
+    if (canEdit) {
+      L.push('<div class="fieldset">' +
+        ef('year', 'Year', r.year, { type: 'number' }) +
+        ef('make', 'Make', r.make) +
+        ef('model', 'Model', r.model) +
+        ef('color', 'Colour', r.color) +
+        ef('vin', 'VIN', r.vin) +
+        ef('plate', 'Plate', r.plate) +
+        ef('plateState', 'Plate state', r.plate_state, { placeholder: 'TX' }) +
+        ef('mileage', 'Mileage', r.mileage, { type: 'number' }) +
+        '</div>' + saveRow('veh', 'Blank clears a value. Every change is logged.'));
+    } else {
+      L.push('<div class="fieldset">' +
+        f2('Year', r.year, 1) + f2('Make', r.make) + f2('Model', r.model) +
+        f2('Colour', r.color) + f2('VIN', r.vin, 1) +
+        f2('Plate', r.plate ? (r.plate_state ? r.plate_state + ' ' : '') + r.plate : null, 1) +
+        f2('Mileage', r.mileage ? Number(r.mileage).toLocaleString('en-US') : null, 1) +
+        '</div>');
+    }
+
+    L.push('<div class="sec">Insurance and loss</div>');
+    if (canEdit) {
+      L.push('<datalist id="insurerList">' +
+        (d.insurers || []).map(function (i) {
+          return '<option value="' + esc(i.name) + '"></option>';
+        }).join('') + '</datalist>');
+      L.push('<div class="fieldset">' +
+        ef('insurer', 'Carrier', r.insurer_name, { list: 'insurerList' }) +
+        ef('claimNumber', 'Claim number', r.claim_number) +
+        ef('policyNumber', 'Policy number', r.policy_number) +
+        ef('dateOfLoss', 'Date of loss', dateValue(r.date_of_loss), { type: 'date' }) +
+        ef('adjuster', 'Adjuster', r.adjuster) +
+        esel('roType', 'Type', r.ro_type, [
+          ['repair', 'Repair'], ['wholesale', 'Wholesale'], ['warranty', 'Warranty']]) +
+        '</div>' + saveRow('ins', 'A carrier not on the list is added when you save.'));
+    } else {
+      L.push('<div class="fieldset">' +
+        f2('Carrier', r.insurer_name) + f2('Claim number', r.claim_number, 1) +
+        f2('Policy number', r.policy_number, 1) +
+        f2('Date of loss', r.date_of_loss ? shopDate(r.date_of_loss) : null, 1) +
+        f2('Adjuster', r.adjuster) + f2('Type', r.ro_type) + '</div>');
+    }
 
     L.push('<div class="sec">Targets and cycle</div>');
     if (ME.caps.editRepairOrders) {
@@ -1116,9 +1258,7 @@
         f2('Days in shop', daysIn(r), 1) +
         f2('Variance', r.target_days ? (daysIn(r) - r.target_days > 0 ? '+' : '') +
           (daysIn(r) - r.target_days) + 'd' : '—', 1) +
-        '</div><div class="row" style="margin-top:11px">' +
-        '<button class="btn btn-ghost" id="saveDates">Save dates</button>' +
-        '<span class="sub">Blank clears a date. Every change is logged.</span></div>');
+        '</div><div class="savehint">Blank clears a date. Every change is logged.</div>');
     } else {
       L.push('<div class="fieldset">' +
         f2('Date in', r.opened_at ? shopDate(r.opened_at) : null, 1) +
@@ -1145,9 +1285,7 @@
         f2('Parts cost', money(r.parts_cost_cents), 1) +
         f2('Sublet', money(r.sublet_cost_cents), 1) +
         f2('Deductible status', Number(r.deductible_waived) ? 'Waived by shop' : 'Customer pays') +
-        '</div><div class="row" style="margin-top:11px">' +
-        '<button class="btn btn-ghost" id="saveMoney">Save money</button>' +
-        '<span class="sub">Wholesale work is priced here.</span></div>');
+        '</div><div class="savehint">Wholesale work is priced here.</div>');
     }
 
     /* Assigned */
@@ -1161,8 +1299,11 @@
     if (ME.caps.editAssignments) {
       L.push('<div class="fieldset two">' + POSITIONS.map(function (p) {
         var cur = (d.assigned || {})[p.k] || {};
+        // Only people who hold the position — a paint tech has no business in
+        // the salesperson list. Whoever is on the file stays listed either way,
+        // so an old assignment is never silently dropped on save.
         var options = STAFF.filter(function (st) {
-          return p.k === 'sales' ? true : (!st.position_key || st.position_key === p.k);
+          return st.position_key === p.k || String(st.user_id) === String(cur.userId);
         });
         return '<div><div class="fl2">' + esc(p.t) + '</div>' +
           '<select data-assign="' + p.k + '" data-was="' + (cur.userId || '') + '" style="width:100%">' +
@@ -1173,9 +1314,7 @@
               esc(st.display_name) + '</option>';
           }).join('') + '</select></div>';
       }).join('') + '</div>' +
-      '<div class="row" style="margin-top:10px">' +
-      '<button class="btn btn-ghost" id="saveAssign">Save assignments</button>' +
-      '<span class="sub">Every change is written to the activity log.</span></div>');
+      '<div class="savehint">Every change is written to the activity log.</div>');
     } else {
       L.push('<div class="fieldset two">' + POSITIONS.map(function (p) {
         return f2(p.t, ((d.assigned || {})[p.k] || {}).name);
@@ -1309,10 +1448,16 @@
       '<span class="sub" style="flex:1;min-width:120px">Notifies whoever owns the status it lands in.</span>' +
       '</div></div>');
     R.push('<div class="msg" id="dMsg"></div>');
+    if (ME.caps.editRepairOrders) {
+      R.push('<div class="savehint">Details, dates, money and assignments on the left are saved when ' +
+        'you close this file — you are asked first, and told what changed.</div>');
+    }
+
+    var LAST = [];
 
     if (r.voided_at && d.canVoid) {
-      R.push('<div class="sec">Bring it back</div>');
-      R.push('<div class="stack">' +
+      LAST.push('<div class="sec">Bring it back</div>');
+      LAST.push('<div class="stack">' +
         '<input type="text" id="vNumber" placeholder="New RO number — blank takes the next in sequence" ' +
         'style="width:100%">' +
         '<select id="vSlot" style="width:100%">' + statusOptions(r.status_slot) + '</select>' +
@@ -1324,17 +1469,21 @@
         '<span class="sub" style="flex:1;min-width:120px">Same file, new number. Documents, notes, ' +
         'history, dates and money all come with it.</span></div></div>');
     } else if (!r.voided_at && d.canVoid) {
-      R.push('<div class="sec">Void this file</div>');
-      R.push('<div class="stack">' +
+      // Last thing in the modal, hard against the right edge: voiding a file is
+      // the end of the road, not something to meet on the way in.
+      LAST.push('<div class="sec">Void this file</div>');
+      LAST.push('<div class="stack">' +
+        '<span class="sub" style="text-transform:none;letter-spacing:0">Cancels the parts, flags ' +
+        'anything already ordered for return, frees the number and takes it off the board. ' +
+        'Nobody is notified — it is in the log.</span>' +
         '<select id="vReason" style="width:100%">' +
         VOID_REASONS.map(function (x) {
           return '<option value="' + esc(x) + '">' + esc(x) + '</option>';
         }).join('') + '<option value="other">Something else — say why below</option></select>' +
         '<input type="text" id="vNote" placeholder="Anything worth recording" style="width:100%">' +
-        '<div class="row"><button class="btn btn-danger" id="doVoid">Void RO ' + esc(r.ro_number) +
-        '</button><span class="sub" style="flex:1;min-width:120px">Cancels the parts, flags anything ' +
-        'already ordered for return, frees the number and takes it off the board. Nobody is notified — ' +
-        'it is in the log.</span></div></div>');
+        '<div class="row" style="justify-content:flex-end">' +
+        '<button class="btn btn-danger" id="doVoid">Void RO ' + esc(r.ro_number) +
+        '</button></div></div>');
     }
 
     R.push('<div class="sec">Notes and history</div>');
@@ -1351,8 +1500,73 @@
         (n.kind === 'auto' ? ';color:var(--muted)' : '') + '">' + esc(n.body) + '</div></div>');
     });
 
+    if (LAST.length) {
+      R.push('<div style="margin-top:22px;padding-top:4px;border-top:1px solid var(--whisper)"></div>');
+      R.push(LAST.join(''));
+    }
+
     $('dRight').innerHTML = R.join('');
+    fold($('dLeft'));
+    fold($('dRight'));
     wireDrawer();
+  }
+
+  /**
+   * Fact blocks fold away. Everything is open the first time; what someone
+   * shuts stays shut on the next file and the next session — the state is per
+   * section, not per RO. Folding never disables editing: the fields are still
+   * there, still saved on close, they are just out of the way.
+   */
+  var FOLDS = 'es_drawer_folds';
+
+  function foldState() {
+    try { return JSON.parse(localStorage.getItem(FOLDS) || '{}') || {}; } catch (e) { return {}; }
+  }
+  function setFold(key, shut) {
+    var s = foldState();
+    if (shut) s[key] = 1; else delete s[key];
+    try { localStorage.setItem(FOLDS, JSON.stringify(s)); } catch (e) { /* private mode */ }
+  }
+
+  function fold(col) {
+    if (!col) return;
+    var state = foldState();
+    var secs = Array.prototype.slice.call(col.children).filter(function (el) {
+      return el.classList && el.classList.contains('sec');
+    });
+
+    secs.forEach(function (sec) {
+      var key = (sec.textContent || '').trim().toLowerCase().split(/\s{2,}|\s·\s/)[0].slice(0, 40);
+      if (!key) return;
+
+      var body = document.createElement('div');
+      body.className = 'foldbody';
+      var node = sec.nextSibling;
+      while (node && !(node.classList && node.classList.contains('sec'))) {
+        var next = node.nextSibling;
+        body.appendChild(node);
+        node = next;
+      }
+      sec.parentNode.insertBefore(body, sec.nextSibling);
+
+      var cue = document.createElement('span');
+      cue.className = 'foldcue';
+      sec.appendChild(cue);
+      sec.classList.add('fold');
+
+      function paint(shut) {
+        body.hidden = shut;
+        sec.classList.toggle('shut', shut);
+        cue.innerHTML = (shut ? 'show' : 'hide') + ' <span class="chev">&#9662;</span>';
+      }
+      paint(!!state[key]);
+
+      sec.addEventListener('click', function () {
+        var shut = !body.hidden;
+        paint(shut);
+        setFold(key, shut);
+      });
+    });
   }
 
   function daysIn(r) {
@@ -1376,47 +1590,6 @@
       api('/api/ro/' + OPEN + '/status', {
         method: 'POST', body: JSON.stringify({ slot: slot || undefined, note: note || undefined })
       }).then(reopen).catch(function (e) { say(e.message, 'err'); });
-    });
-
-    var sa = $('saveAssign');
-    if (sa) sa.addEventListener('click', function () {
-      var jobs = [];
-      Array.prototype.forEach.call(document.querySelectorAll('[data-assign]'), function (sel) {
-        if (sel.value === sel.dataset.was) return;
-        var name = sel.value ? sel.options[sel.selectedIndex].textContent : null;
-        jobs.push({ position: sel.dataset.assign, userId: sel.value ? Number(sel.value) : null, name: name });
-      });
-      if (!jobs.length) return say('No assignments changed.', 'ok');
-      Promise.all(jobs.map(function (j) {
-        return api('/api/ro/' + OPEN + '/assign/' + j.position, {
-          method: 'PUT', body: JSON.stringify({ userId: j.userId, displayName: j.name })
-        });
-      })).then(reopen).catch(function (e) { say(e.message, 'err'); });
-    });
-
-    var sd = $('saveDates');
-    if (sd) sd.addEventListener('click', function () {
-      var body = {}, n = 0;
-      Array.prototype.forEach.call(document.querySelectorAll('[data-date]'), function (el) {
-        if (el.value === el.dataset.was) return;
-        body[el.dataset.date] = el.value || null;
-        n++;
-      });
-      if (!n) return say('No dates changed.', 'ok');
-      api('/api/ro/' + OPEN + '/dates', { method: 'PATCH', body: JSON.stringify(body) })
-        .then(reopen).catch(function (e) { say(e.message, 'err'); });
-    });
-
-    var sm = $('saveMoney');
-    if (sm) sm.addEventListener('click', function () {
-      var body = {}, n = 0;
-      var a = $('m_amount'), dd = $('m_deduct'), hr = $('m_hours');
-      if (a.value !== a.dataset.was) { body.amountCents = Math.round(Number(a.value || 0) * 100); n++; }
-      if (dd.value !== dd.dataset.was) { body.deductibleCents = Math.round(Number(dd.value || 0) * 100); n++; }
-      if (hr.value !== hr.dataset.was) { body.laborHours = Number(hr.value || 0); n++; }
-      if (!n) return say('Nothing changed.', 'ok');
-      api('/api/ro/' + OPEN + '/money', { method: 'PATCH', body: JSON.stringify(body) })
-        .then(reopen).catch(function (e) { say(e.message, 'err'); });
     });
 
     var dv = $('doVoid');
@@ -1639,7 +1812,14 @@
   on('newRo', 'click', function () { location.href = '/new-ro.html'; });
   on('dDocs', 'click', function () {
     var drop = $('drop');
-    if (drop) $('dLeft').scrollTop = drop.offsetTop - 60;
+    if (!drop) return;
+    // The block may be folded away; open it before scrolling to it.
+    var body = drop.closest('.foldbody');
+    if (body && body.hidden) {
+      var sec = body.previousElementSibling;
+      if (sec && sec.classList.contains('sec')) sec.click();
+    }
+    $('dLeft').scrollTop = drop.offsetTop - 60;
   });
 })();
 </script>

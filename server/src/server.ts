@@ -24,6 +24,7 @@ import { registerLeads } from './routes/leads';
 import { registerScheduler } from './routes/scheduler';
 import { registerReports } from './routes/reports';
 import { registerSales } from './routes/sales';
+import { registerCalendar } from './routes/gcal';
 import { purgeExpiredSessions } from './auth/session';
 
 async function main(): Promise<void> {
@@ -62,6 +63,7 @@ async function main(): Promise<void> {
   await registerScheduler(app);
   await registerReports(app);
   await registerSales(app);
+  await registerCalendar(app);
 
   app.get('/api/health', async () => {
     const [r] = await master().query('SELECT 1 AS ok');

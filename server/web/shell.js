@@ -27,13 +27,30 @@ window.Shell = (function () {
     });
   }
 
+  /**
+   * Every request goes through here. Two rules learned the hard way:
+   * only declare a JSON body when there is one (Fastify refuses an empty JSON
+   * body, which is what made cancelling an appointment silently do nothing),
+   * and never let a failure return quietly — a rejected promise with a real
+   * message is what the screens show the user.
+   */
   function api(path, opts) {
-    return fetch(path, Object.assign({
-      headers: { 'content-type': 'application/json' }
-    }, opts || {})).then(function (r) {
+    var o = Object.assign({}, opts || {});
+    o.headers = Object.assign({}, o.headers || {});
+    if (o.body != null && !o.headers['content-type']) o.headers['content-type'] = 'application/json';
+
+    return fetch(path, o).then(function (r) {
       if (r.status === 401) { location.href = '/'; throw new Error('signed out'); }
-      return r.json().then(function (j) {
-        if (!r.ok) throw new Error(j.error || 'Request failed');
+      if (r.status === 204) return {};
+      return r.text().then(function (text) {
+        var j = {};
+        if (text) { try { j = JSON.parse(text); } catch (e) { j = { error: text.slice(0, 200) }; } }
+        if (!r.ok) {
+          var err = new Error(j.error || j.message || ('Request failed (' + r.status + ')'));
+          err.status = r.status;
+          err.data = j;
+          throw err;
+        }
         return j;
       });
     });
@@ -64,6 +81,8 @@ window.Shell = (function () {
           esc(n.label) + '</a>';
       }).join('');
     }
+
+    mountTabs(active);
 
     var bell = document.getElementById('bell');
     if (bell) {
@@ -127,6 +146,83 @@ window.Shell = (function () {
         ' as the platform owner. Everything you do is recorded.';
       document.body.insertBefore(banner, document.body.firstChild);
     }
+  }
+
+  /**
+   * Mobile navigation. The top bar cannot hold the nav and the filters and the
+   * KPI band on a phone — between them they took 330px of a 664px screen and
+   * left one car visible. Below 760px the nav moves down here, five tabs, and
+   * everything else goes behind More.
+   */
+  var TABS = [
+    { key: 'board', href: '/board.html', label: 'Board', feature: 'board',
+      d: 'M4 5.5h16M4 12h16M4 18.5h16' },
+    { key: 'schedule', href: '/schedule.html', label: 'Schedule', feature: 'sched',
+      d: 'M4 6h16v14H4z M8 3v4 M16 3v4 M4 10.5h16' },
+    { key: 'parts', href: '/parts.html', label: 'Parts', feature: 'parts', cap: 'manageParts',
+      d: 'M12 8.5a3.5 3.5 0 100 7 3.5 3.5 0 000-7z M12 3v2.5 M12 18.5V21 M3 12h2.5 M18.5 12H21 M5.6 5.6l1.8 1.8 M16.6 16.6l1.8 1.8 M18.4 5.6l-1.8 1.8 M7.4 16.6l-1.8 1.8' },
+    { key: 'clients', href: '/clients.html', label: 'Clients', feature: 'clients',
+      d: 'M12 11.5a4 4 0 100-8 4 4 0 000 8z M4.5 20.5c0-3.6 3.4-5.5 7.5-5.5s7.5 1.9 7.5 5.5' }
+  ];
+
+  function icon(d, color) {
+    return '<svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="' + color +
+      '" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="' + d +
+      '"></path></svg>';
+  }
+
+  function mountTabs(active) {
+    if (document.getElementById('tabbar')) return;
+
+    var allowed = NAV.filter(function (n) {
+      if (n.feature && ME.features.indexOf(n.feature) < 0) return false;
+      if (n.cap && !ME.caps[n.cap]) return false;
+      return true;
+    });
+    var keys = allowed.map(function (n) { return n.key; });
+
+    var tabs = TABS.filter(function (t) { return keys.indexOf(t.key) >= 0; });
+    var rest = allowed.filter(function (n) {
+      return !tabs.some(function (t) { return t.key === n.key; });
+    });
+
+    var bar = document.createElement('nav');
+    bar.className = 'tabbar';
+    bar.id = 'tabbar';
+    bar.innerHTML = tabs.map(function (t) {
+      var on = t.key === active;
+      var c = on ? 'var(--acc2)' : 'var(--dim)';
+      return '<a class="tab' + (on ? ' sel' : '') + '" href="' + t.href + '">' +
+        icon(t.d, c) + '<span>' + esc(t.label) + '</span></a>';
+    }).join('') +
+      '<button class="tab" id="tabMore" aria-label="More">' +
+      icon('M6 12h.01 M12 12h.01 M18 12h.01', 'var(--dim)') + '<span>More</span></button>';
+
+    var sheet = document.createElement('div');
+    sheet.className = 'sheet';
+    sheet.id = 'moreSheet';
+    sheet.hidden = true;
+    sheet.innerHTML = '<div class="sheetcard">' +
+      '<div class="sheethead">' + esc(ME.company ? ME.company.name : 'Easy Shop') +
+      '<span>' + esc(ME.user.name) + (ME.roleLabel ? ' · ' + esc(ME.roleLabel) : '') + '</span></div>' +
+      rest.map(function (n) {
+        return '<a class="sheetrow" href="' + n.href + '">' + esc(n.label) + '</a>';
+      }).join('') +
+      '<a class="sheetrow" href="/account.html">Your account</a>' +
+      (ME.isPlatformOwner ? '<a class="sheetrow" href="/platform.html">Platform</a>' : '') +
+      '<button class="sheetrow" id="sheetOut">Sign out</button></div>';
+
+    document.body.appendChild(bar);
+    document.body.appendChild(sheet);
+    document.body.classList.add('has-tabbar');
+
+    document.getElementById('tabMore').addEventListener('click', function () {
+      sheet.hidden = !sheet.hidden;
+    });
+    sheet.addEventListener('click', function (e) { if (e.target === sheet) sheet.hidden = true; });
+    document.getElementById('sheetOut').addEventListener('click', function () {
+      api('/api/auth/logout', { method: 'POST' }).then(function () { location.href = '/'; });
+    });
   }
 
   function refreshCount() {

@@ -1,5 +1,5 @@
 import { FastifyInstance } from 'fastify';
-import { RowDataPacket, ResultSetHeader } from 'mysql2/promise';
+import { PoolConnection, RowDataPacket, ResultSetHeader } from 'mysql2/promise';
 import { tq, texec, tqOne, withTenantTx } from '../db/tenant';
 import { requireCompany, requireFeature } from '../middleware/context';
 import { parseEms, EmsEstimate, partTypeToEnum } from '../lib/ems';
@@ -59,15 +59,26 @@ export async function registerEms(app: FastifyInstance): Promise<void> {
     const clip = (v: string | null, n: number): string | null =>
       v === null || v === undefined ? null : v.slice(0, n);
 
+    // Everything the estimate said about the claim is kept, not just the claim
+    // number: without these the carrier had to be typed in again by hand after
+    // every import.
     const res = await texec(cid, `
       INSERT INTO ems_imports
-        (source, estimating_system, envelope_name, ro_number, claim_number, vin,
-         customer_name, vehicle_text, supplement_seq, total_cents, line_count,
+        (source, estimating_system, envelope_name, ro_number, claim_number,
+         insurer_name, policy_number, deductible_cents, deductible_waived,
+         date_of_loss, adjuster, estimator, vin,
+         customer_name, vehicle_text, vehicle_color, plate, plate_state, mileage,
+         supplement_seq, total_cents, line_count,
          matched_ro_id, match_confidence, state, storage_key)
-      VALUES ('upload', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
+      VALUES ('upload', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
       [clip(est.estimatingSystem, 32), clip(est.envelopeName, 190), clip(est.roNumber, 32),
-       clip(est.claimNumber, 64), clip(est.vin, 24), clip(est.customerName, 160),
+       clip(est.claimNumber, 64),
+       clip(est.insurer, 190), clip(est.policyNumber, 64),
+       est.deductibleCents, est.deductibleWaived ? 1 : 0,
+       est.dateOfLoss, clip(est.adjuster, 120), clip(est.estimator, 120),
+       clip(est.vin, 24), clip(est.customerName, 160),
        clip([est.year, est.make, est.model].filter(Boolean).join(' ') || null, 160),
+       clip(est.color, 48), clip(est.plate, 16), clip(est.plateState, 8), est.mileage,
        est.supplementSeq, est.grossCents ?? est.netCents, est.lines.length,
        match.roId, match.confidence, prefix]
     );
@@ -220,19 +231,26 @@ export async function registerEms(app: FastifyInstance): Promise<void> {
             const parts = String(imp.vehicle_text ?? '').split(' ');
             const year = Number(parts[0]) || null;
             const [r] = await c.query<ResultSetHeader>(
-              `INSERT INTO vehicles (client_id, vin, year, make, model) VALUES (?, ?, ?, ?, ?)`,
-              [clientId, imp.vin ?? null, year, parts[1] ?? null, parts.slice(2).join(' ') || null]);
+              `INSERT INTO vehicles (client_id, vin, year, make, model, color, plate, plate_state, mileage)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              [clientId, imp.vin ?? null, year, parts[1] ?? null, parts.slice(2).join(' ') || null,
+               imp.vehicle_color ?? null, imp.plate ?? null, imp.plate_state ?? null,
+               imp.mileage ?? null]);
             vehicleId = r.insertId;
           }
 
-          let insurerId: number | null = null;
+          const insurerId = await insurerIdFor(c, imp.insurer_name as string | null);
+
           const [r] = await c.query<ResultSetHeader>(
             `INSERT INTO repair_orders
                (ro_number, client_id, vehicle_id, insurer_client_id, ro_type, repair_path,
-                status_slot, status_since, claim_number, amount_cents, created_by)
-             VALUES (?, ?, ?, ?, 'repair', 'undecided', 'intake.arrived', NOW(), ?, ?, ?)`,
+                status_slot, status_since, claim_number, policy_number, date_of_loss,
+                deductible_cents, deductible_waived, adjuster, amount_cents, created_by)
+             VALUES (?, ?, ?, ?, 'repair', 'undecided', 'intake.arrived', NOW(), ?, ?, ?, ?, ?, ?, ?, ?)`,
             [roNumber, clientId, vehicleId, insurerId, imp.claim_number ?? null,
-             imp.total_cents ?? 0, ctx.user.id]);
+             imp.policy_number ?? null, imp.date_of_loss ?? null,
+             imp.deductible_cents ?? null, imp.deductible_waived ? 1 : 0,
+             imp.adjuster ?? null, imp.total_cents ?? 0, ctx.user.id]);
           roId = r.insertId;
           created = true;
 
@@ -256,11 +274,36 @@ export async function registerEms(app: FastifyInstance): Promise<void> {
           [imp.total_cents, hours || 0, roId]);
       }
 
-      if (body.updateVehicle !== false && imp.vin) {
+      if (body.updateVehicle !== false && (imp.vin || imp.vehicle_color || imp.plate || imp.mileage)) {
         await c.query(
           `UPDATE vehicles v JOIN repair_orders r ON r.vehicle_id = v.id
-           SET v.vin = COALESCE(NULLIF(v.vin, ''), ?)
-           WHERE r.id = ?`, [imp.vin, roId]);
+           SET v.vin         = COALESCE(NULLIF(v.vin, ''), ?),
+               v.color       = COALESCE(NULLIF(v.color, ''), ?),
+               v.plate       = COALESCE(NULLIF(v.plate, ''), ?),
+               v.plate_state = COALESCE(NULLIF(v.plate_state, ''), ?),
+               v.mileage     = COALESCE(v.mileage, ?)
+           WHERE r.id = ?`,
+          [imp.vin ?? null, imp.vehicle_color ?? null, imp.plate ?? null,
+           imp.plate_state ?? null, imp.mileage ?? null, roId]);
+      }
+
+      // The insurance an existing file is missing. Blank fields are filled;
+      // anything already on the file is left as the desk set it.
+      if (imp.insurer_name || imp.policy_number || imp.date_of_loss || imp.adjuster) {
+        const insurerId = await insurerIdFor(c, imp.insurer_name as string | null);
+        await c.query(
+          `UPDATE repair_orders
+           SET insurer_client_id = COALESCE(insurer_client_id, ?),
+               claim_number      = COALESCE(NULLIF(claim_number, ''), ?),
+               policy_number     = COALESCE(NULLIF(policy_number, ''), ?),
+               date_of_loss      = COALESCE(date_of_loss, ?),
+               deductible_cents  = COALESCE(NULLIF(deductible_cents, 0), ?),
+               deductible_waived = GREATEST(deductible_waived, ?),
+               adjuster          = COALESCE(NULLIF(adjuster, ''), ?)
+           WHERE id = ?`,
+          [insurerId, imp.claim_number ?? null, imp.policy_number ?? null,
+           imp.date_of_loss ?? null, imp.deductible_cents ?? null,
+           imp.deductible_waived ? 1 : 0, imp.adjuster ?? null, roId]);
       }
 
       if (body.importParts !== false) {
@@ -369,6 +412,24 @@ async function findMatch(cid: number, k: MatchKeys): Promise<{ roId: number | nu
   }
 
   return { roId: null, confidence: 'none', how: null };
+}
+
+/**
+ * The carrier as an insurance client. Matched by name, created if the shop has
+ * not seen it before — the same rule the drawer's carrier field follows, so an
+ * imported file and a hand-typed one end up pointing at one client.
+ */
+async function insurerIdFor(c: PoolConnection, name: string | null): Promise<number | null> {
+  const clean = (name ?? '').trim().slice(0, 190);
+  if (!clean) return null;
+
+  const [hit] = await c.query<RowDataPacket[]>(
+    `SELECT id FROM clients WHERE kind = 'insurance' AND name = ? LIMIT 1`, [clean]);
+  if (hit.length) return hit[0].id as number;
+
+  const [ins] = await c.query<ResultSetHeader>(
+    `INSERT INTO clients (kind, name) VALUES ('insurance', ?)`, [clean]);
+  return ins.insertId;
 }
 
 /** Open files that look plausible, for the human to choose from. */

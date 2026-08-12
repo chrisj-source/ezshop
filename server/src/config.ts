@@ -28,6 +28,16 @@ export const config = {
   storageDir: process.env.STORAGE_DIR ?? path.resolve(process.cwd(), 'storage'),
 
   /**
+   * Google Calendar, push only. Optional: with these unset the settings screen
+   * says the server is not set up rather than offering a dead button.
+   */
+  google: {
+    clientId: process.env.GOOGLE_CLIENT_ID ?? '',
+    clientSecret: process.env.GOOGLE_CLIENT_SECRET ?? '',
+    redirectUri: process.env.GOOGLE_REDIRECT_URI ?? ''
+  },
+
+  /**
    * Tenant DB credentials are looked up by NAME, never stored in the master DB.
    * company_databases.secret_ref = 'DEFAULT' resolves TENANT_SECRET_DEFAULT.
    * Falls back to the app account's own password on a single-box install.
