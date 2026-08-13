@@ -434,10 +434,15 @@
     detail: ['detail']
   };
 
-  /** A car nobody can start: no body tech and no paint tech on it. */
+  /** A car nobody can start. PDR alone is a complete file — a hail car pulled by
+      one tech needs nobody else. Once body or paint is on it, the car wants both:
+      body and PDR still needs a painter, PDR and paint still needs a body tech. */
+  var TRADE_LANES = ['pdr', 'body', 'paint', 'ri'];
   function needsTech(f) {
     var a = f.assigned || {};
-    return !a.body && !a.paint;
+    if (!TRADE_LANES.some(function (k) { return !!a[k]; })) return true;
+    if (!a.body && !a.paint) return false;
+    return !a.body || !a.paint;
   }
 
   function $(id) { return document.getElementById(id); }
@@ -544,12 +549,21 @@
    * Everyone, one technician, or the files that still need one. Grouped by
    * position so the list reads as the shop is organised.
    */
+  /** Every trade a person works. staff_positions is the truth; the old single
+      column is the fallback for a database that has not migrated yet. */
+  function tradesOf(st) {
+    if (st.position_keys && st.position_keys.length) return st.position_keys;
+    return st.position_key ? [st.position_key] : [];
+  }
+
   function fillTechFilter() {
     var s = $('fTech');
     var byPos = {};
     STAFF.forEach(function (st) {
-      if (!st.position_key || !POSITION_LANES[st.position_key]) return;
-      (byPos[st.position_key] = byPos[st.position_key] || []).push(st);
+      tradesOf(st).forEach(function (k) {
+        if (!POSITION_LANES[k]) return;
+        (byPos[k] = byPos[k] || []).push(st);
+      });
     });
 
     var labels = { pdr: 'PDR', body: 'Body', paint: 'Paint', ri: 'R&I', detail: 'Detail' };
@@ -563,9 +577,13 @@
           }).join('') + '</optgroup>';
       }).join('');
 
-    // A technician's own board opens on their own work.
-    if (ME.positionKey && POSITION_LANES[ME.positionKey]) {
-      var mine = 'u' + ME.user.id + ':' + ME.positionKey;
+    // A technician's own board opens on their own work — their listed trade.
+    var myTrades = (ME.positionKeys && ME.positionKeys.length)
+      ? ME.positionKeys
+      : (ME.positionKey ? [ME.positionKey] : []);
+    var myLane = myTrades.filter(function (k) { return POSITION_LANES[k]; })[0];
+    if (myLane) {
+      var mine = 'u' + ME.user.id + ':' + myLane;
       if (s.querySelector('option[value="' + mine + '"]')) s.value = mine;
     }
   }
@@ -795,7 +813,7 @@
       'title="Supplement open">Supp</span>';
     if (f.roType === 'wholesale') out += '<span class="flag" style="color:var(--dim);border:1px solid var(--line)">WS</span>';
     if (needsTech(f)) out += '<span class="flag" style="color:var(--acc);border:1px solid var(--acc)" ' +
-      'title="No body tech and no paint tech on this file">Needs tech</span>';
+      'title="Nobody is on this file, or it has body or paint work with the other trade missing">Needs tech</span>';
 
     // A file that has not moved in days says so, in its own right.
     var days = Math.floor(Number(f.hoursInStatus || 0) / 24);
@@ -921,7 +939,8 @@
         '<div class="cardtop"><div class="cardro">' + esc(f.ro) + '</div>' +
         '<div class="carddays" style="color:' + AGE[f.age] + '">' + f.daysInShop + 'd' +
         (f.targetDays ? ' of ' + f.targetDays : '') + '</div></div>' +
-        '<div class="cardveh">' + esc(f.vehicle || '—') + '</div>' +
+        '<div class="cardveh">' + esc(f.vehicle || '—') +
+        (f.color ? ' · ' + esc(f.color) : '') + '</div>' +
         '<div class="sub">' + esc([f.customer, f.insurer].filter(Boolean).join(' · ') || '') + '</div>' +
         '<div class="cardline"><span style="font:500 12px var(--font);color:' + tone(f) + '">' +
         esc(f.status || 'No status') + '</span>' +
@@ -1021,7 +1040,8 @@
 
     return '<div class="cyclerow" data-id="' + f.id + '">' +
       '<div style="min-width:0">' +
-      '<div class="cell" title="' + esc(f.vehicle || '') + '">' + esc(f.vehicle || '—') + '</div>' +
+      '<div class="cell" title="' + esc(f.vehicle || '') + '">' + esc(f.vehicle || '—') +
+      (f.color ? ' <span style="color:var(--dim)">· ' + esc(f.color) + '</span>' : '') + '</div>' +
       '<div class="sub">' + esc(f.ro) + (f.customer ? ' · ' + esc(f.customer) : '') + '</div></div>' +
 
       '<div style="min-width:0"><div class="row" style="gap:6px">' +
@@ -1303,7 +1323,13 @@
     $('scrim').classList.remove('open');
     $('drawer').classList.remove('open');
     $('drawer').setAttribute('aria-hidden', 'true');
-    if (new URLSearchParams(location.search).get('ro')) history.replaceState(null, '', '/board.html');
+    /* Opened off a parts line: go back to the parts list with that file still open. */
+    var qs = new URLSearchParams(location.search);
+    if (qs.get('back') === 'parts' && qs.get('ro')) {
+      location.href = '/parts.html?open=' + qs.get('ro');
+      return;
+    }
+    if (qs.get('ro')) history.replaceState(null, '', '/board.html');
   }
 
   function field(l, v) {
@@ -1530,19 +1556,22 @@
     if (ME.caps.editAssignments) {
       L.push('<div class="fieldset two">' + POSITIONS.map(function (p) {
         var cur = (d.assigned || {})[p.k] || {};
-        // Only people who hold the position — a paint tech has no business in
-        // the salesperson list. Whoever is on the file stays listed either way,
-        // so an old assignment is never silently dropped on save.
+        // Only people who work the trade — a paint tech has no business in the
+        // salesperson list. Someone who works two trades is offered in both.
+        // Whoever is on the file stays listed either way, so an old assignment
+        // is never silently dropped on save.
         var options = STAFF.filter(function (st) {
-          return st.position_key === p.k || String(st.user_id) === String(cur.userId);
+          return tradesOf(st).indexOf(p.k) >= 0 || String(st.user_id) === String(cur.userId);
         });
         return '<div><div class="fl2">' + esc(p.t) + '</div>' +
           '<select data-assign="' + p.k + '" data-was="' + (cur.userId || '') + '" style="width:100%">' +
           '<option value="">Unassigned</option>' +
           options.map(function (st) {
+            var also = tradesOf(st).filter(function (k) { return k !== p.k; });
             return '<option value="' + st.user_id + '"' +
               (String(cur.userId) === String(st.user_id) ? ' selected' : '') + '>' +
-              esc(st.display_name) + '</option>';
+              esc(st.display_name) +
+              (also.length ? esc('  (also ' + also.join(', ') + ')') : '') + '</option>';
           }).join('') + '</select></div>';
       }).join('') + '</div>' +
       '<div class="savehint">Every change is written to the activity log.</div>');

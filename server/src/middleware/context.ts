@@ -2,9 +2,9 @@ import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { RowDataPacket } from 'mysql2/promise';
 import { COOKIE_NAME } from '../config';
 import { mq, mqOne } from '../db/master';
-import { tqOne } from '../db/tenant';
+import { tq, tqOne } from '../db/tenant';
 import { loadSession } from '../auth/session';
-import { Caps, capsFor, Role } from '../permissions';
+import { Caps, capsFor, capsForRoles, primaryRole, Role, sortRoles } from '../permissions';
 
 export interface UserRow extends RowDataPacket {
   id: number; email: string | null; name: string;
@@ -22,8 +22,14 @@ export interface Ctx {
   isPlatformOwner: boolean;
   impersonating: boolean;
   company: CompanyRow | null;
+  /** Primary role — the highest-ranked one held. Display and notifications. */
   role: Role | null;
+  /** Every role held. Permissions are the union of these. */
+  roles: Role[];
+  /** The trade this person is listed under. */
   positionKey: string | null;
+  /** Every trade they work. */
+  positionKeys: string[];
   caps: Caps;
   features: Set<string>;
 }
@@ -55,7 +61,9 @@ export async function attachContext(req: FastifyRequest): Promise<void> {
 
   let company: CompanyRow | null = null;
   let role: Role | null = null;
+  let roles: Role[] = [];
   let positionKey: string | null = null;
+  let positionKeys: string[] = [];
   let caps = NO_CAPS;
   const features = new Set<string>();
 
@@ -72,9 +80,17 @@ export async function attachContext(req: FastifyRequest): Promise<void> {
       );
 
       if (mem && mem.status === 'active') {
-        role = mem.role;
+        /* membership_roles is the truth; memberships.role is the fallback for a
+           database that has not run the migration yet. */
+        const held = await mq<Array<RowDataPacket & { role_key: Role }>>(
+          `SELECT role_key FROM membership_roles WHERE user_id = ? AND company_id = ?`,
+          [user.id, company.id]
+        ).catch(() => []);
+        roles = sortRoles(held.length ? held.map(r => r.role_key) : [mem.role]);
+        role = primaryRole(roles);
         positionKey = mem.position_key;
       } else if (user.is_platform_owner && sess.impersonating) {
+        roles = ['owner'];
         role = 'owner';
       }
 
@@ -82,7 +98,19 @@ export async function attachContext(req: FastifyRequest): Promise<void> {
         const setting = await tqOne<RowDataPacket & { setting_value: string }>(
           company.id, `SELECT setting_value FROM shop_settings WHERE setting_key = 'tech_sees_own_only'`
         ).catch(() => null);
-        caps = capsFor(role, { techSeesOwnOnly: setting?.setting_value !== '0' });
+        caps = capsForRoles(roles, { techSeesOwnOnly: setting?.setting_value !== '0' });
+
+        /* Trades are a set: staff_positions is the truth, staff.position_key the
+           seed and the trade they are listed under. */
+        const trades = await tq<Array<RowDataPacket & { position_key: string }>>(
+          company.id,
+          `SELECT position_key FROM staff_positions WHERE user_id = ? ORDER BY sort_order, position_key`,
+          [user.id]
+        ).catch(() => []);
+        positionKeys = trades.length
+          ? trades.map(t => t.position_key)
+          : (positionKey ? [positionKey] : []);
+        if (!positionKey && positionKeys.length) positionKey = positionKeys[0];
 
         for (const f of await companyFeatures(company.id)) features.add(f);
       }
@@ -98,7 +126,9 @@ export async function attachContext(req: FastifyRequest): Promise<void> {
     impersonating: sess.impersonating === 1,
     company,
     role,
+    roles,
     positionKey,
+    positionKeys,
     caps,
     features
   };

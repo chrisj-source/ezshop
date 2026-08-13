@@ -64,6 +64,9 @@
     border:1px solid var(--line); color:var(--muted); white-space:nowrap; flex:none;
   }
   .linebtn:hover { border-color:var(--acc); color:var(--acc); }
+  /* The RO number is a way into the file — the desk is often one field short. */
+  .rolink { color:var(--acc); text-decoration:none; border-bottom:1px dashed var(--acc); }
+  .rolink:hover { color:var(--text); border-bottom-color:var(--text); }
   .locked { padding:64px 18px; display:flex; flex-direction:column; align-items:center; gap:8px; }
 
   @media (max-width:1100px) {
@@ -130,6 +133,8 @@
 (function () {
   var api = Shell.api, esc = Shell.esc;
   var ME = null, PARTS = [], VENDORS = [], RETURNS = [], OPEN = {}, ALL_OPEN = false;
+  /* A parts line under this margin reads thin. The server sends its own value. */
+  var THIN_PCT = 20;
 
   /* One tone per part state, used by the legend, the segments and the chips. */
   var TONE = {
@@ -194,7 +199,16 @@
         return '<option value="' + k + '">' + esc(LABEL[k]) + '</option>';
       }).join('');
 
-    return load();
+    return load().then(function () {
+      /* Coming back from a repair order opened off a parts line: the same file is
+         still expanded, where the desk left it. */
+      var back = new URLSearchParams(location.search).get('open');
+      if (back) {
+        OPEN[back] = true;
+        render();
+        history.replaceState(null, '', '/parts.html');
+      }
+    });
   }).catch(function (e) { if (e.message !== 'signed out') console.error(e); });
 
   function load() {
@@ -206,6 +220,7 @@
       RETURNS = res[1].returns || [];
       PARTS = d.parts;
       VENDORS = d.vendors;
+      if (d.thinMarginPct) THIN_PCT = Number(d.thinMarginPct);
       $('fVendor').innerHTML = '<option value="">Vendor: All</option>' +
         VENDORS.map(function (v) { return '<option value="' + v.id + '">' + esc(v.name) + '</option>'; }).join('');
       renderKpis(d.summary);
@@ -224,11 +239,13 @@
     ];
 
     if (ME.caps.money && s.listCents != null) {
-      var gp = s.listCents ? Math.round(((s.listCents - s.costCents) / s.listCents) * 100) : 0;
+      var pp = s.marginPct != null
+        ? s.marginPct
+        : (s.listCents ? Math.round(((s.listCents - s.costCents) / s.listCents) * 100) : 0);
       cells.push(
         { v: money0(s.listCents), k: 'List' },
         { v: money0(s.costCents), k: 'Cost' },
-        { v: gp + '%', k: 'GP', tone: gp < 15 ? 'var(--blocked)' : '' }
+        { v: pp + '%', k: 'Parts profit', tone: pp < THIN_PCT ? 'var(--stopped)' : '' }
       );
     }
 
@@ -261,7 +278,7 @@
       var key = p.ro_id;
       if (!map[key]) {
         map[key] = {
-          roId: p.ro_id, ro: p.ro_number, vehicle: p.vehicle, color: p.color,
+          roId: p.ro_id, ro: p.ro_number, vehicle: p.vehicle, color: p.color, vin: p.vin,
           customer: p.customer_name, status: p.status_label,
           openedAt: p.opened_at, daysInShop: p.days_in_shop, targetDays: p.target_days,
           lines: []
@@ -297,6 +314,21 @@
         return a + Number(l.cost_cents || 0) * Number(l.qty || 1);
       }, 0);
       f.received = f.lines.filter(function (l) { return l.state === 'received'; }).length;
+      /* Parts profit is margin on list, over the lines still owed. */
+      var openLines = f.lines.filter(function (l) {
+        return ['need', 'ordered', 'partial', 'backordered'].indexOf(l.state) >= 0;
+      });
+      var oList = openLines.reduce(function (a, l) {
+        return a + Number(l.price_cents || 0) * Number(l.qty || 1);
+      }, 0);
+      var oCost = openLines.reduce(function (a, l) {
+        return a + Number(l.cost_cents || 0) * Number(l.qty || 1);
+      }, 0);
+      f.marginPct = oList ? Math.round(((oList - oCost) / oList) * 100) : null;
+      f.thinLines = openLines.filter(function (l) {
+        var lp = Number(l.price_cents || 0);
+        return lp > 0 && ((lp - Number(l.cost_cents || 0)) / lp) * 100 < THIN_PCT;
+      }).length;
 
       f.group = counts.backordered ? 'backordered'
         : late.length ? 'late'
@@ -401,11 +433,13 @@
           '<div class="caret' + (isOpen ? ' open' : '') + '">▶</div>' +
 
           '<div><div style="font:500 12px var(--font);font-variant-numeric:tabular-nums">' +
-          esc(f.ro) + '</div><div class="cellsub">in ' + shopDate(f.openedAt) + '</div></div>' +
+          '<a class="rolink" href="/board.html?ro=' + f.roId + '&back=parts" ' +
+          'title="Open the repair order — the file without leaving the parts list">' +
+          esc(f.ro) + '</a></div><div class="cellsub">in ' + shopDate(f.openedAt) + '</div></div>' +
 
           '<div style="min-width:0"><div class="cellmain" title="' + esc(f.vehicle || '') + '">' +
-          esc(f.vehicle || '—') + '</div><div class="cellsub">' +
-          esc(f.customer || f.color || '—') + '</div></div>' +
+          esc(f.vehicle || '—') + (f.color ? ' · ' + esc(f.color) : '') + '</div><div class="cellsub">' +
+          esc(f.customer || '—') + (f.vin ? ' · …' + esc(String(f.vin).slice(-8)) : '') + '</div></div>' +
 
           '<div style="min-width:0"><div style="display:flex;align-items:center;gap:8px">' +
           '<div style="font:400 11.5px var(--font);white-space:nowrap">' + esc(summaryFor(f)) + '</div>' +
@@ -437,8 +471,10 @@
 
           (ME.caps.money
             ? '<div class="hide-md"><div class="cellnum">' + money(f.costCents) + '</div>' +
-              '<div class="cellsub" style="text-align:right">' +
-              (f.listCents ? Math.round(((f.listCents - f.costCents) / f.listCents) * 100) + '% GP'
+              '<div class="cellsub" style="text-align:right' +
+              (f.marginPct != null && f.marginPct < THIN_PCT ? ';color:var(--stopped)' : '') + '" ' +
+              'title="Parts profit — margin on list">' +
+              (f.marginPct != null ? f.marginPct + '% PP'
                 : f.received + ' of ' + f.lines.length) + '</div></div>'
             : '<div class="hide-md cellnum">' + f.received + ' of ' + f.lines.length + '</div>') +
           '</div>';
@@ -468,8 +504,37 @@
   }
 
   function lineTable(f) {
-    var h = '<div class="lines">' +
-      '<div class="lgrid lhead"><div>Line</div><div>Part</div><div class="hide-md">Number</div>' +
+    var toOrder = f.lines.filter(function (l) { return l.state === 'need'; }).length;
+    var onOrder = f.lines.filter(function (l) {
+      return ['ordered', 'partial', 'backordered'].indexOf(l.state) >= 0;
+    }).length;
+
+    var h = '<div class="lines">';
+
+    if (ME.caps.manageParts && (toOrder || onOrder)) {
+      h += '<div class="row" style="padding:8px 0 10px;gap:8px;align-items:center">' +
+        (toOrder
+          ? '<button class="btn btn-ghost" data-orderfile="' + f.roId + '">Order ' + toOrder +
+            ' line' + (toOrder === 1 ? '' : 's') + '</button>'
+          : '') +
+        (onOrder
+          ? '<button class="btn btn-ghost" data-recvfile="' + f.roId + '">Receive ' + onOrder +
+            ' line' + (onOrder === 1 ? '' : 's') + '</button>'
+          : '') +
+        '<span class="sub">' +
+        (f.vin ? 'VIN …' + esc(String(f.vin).slice(-8)) + ' · ' : '') +
+        (ME.caps.money && f.thinLines
+          ? f.thinLines + ' line' + (f.thinLines === 1 ? '' : 's') + ' under ' + THIN_PCT + '% margin'
+          : 'one order, one vendor, one order number') +
+        '</span>' +
+        (f.vin
+          ? '<button class="linebtn" data-vin="' + esc(f.vin) + '" ' +
+            'title="Copy the full 17">copy all 17</button>'
+          : '') +
+        '</div>';
+    }
+
+    h += '<div class="lgrid lhead"><div>Line</div><div>Part</div><div class="hide-md">Number</div>' +
       '<div class="hide-md">Type</div><div>Qty</div><div>Vendor</div><div>ETA</div>' +
       (ME.caps.money ? '<div style="text-align:right">Price / cost</div>' : '<div></div>') +
       '<div>State</div></div>';
@@ -483,7 +548,7 @@
         '<div class="cellsub hide-md" style="margin:0">' + esc(l.part_type || '—') + '</div>' +
         '<div class="cellsub" style="margin:0">' + l.qty_received + '/' + l.qty + '</div>' +
         '<div><div class="cellsub" style="margin:0">' + esc(l.vendor_name || '—') + '</div>' +
-        (l.po_number ? '<div class="cellsub">PO ' + esc(l.po_number) + '</div>' : '') + '</div>' +
+        (l.po_number ? '<div class="cellsub">order ' + esc(l.po_number) + '</div>' : '') + '</div>' +
         '<div class="cellsub" style="margin:0' + (late ? ';color:var(--stopped)' : '') + '">' +
         (l.eta ? shopDate(l.eta) : '—') + (late ? ' · ' + l.days_late + 'd' : '') + '</div>' +
         (ME.caps.money
@@ -498,7 +563,12 @@
           ? '<button class="linebtn" data-recv="' + l.id + '">Received</button>'
           : '') +
         (l.state === 'need'
-          ? '<button class="linebtn" data-order="' + l.id + '">Order</button>'
+          ? '<button class="linebtn" data-orderfile="' + f.roId + '">Order</button>'
+          : '') +
+        (Number(l.qty_received || 0) > 0 && Number(l.qty_received) < Number(l.qty)
+          ? '<span class="lstate" style="color:var(--stopped);border:1px solid var(--stopped)" ' +
+            'title="Part of this line arrived; the rest is still owed">' +
+            (Number(l.qty) - Number(l.qty_received)) + ' short</span>'
           : '') +
         '</div></div>';
     });
@@ -533,19 +603,181 @@
       });
     });
 
-    Array.prototype.forEach.call($('body').querySelectorAll('[data-order]'), function (b) {
+    Array.prototype.forEach.call($('body').querySelectorAll('[data-orderfile]'), function (b) {
       b.addEventListener('click', function (e) {
         e.stopPropagation();
-        api('/api/parts/' + b.dataset.order, {
-          method: 'PATCH', body: JSON.stringify({ state: 'ordered' })
-        }).then(load);
+        var f = byRo().filter(function (x) { return String(x.roId) === b.dataset.orderfile; })[0];
+        if (f) openOrder(f);
       });
     });
+
+    Array.prototype.forEach.call($('body').querySelectorAll('[data-recvfile]'), function (b) {
+      b.addEventListener('click', function (e) {
+        e.stopPropagation();
+        var f = byRo().filter(function (x) { return String(x.roId) === b.dataset.recvfile; })[0];
+        if (f) openReceive(f);
+      });
+    });
+
+    /* Most dealers want the last 8 over the phone; the full 17 goes on the clipboard. */
+    Array.prototype.forEach.call($('body').querySelectorAll('[data-vin]'), function (b) {
+      b.addEventListener('click', function (e) {
+        e.stopPropagation();
+        if (navigator.clipboard) navigator.clipboard.writeText(b.dataset.vin);
+        b.textContent = 'copied';
+        setTimeout(function () { b.textContent = 'copy all 17'; }, 1600);
+      });
+    });
+
+    Array.prototype.forEach.call($('body').querySelectorAll('a.rolink'), function (a) {
+      a.addEventListener('click', function (e) { e.stopPropagation(); });
+    });
+  }
+
+  /* ------------------------------------------------- order and receive */
+
+  /**
+   * Ordering is not a flag. One order goes to one vendor with an order number
+   * and an ETA, covering as many lines as the desk ticks — which is how a single
+   * order to a supplier actually happens.
+   */
+  function openOrder(f) {
+    var lines = f.lines.filter(function (l) { return l.state === 'need'; });
+    if (!lines.length) return;
+
+    $('dTitle').textContent = 'Order parts — ' + f.ro;
+    $('dSub').textContent = (f.vehicle || '') + (f.vin ? ' · …' + String(f.vin).slice(-8) : '');
+    $('scrim').classList.add('open');
+    $('drawer').classList.add('open');
+    $('drawer').setAttribute('aria-hidden', 'false');
+
+    var h = ['<div class="sec">Who it is going to</div>',
+      '<div class="row"><select id="oVendor" style="flex:1;min-width:150px">' +
+      '<option value="">Pick a vendor</option>' +
+      VENDORS.map(function (v) {
+        return '<option value="' + v.id + '">' + esc(v.name) + (v.kind ? ' · ' + esc(v.kind) : '') + '</option>';
+      }).join('') + '</select>' +
+      '<button class="btn btn-ghost" id="oVendors">Edit list</button></div>',
+      '<div class="row" style="margin-top:10px">' +
+      '<input id="oPo" placeholder="Order or invoice number" style="flex:1;min-width:150px">' +
+      '<input id="oEta" type="date" style="width:150px" title="When the vendor says it lands"></div>',
+      '<div class="sec">Lines — untick anything not on this order</div>'];
+
+    lines.forEach(function (l) {
+      h.push('<div class="log" style="display:flex;gap:10px;align-items:flex-start">' +
+        '<input type="checkbox" class="o-line" data-id="' + l.id + '" checked ' +
+        'style="margin-top:3px">' +
+        '<div style="min-width:0;flex:1">' +
+        '<div class="log-b">' + esc(l.description) + '</div>' +
+        '<div class="log-m">' + esc([l.part_number, l.part_type, 'qty ' + l.qty].filter(Boolean).join(' · ')) +
+        (ME.caps.money ? ' · ' + money(l.price_cents) + ' list / ' +
+          (Number(l.cost_cents) ? money(l.cost_cents) : 'no cost yet') : '') + '</div></div></div>');
+    });
+
+    h.push('<div class="msg" id="oMsg"></div>',
+      '<div class="row" style="margin-top:12px">' +
+      '<button class="btn btn-solid" id="oSend">Mark ordered</button>' +
+      '<span class="sub">Ordered date is stamped today.</span></div>');
+
+    $('dBody').innerHTML = h.join('');
+    $('oVendors').addEventListener('click', openVendors);
+
+    $('oSend').addEventListener('click', function () {
+      var ids = Array.prototype.filter.call($('dBody').querySelectorAll('.o-line'), function (c) {
+        return c.checked;
+      }).map(function (c) { return Number(c.dataset.id); });
+      if (!ids.length) { return dMsg('oMsg', 'Nothing ticked.', 'err'); }
+      if (!$('oVendor').value) { return dMsg('oMsg', 'Pick the vendor this is going to.', 'err'); }
+      api('/api/parts/bulk-order', {
+        method: 'POST',
+        body: JSON.stringify({
+          ids: ids,
+          vendorId: Number($('oVendor').value),
+          poNumber: $('oPo').value.trim() || undefined,
+          eta: $('oEta').value || undefined
+        })
+      }).then(function () { closeDrawer(); return load(); })
+        .then(function () { Shell.refreshCount(); })
+        .catch(function (e) { dMsg('oMsg', e.message, 'err'); });
+    });
+  }
+
+  /**
+   * Receiving stays quick, but records the date and what came short: a line with
+   * anything owed stays on order for the remainder.
+   */
+  function openReceive(f) {
+    var lines = f.lines.filter(function (l) {
+      return ['ordered', 'partial', 'backordered'].indexOf(l.state) >= 0;
+    });
+    if (!lines.length) return;
+
+    $('dTitle').textContent = 'Receive parts — ' + f.ro;
+    $('dSub').textContent = (f.vehicle || '') + (f.vin ? ' · …' + String(f.vin).slice(-8) : '');
+    $('scrim').classList.add('open');
+    $('drawer').classList.add('open');
+    $('drawer').setAttribute('aria-hidden', 'false');
+
+    var h = ['<div class="sec">What arrived</div>',
+      '<div class="row"><input id="rInv" placeholder="Vendor invoice number — optional" ' +
+      'style="flex:1;min-width:160px">' +
+      '<input id="rDate" type="date" style="width:150px" title="Received date — today unless you change it"></div>'];
+
+    lines.forEach(function (l) {
+      var owed = Number(l.qty) - Number(l.qty_received || 0);
+      h.push('<div class="log" style="display:flex;gap:10px;align-items:flex-start">' +
+        '<input type="checkbox" class="r-line" data-id="' + l.id + '" data-qty="' + l.qty + '" checked ' +
+        'style="margin-top:3px">' +
+        '<div style="min-width:0;flex:1">' +
+        '<div class="log-b">' + esc(l.description) + '</div>' +
+        '<div class="log-m">' + esc([l.vendor_name || 'no vendor',
+          l.po_number ? 'order ' + l.po_number : '',
+          l.eta ? 'ETA ' + shopDate(l.eta) : ''].filter(Boolean).join(' · ')) + '</div></div>' +
+        '<div style="text-align:right"><div class="sub" style="margin:0">short of ' + owed + '</div>' +
+        '<input class="r-short" data-for="' + l.id + '" type="number" min="0" max="' + owed + '" ' +
+        'value="0" style="width:64px;text-align:right"></div></div>');
+    });
+
+    h.push('<div class="msg" id="rMsg"></div>',
+      '<div class="row" style="margin-top:12px">' +
+      '<button class="btn btn-solid" id="rSend">Mark received</button>' +
+      '<span class="sub">Anything short stays on order for the rest.</span></div>');
+
+    $('dBody').innerHTML = h.join('');
+
+    $('rSend').addEventListener('click', function () {
+      var picked = Array.prototype.filter.call($('dBody').querySelectorAll('.r-line'), function (c) {
+        return c.checked;
+      }).map(function (c) {
+        var shortEl = $('dBody').querySelector('.r-short[data-for="' + c.dataset.id + '"]');
+        return { id: Number(c.dataset.id), short: shortEl ? Number(shortEl.value || 0) : 0 };
+      });
+      if (!picked.length) return dMsg('rMsg', 'Nothing ticked.', 'err');
+      api('/api/parts/bulk-receive', {
+        method: 'POST',
+        body: JSON.stringify({
+          lines: picked,
+          receivedAt: $('rDate').value || undefined,
+          invoiceNo: $('rInv').value.trim() || undefined
+        })
+      }).then(function () { closeDrawer(); return load(); })
+        .then(function () { Shell.refreshCount(); })
+        .catch(function (e) { dMsg('rMsg', e.message, 'err'); });
+    });
+  }
+
+  function dMsg(id, text, kind) {
+    var el = $(id);
+    if (!el) return;
+    el.textContent = text;
+    el.className = 'msg ' + (kind || '');
   }
 
   /* --------------------------------------------------------- vendors */
 
   function openVendors() {
+    $('dTitle').textContent = 'Vendors';
+    $('dSub').textContent = 'Who you order from';
     $('scrim').classList.add('open');
     $('drawer').classList.add('open');
     $('drawer').setAttribute('aria-hidden', 'false');

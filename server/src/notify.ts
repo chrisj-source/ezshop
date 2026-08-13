@@ -71,7 +71,13 @@ export async function notify(input: NotifyInput): Promise<number> {
       tq<MemberRow[]>(cid,
         `SELECT group_id, member_type, position_key, user_id
          FROM notification_group_members WHERE group_id IN (?)`, [ids]),
-      tq<StaffRow[]>(cid, `SELECT user_id, position_key FROM staff WHERE active = 1`),
+      tq<StaffRow[]>(cid,
+        /* Every trade a person works, so a painter who also does body is notified
+           for both lanes. Falls back to the single column pre-migration. */
+        `SELECT s.user_id, COALESCE(sp.position_key, s.position_key) AS position_key
+         FROM staff s
+         LEFT JOIN staff_positions sp ON sp.user_id = s.user_id
+         WHERE s.active = 1`),
       tq<PositionRow[]>(cid, `SELECT position_key, owner_role FROM positions WHERE enabled = 1`)
     ]);
 
@@ -80,7 +86,7 @@ export async function notify(input: NotifyInput): Promise<number> {
     for (const s of staff) {
       if (!s.position_key) continue;
       const list = staffByPosition.get(s.position_key) ?? [];
-      list.push(s.user_id);
+      if (list.indexOf(s.user_id) < 0) list.push(s.user_id);
       staffByPosition.set(s.position_key, list);
     }
 

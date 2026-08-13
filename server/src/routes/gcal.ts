@@ -248,8 +248,11 @@ export async function registerCalendar(app: FastifyInstance): Promise<void> {
 
     // Which account, and what calendars it can write to.
     let email: string | null = null;
-    let calendarId: string | null = null;
-    let calendarName: string | null = null;
+    // Default to the account's own calendar: 'primary' is writable under the
+    // events scope alone, so the connection is useful even when the account
+    // will not list its calendars.
+    let calendarId: string | null = 'primary';
+    let calendarName: string | null = "The account's own calendar";
     try {
       const list = await fetch(`${CAL}/users/me/calendarList?minAccessRole=writer`, {
         headers: { authorization: `Bearer ${tok.access_token}` }
@@ -286,11 +289,26 @@ export async function registerCalendar(app: FastifyInstance): Promise<void> {
     const token = await accessToken(ctx.company!.id, conn);
     if (!token) return reply.code(400).send({ error: 'That connection needs to be made again.' });
 
-    const list = await fetch(`${CAL}/users/me/calendarList?minAccessRole=writer`, {
+    const res = await fetch(`${CAL}/users/me/calendarList?minAccessRole=writer`, {
       headers: { authorization: `Bearer ${token}` }
-    }).then(r => r.json() as Promise<{ items?: Array<{ id: string; summary: string }> }>);
+    });
+    const list = await res.json() as {
+      items?: Array<{ id: string; summary: string }>;
+      error?: { message?: string };
+    };
 
-    return { calendars: (list.items ?? []).map(i => ({ id: i.id, name: i.summary })) };
+    // Listing calendars needs the readonly scope; writing events does not. When
+    // the list is refused or empty, the account's own calendar is still
+    // writable under the events scope — offer that rather than a dead end.
+    const calendars = (list.items ?? []).map(i => ({ id: i.id, name: i.summary }));
+    if (!calendars.length) calendars.push({ id: 'primary', name: "The account's own calendar" });
+
+    return {
+      calendars,
+      note: res.ok ? null
+        : (list.error?.message ?? 'Google would not list the calendars') +
+          " — appointments can still be written to the account's own calendar."
+    };
   });
 
   app.patch('/api/calendar', async (req, reply) => {

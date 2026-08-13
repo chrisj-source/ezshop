@@ -80,6 +80,16 @@
   .visbtn:hover { border-color:var(--acc); color:var(--acc); }
   .visbtn.on { color:var(--done); border-color:var(--done); }
 
+  /* A role and a trade are both sets: several chips, tap to hold or drop one. */
+  .chipset { display:flex; flex-wrap:wrap; gap:4px; }
+  .setchip {
+    font:400 10px var(--font); padding:3px 6px; border-radius:3px; background:transparent;
+    border:1px solid var(--line); color:var(--dim); white-space:nowrap; cursor:pointer;
+  }
+  .setchip:hover { border-color:var(--acc); color:var(--muted); }
+  .setchip.on { color:var(--bg); background:var(--acc); border-color:var(--acc); }
+  .setchip.primary::after { content:' \2022'; }
+
   .sechead {
     display:flex; align-items:baseline; gap:10px; padding:13px 16px 9px;
     position:sticky; top:0; background:var(--bg); z-index:1;
@@ -118,7 +128,7 @@
     align-items:center; min-height:44px; border-bottom:1px solid var(--whisper); padding:0 2px;
   }
   .prow2 {
-    display:grid; grid-template-columns:26px minmax(160px,1fr) 150px 140px 92px 148px;
+    display:grid; grid-template-columns:26px minmax(150px,1fr) 190px 168px 82px 148px;
     gap:12px; align-items:center; min-height:46px; padding:6px 16px;
     border-bottom:1px solid var(--whisper);
   }
@@ -702,14 +712,16 @@
       '<div class="grid3" style="margin-top:4px;row-gap:14px">' +
       '<div><div class="dk">Name</div><input class="dinput" id="nName"></div>' +
       '<div><div class="dk">Email — optional</div><input class="dinput" id="nEmail" type="email"></div>' +
-      '<div><div class="dk">Role</div><select class="dsel" id="nRole">' +
-      ROLES.map(function (r) {
-        return '<option value="' + esc(r.key) + '">' + esc(r.label) + '</option>';
-      }).join('') + '</select></div>' +
-      '<div><div class="dk">Position</div><select class="dsel" id="nPos"><option value="">None</option>' +
-      CFG.positions.map(function (p) {
-        return '<option value="' + esc(p.position_key) + '">' + esc(p.label) + '</option>';
-      }).join('') + '</select></div>' +
+      '<div><div class="dk">Roles — tick every one they hold</div>' +
+      '<div class="chipset" id="nRoles">' + ROLES.map(function (r, i) {
+        return '<button type="button" class="setchip' + (i === 0 ? ' on' : '') + '" ' +
+          'data-role="' + esc(r.key) + '">' + esc(r.label) + '</button>';
+      }).join('') + '</div></div>' +
+      '<div><div class="dk">Trades — every one they work</div>' +
+      '<div class="chipset" id="nTrades">' + CFG.positions.map(function (p) {
+        return '<button type="button" class="setchip" data-trade="' + esc(p.position_key) + '">' +
+          esc(p.label) + '</button>';
+      }).join('') + '</div></div>' +
       '<div><div class="dk">Employee code</div><input class="dinput" id="nCode"></div>' +
       '<div><div class="dk">Temporary password — optional</div>' +
       '<input class="dinput" id="nPass" placeholder="leave blank to generate one"></div>' +
@@ -722,8 +734,8 @@
       '<div class="msg" id="dMsg"></div></div></div>'];
 
     h.push('<div class="prow2" style="border-top:1px solid var(--line);min-height:32px">' +
-      '<div></div><div class="dk">Name</div><div class="dk">Role</div>' +
-      '<div class="dk hide-sm">Position</div><div class="dk hide-sm">Last in</div>' +
+      '<div></div><div class="dk">Name</div><div class="dk">Roles</div>' +
+      '<div class="dk hide-sm">Trades</div><div class="dk hide-sm">Last in</div>' +
       '<div class="dk">Access</div></div>');
 
     list.forEach(function (p) {
@@ -739,15 +751,21 @@
         'placeholder="no email — code sign-in" ' +
         'style="font:400 10.5px var(--font);padding:3px 7px;margin-top:4px;color:var(--dim)" ' +
         'title="Email — this is what they sign in with"></div>' +
-        '<select class="dsel p-role">' + ROLES.map(function (r) {
-          return '<option value="' + esc(r.key) + '"' + (r.key === p.role ? ' selected' : '') + '>' +
-            esc(r.label) + '</option>';
-        }).join('') + '</select>' +
-        '<select class="dsel p-pos hide-sm"><option value="">None</option>' +
-        CFG.positions.map(function (x) {
-          return '<option value="' + esc(x.position_key) + '"' +
-            (x.position_key === p.position_key ? ' selected' : '') + '>' + esc(x.label) + '</option>';
-        }).join('') + '</select>' +
+        '<div class="chipset p-roles">' + ROLES.map(function (r) {
+          var held = (p.roles || [p.role]).indexOf(r.key) >= 0;
+          return '<button type="button" class="setchip' + (held ? ' on' : '') +
+            (held && r.key === p.role ? ' primary' : '') + '" ' +
+            'data-role="' + esc(r.key) + '"' +
+            (held && r.key === p.role ? ' title="Primary role — what they are called, and who gets notified"' : '') +
+            '>' + esc(r.label) + '</button>';
+        }).join('') + '</div>' +
+        '<div class="chipset p-trades hide-sm">' + CFG.positions.map(function (x) {
+          var works = (p.positionKeys && p.positionKeys.length
+            ? p.positionKeys
+            : (p.position_key ? [p.position_key] : [])).indexOf(x.position_key) >= 0;
+          return '<button type="button" class="setchip' + (works ? ' on' : '') + '" ' +
+            'data-trade="' + esc(x.position_key) + '">' + esc(x.label) + '</button>';
+        }).join('') + '</div>' +
         '<div class="ssub hide-sm">' + (p.last_login_at ? Shell.when(p.last_login_at) : 'never') + '</div>' +
         '<div class="row" style="gap:6px">' +
         '<button class="visbtn" data-code="' + p.id + '">Code</button>' +
@@ -760,9 +778,9 @@
     });
 
     h.push('<div class="pad" style="padding-top:16px"><div class="row">' +
-      '<button class="btn btn-solid" id="savePeople">Save roles and positions</button>' +
+      '<button class="btn btn-solid" id="savePeople">Save roles and trades</button>' +
       '<span class="sub">' + list.length + ' shown' +
-      (RAIL ? ' in this position' : '') + ' · names and emails save here too</span></div></div>');
+      (RAIL ? ' in this trade' : '') + ' · names and emails save here too</span></div></div>');
 
     h.push('<div id="removedBox"></div>');
 
@@ -771,8 +789,10 @@
     loadRemoved();
 
     detail('Access', '<div style="font:400 11.5px/1.6 var(--font);color:var(--muted);padding:12px 0">' +
-      'Role decides what someone can see and change. Position decides which lanes they own and which ' +
-      'notifications reach them.</div>' +
+      'Roles decide what someone can see and change — a person can hold several and gets the union of ' +
+      'all of them. The highest-ranked one, marked •, is their primary: what they are called, and who ' +
+      'notifications treat them as. Trades decide which lanes they own and which cars they are offered ' +
+      'for; someone who works two trades appears in both dropdowns.</div>' +
       '<div class="dlbl" style="margin-top:12px">Roles</div>' +
       [['Owner', 'everything, including this page'],
        ['Accounting', 'money and reports, no production'],
@@ -787,10 +807,45 @@
       }).join(''));
   }
 
+  /** Chip groups are sets: the picked values, in the order the chips render. */
+  function chipValues(scope, attr) {
+    return Array.prototype.filter.call(scope.querySelectorAll('[data-' + attr + ']'), function (b) {
+      return b.classList.contains('on');
+    }).map(function (b) { return b.dataset[attr]; });
+  }
+
+  /** One delegated handler for every chip set on the page. */
+  function wireChips() {
+    $('mid').addEventListener('click', function (e) {
+      var chip = e.target.closest && e.target.closest('.setchip');
+      if (!chip) return;
+      e.preventDefault();
+      var set = chip.parentElement;
+      var roleSet = !!chip.dataset.role;
+      if (roleSet && chip.classList.contains('on') && chipValues(set, 'role').length === 1) {
+        return say('Everyone needs at least one role.', 'err');
+      }
+      chip.classList.toggle('on');
+      if (roleSet) {
+        /* The primary is the highest-ranked role held, and ROLES arrives in rank
+           order — so it is the first chip still on. */
+        var first = true;
+        Array.prototype.forEach.call(set.querySelectorAll('[data-role]'), function (b) {
+          var on = b.classList.contains('on');
+          b.classList.toggle('primary', on && first);
+          if (on) first = false;
+        });
+      }
+    });
+  }
+
   function wirePeople() {
+    wireChips();
     $('addPerson').addEventListener('click', function () {
       var name = $('nName').value.trim();
       if (!name) return say('A name is required.', 'err');
+      var roles = chipValues($('nRoles'), 'role');
+      if (!roles.length) return say('Tick at least one role.', 'err');
       api('/api/admin/people', {
         method: 'POST',
         body: JSON.stringify({
@@ -798,8 +853,8 @@
           email: $('nEmail').value.trim() || undefined,
           useCode: !$('nEmail').value.trim() && !$('nPass').value.trim(),
           password: $('nPass').value.trim() || undefined,
-          role: $('nRole').value,
-          positionKey: $('nPos').value || undefined,
+          roles: roles,
+          positionKeys: chipValues($('nTrades'), 'trade'),
           employeeCode: $('nCode').value.trim() || undefined
         })
       }).then(function (r) {
@@ -817,12 +872,17 @@
       Array.prototype.forEach.call($('mid').querySelectorAll('[data-user]'), function (row) {
         var id = Number(row.dataset.user);
         var was = PEOPLE.people.filter(function (p) { return p.id === id; })[0];
-        var role = row.querySelector('.p-role').value;
-        var posEl = row.querySelector('.p-pos');
-        var pos = posEl ? posEl.value : (was.position_key || '');
+        var rolesEl = row.querySelector('.p-roles');
+        var tradesEl = row.querySelector('.p-trades');
+        var roles = rolesEl ? chipValues(rolesEl, 'role') : null;
+        var trades = tradesEl ? chipValues(tradesEl, 'trade') : null;
+        var wasRoles = (was.roles || [was.role]).join(',');
+        var wasTrades = (was.positionKeys && was.positionKeys.length
+          ? was.positionKeys
+          : (was.position_key ? [was.position_key] : [])).join(',');
         var body = {};
-        if (role !== was.role) body.role = role;
-        if (pos !== (was.position_key || '')) body.positionKey = pos || null;
+        if (roles && roles.join(',') !== wasRoles) body.roles = roles;
+        if (trades && trades.join(',') !== wasTrades) body.positionKeys = trades;
         if (Object.keys(body).length) jobs.push({ id: id, body: body });
 
         var nameEl = row.querySelector('.p-name');
@@ -1076,7 +1136,16 @@
         $('calPick').innerHTML = r.calendars.map(function (x) {
           return '<option value="' + esc(x.id) + '"' +
             (x.id === conn.calendarId ? ' selected' : '') + '>' + esc(x.name) + '</option>';
-        }).join('') || '<option value="">No writable calendars</option>';
+        }).join('');
+        // Google refusing to list calendars does not stop us writing to the
+        // account's own one, so say what happened instead of showing nothing.
+        if (r.note) {
+          var n = document.createElement('div');
+          n.className = 'sub';
+          n.style.marginTop = '8px';
+          n.textContent = r.note;
+          $('calPick').parentNode.appendChild(n);
+        }
       }).catch(function (e) {
         $('calPick').innerHTML = '<option value="">' + esc(e.message) + '</option>';
       });

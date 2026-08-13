@@ -4,11 +4,33 @@ import { texec, tq, tqOne, withTenantTx } from '../db/tenant';
 import { mexec, mq, mqOne } from '../db/master';
 import { requireCompany } from '../middleware/context';
 import { hashPassword } from '../auth/password';
-import { Role, ROLE_LABEL } from '../permissions';
+import { Role, ROLE_LABEL, primaryRole, sortRoles } from '../permissions';
 import crypto from 'node:crypto';
 
 const ROLES: Role[] = ['owner', 'accounting', 'estimator', 'production_manager',
   'parts_manager', 'front_office', 'salesperson', 'technician'];
+
+/** Replace the set of roles a person holds at this shop. */
+async function setRoles(userId: number, companyId: number, roles: Role[]): Promise<void> {
+  await mexec('DELETE FROM membership_roles WHERE user_id = ? AND company_id = ?', [userId, companyId]);
+  for (const r of roles) {
+    await mexec(
+      'INSERT IGNORE INTO membership_roles (user_id, company_id, role_key) VALUES (?, ?, ?)',
+      [userId, companyId, r]
+    );
+  }
+}
+
+/** Replace the set of trades a person works. Lane order is the order given. */
+async function setTrades(companyId: number, userId: number, keys: string[]): Promise<void> {
+  await texec(companyId, 'DELETE FROM staff_positions WHERE user_id = ?', [userId]);
+  for (let i = 0; i < keys.length; i++) {
+    await texec(companyId,
+      'INSERT IGNORE INTO staff_positions (user_id, position_key, sort_order) VALUES (?, ?, ?)',
+      [userId, keys[i], i]
+    );
+  }
+}
 
 export async function registerAdmin(app: FastifyInstance): Promise<void> {
 
@@ -20,11 +42,18 @@ export async function registerAdmin(app: FastifyInstance): Promise<void> {
     if (!ctx.caps.admin) return reply.code(403).send({ error: 'Owner only' });
 
     const b = req.body as {
-      name: string; email?: string; role: Role; positionKey?: string;
+      name: string; email?: string; role?: Role; roles?: Role[];
+      positionKey?: string; positionKeys?: string[];
       employeeCode?: string; useCode?: boolean; password?: string;
     };
-    if (!b.name || !b.role) return reply.code(400).send({ error: 'Name and role are required.' });
-    if (!ROLES.includes(b.role)) return reply.code(400).send({ error: 'Unknown role.' });
+    const wanted = sortRoles((b.roles && b.roles.length ? b.roles : (b.role ? [b.role] : [])) as Role[]);
+    if (!b.name || !wanted.length) return reply.code(400).send({ error: 'Name and at least one role are required.' });
+    if (wanted.some(r => !ROLES.includes(r))) return reply.code(400).send({ error: 'Unknown role.' });
+    const primary = primaryRole(wanted)!;
+    const trades = (b.positionKeys && b.positionKeys.length)
+      ? b.positionKeys
+      : (b.positionKey ? [b.positionKey] : []);
+    const listedTrade = trades[0] ?? null;
     if (!b.email && !b.useCode) return reply.code(400).send({ error: 'Give an email, or choose a sign-in code.' });
 
     const email = b.email ? b.email.trim().toLowerCase() : null;
@@ -71,18 +100,20 @@ export async function registerAdmin(app: FastifyInstance): Promise<void> {
     await mexec(
       `INSERT INTO memberships (user_id, company_id, role, position_key) VALUES (?, ?, ?, ?)
        ON DUPLICATE KEY UPDATE role = VALUES(role), position_key = VALUES(position_key), status = 'active'`,
-      [userId, ctx.company!.id, b.role, b.positionKey ?? null]
+      [userId, ctx.company!.id, primary, listedTrade]
     );
+    await setRoles(userId, ctx.company!.id, wanted);
 
     await texec(ctx.company!.id,
       `INSERT INTO staff (user_id, display_name, position_key, employee_code, active)
        VALUES (?, ?, ?, ?, 1)
        ON DUPLICATE KEY UPDATE display_name = VALUES(display_name),
          position_key = VALUES(position_key), employee_code = VALUES(employee_code), active = 1`,
-      [userId, b.name, b.positionKey ?? null, b.employeeCode ?? null]
+      [userId, b.name, listedTrade, b.employeeCode ?? null]
     );
+    await setTrades(ctx.company!.id, userId, trades);
 
-    return { ok: true, userId, code, tempPassword };
+    return { ok: true, userId, code, tempPassword, roles: wanted, positionKeys: trades };
   });
 
   app.patch('/api/admin/people/:userId', async (req, reply) => {
@@ -92,26 +123,38 @@ export async function registerAdmin(app: FastifyInstance): Promise<void> {
 
     const userId = Number((req.params as { userId: string }).userId);
     const b = req.body as {
-      role?: Role; positionKey?: string | null; active?: boolean;
-      name?: string; employeeCode?: string; commissionRate?: number;
+      role?: Role; roles?: Role[];
+      positionKey?: string | null; positionKeys?: string[];
+      active?: boolean; name?: string; employeeCode?: string; commissionRate?: number;
     };
 
-    if (b.role && !ROLES.includes(b.role)) return reply.code(400).send({ error: 'Unknown role.' });
+    const wanted = b.roles !== undefined
+      ? sortRoles(b.roles as Role[])
+      : (b.role !== undefined ? sortRoles([b.role]) : null);
+    if (wanted && !wanted.length) return reply.code(400).send({ error: 'Everyone needs at least one role.' });
+    if (wanted && wanted.some(r => !ROLES.includes(r))) return reply.code(400).send({ error: 'Unknown role.' });
 
-    if (b.role !== undefined || b.positionKey !== undefined || b.active !== undefined) {
+    /* Trades: the set given, or the single key for an older client. */
+    const trades = b.positionKeys !== undefined
+      ? b.positionKeys
+      : (b.positionKey !== undefined ? (b.positionKey ? [b.positionKey] : []) : null);
+    const listedTrade = trades ? (trades[0] ?? null) : undefined;
+
+    if (wanted || listedTrade !== undefined || b.active !== undefined) {
       const sets: string[] = [];
       const vals: unknown[] = [];
-      if (b.role !== undefined) { sets.push('role = ?'); vals.push(b.role); }
-      if (b.positionKey !== undefined) { sets.push('position_key = ?'); vals.push(b.positionKey); }
+      if (wanted) { sets.push('role = ?'); vals.push(primaryRole(wanted)!); }
+      if (listedTrade !== undefined) { sets.push('position_key = ?'); vals.push(listedTrade); }
       if (b.active !== undefined) { sets.push('status = ?'); vals.push(b.active ? 'active' : 'inactive'); }
       vals.push(userId, ctx.company!.id);
       await mexec(`UPDATE memberships SET ${sets.join(', ')} WHERE user_id = ? AND company_id = ?`, vals);
     }
+    if (wanted) await setRoles(userId, ctx.company!.id, wanted);
 
     const tsets: string[] = [];
     const tvals: unknown[] = [];
     if (b.name !== undefined) { tsets.push('display_name = ?'); tvals.push(b.name); }
-    if (b.positionKey !== undefined) { tsets.push('position_key = ?'); tvals.push(b.positionKey); }
+    if (listedTrade !== undefined) { tsets.push('position_key = ?'); tvals.push(listedTrade); }
     if (b.employeeCode !== undefined) { tsets.push('employee_code = ?'); tvals.push(b.employeeCode); }
     if (b.commissionRate !== undefined) { tsets.push('commission_rate = ?'); tvals.push(b.commissionRate); }
     if (b.active !== undefined) { tsets.push('active = ?'); tvals.push(b.active ? 1 : 0); }
@@ -119,6 +162,7 @@ export async function registerAdmin(app: FastifyInstance): Promise<void> {
       tvals.push(userId);
       await texec(ctx.company!.id, `UPDATE staff SET ${tsets.join(', ')} WHERE user_id = ?`, tvals);
     }
+    if (trades) await setTrades(ctx.company!.id, userId, trades);
 
     return { ok: true };
   });
@@ -265,8 +309,20 @@ export async function registerAdmin(app: FastifyInstance): Promise<void> {
       'SELECT role FROM memberships WHERE user_id = ? AND company_id = ?', [userId, cid]);
     if (!mem) return reply.code(404).send({ error: 'Not on this shop' });
 
-    if (mem.role === 'owner') {
+    /* Owner may be one of several roles this person holds; count owners the same
+       way — from the roles held, not the primary. */
+    const holdsOwner = await mqOne<RowDataPacket & { n: number }>(
+      `SELECT COUNT(*) AS n FROM membership_roles
+       WHERE user_id = ? AND company_id = ? AND role_key = 'owner'`, [userId, cid]
+    ).catch(() => null);
+    const isOwner = holdsOwner ? Number(holdsOwner.n) > 0 : mem.role === 'owner';
+
+    if (isOwner) {
       const owners = await mqOne<RowDataPacket & { n: number }>(
+        `SELECT COUNT(DISTINCT mr.user_id) AS n FROM membership_roles mr
+         JOIN memberships m ON m.user_id = mr.user_id AND m.company_id = mr.company_id
+         WHERE mr.company_id = ? AND mr.role_key = 'owner' AND m.status = 'active'`, [cid]
+      ).catch(() => null) ?? await mqOne<RowDataPacket & { n: number }>(
         `SELECT COUNT(*) AS n FROM memberships
          WHERE company_id = ? AND role = 'owner' AND status = 'active'`, [cid]);
       if (Number(owners?.n ?? 0) <= 1) {
@@ -280,6 +336,8 @@ export async function registerAdmin(app: FastifyInstance): Promise<void> {
        WHERE a.user_id = ? AND r.closed_at IS NULL`, [userId]);
 
     await mexec('DELETE FROM memberships WHERE user_id = ? AND company_id = ?', [userId, cid]);
+    await mexec('DELETE FROM membership_roles WHERE user_id = ? AND company_id = ?', [userId, cid])
+      .catch(() => undefined);
     await mexec('UPDATE sessions SET revoked_at = NOW() WHERE user_id = ? AND company_id = ?',
       [userId, cid]);
 
@@ -318,16 +376,23 @@ export async function registerAdmin(app: FastifyInstance): Promise<void> {
     if (!ctx.caps.admin) return reply.code(403).send({ error: 'Owner only' });
 
     const userId = Number((req.params as { userId: string }).userId);
-    const { role, positionKey } = req.body as { role: Role; positionKey?: string };
-    if (!ROLES.includes(role)) return reply.code(400).send({ error: 'Unknown role.' });
+    const b = req.body as { role?: Role; roles?: Role[]; positionKey?: string; positionKeys?: string[] };
+    const wanted = sortRoles((b.roles && b.roles.length ? b.roles : (b.role ? [b.role] : [])) as Role[]);
+    if (!wanted.length) return reply.code(400).send({ error: 'Give at least one role.' });
+    if (wanted.some(r => !ROLES.includes(r))) return reply.code(400).send({ error: 'Unknown role.' });
+    const trades = (b.positionKeys && b.positionKeys.length)
+      ? b.positionKeys
+      : (b.positionKey ? [b.positionKey] : []);
 
     await mexec(
       `INSERT INTO memberships (user_id, company_id, role, position_key) VALUES (?, ?, ?, ?)
        ON DUPLICATE KEY UPDATE role = VALUES(role), position_key = VALUES(position_key), status = 'active'`,
-      [userId, ctx.company!.id, role, positionKey ?? null]
+      [userId, ctx.company!.id, primaryRole(wanted)!, trades[0] ?? null]
     );
+    await setRoles(userId, ctx.company!.id, wanted);
     await mexec(`UPDATE users SET status = 'active' WHERE id = ?`, [userId]);
     await texec(ctx.company!.id, 'UPDATE staff SET active = 1 WHERE user_id = ?', [userId]);
+    await setTrades(ctx.company!.id, userId, trades);
 
     return { ok: true };
   });

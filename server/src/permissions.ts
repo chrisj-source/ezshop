@@ -1,8 +1,10 @@
 /**
  * Who can see and do what.
  *
- * Roles come from memberships.role in the master DB. Everything here is a
- * pure function of role + shop settings — no database access — so it can be
+ * Roles come from membership_roles in the master DB — a person can hold several
+ * (the owner who also writes estimates, the office manager who also does the
+ * books) and what they may do is the UNION of all of them. Everything here is a
+ * pure function of roles + shop settings — no database access — so it can be
  * mirrored in the client for hiding controls. The server still checks.
  */
 
@@ -65,25 +67,58 @@ export interface Caps {
 }
 
 export function capsFor(role: Role, opts: { techSeesOwnOnly: boolean }): Caps {
-  const seesAll = SEES_ALL.includes(role) || (role === 'technician' && !opts.techSeesOwnOnly);
+  return capsForRoles([role], opts);
+}
+
+/**
+ * The union of every role held. A technician who also holds a management role
+ * sees the whole board — the manager role wins over the shop's
+ * techs-see-only-their-cars setting, which only binds a tech-only user.
+ */
+export function capsForRoles(roles: Role[], opts: { techSeesOwnOnly: boolean }): Caps {
+  const list = roles.length ? roles : (['technician'] as Role[]);
+  const any = (set: Role[]): boolean => list.some(r => set.includes(r));
+  /* A tech-only user is bound by the shop setting; holding any role that sees the
+     whole board wins over it. */
+  const seesAll = any(SEES_ALL) || (list.includes('technician') && !opts.techSeesOwnOnly);
   return {
-    money: MONEY.includes(role),
+    money: any(MONEY),
     seesAllRepairOrders: seesAll,
-    anyStatus: ANY_STATUS.includes(role),
-    editRepairOrders: EDIT_RO.includes(role),
-    admin: ADMIN.includes(role),
-    deleteDocuments: DELETE_DOCS.includes(role),
-    acceptImports: ACCEPT_IMPORT.includes(role),
-    voidRepairOrders: VOID_RO.includes(role),
-    editAssignments: ['owner', 'production_manager', 'estimator'].includes(role),
-    manageParts: ['owner', 'parts_manager', 'estimator', 'production_manager'].includes(role),
-    manageLeads: ['owner', 'front_office', 'salesperson', 'estimator'].includes(role),
-    viewReports: ['owner', 'accounting', 'estimator', 'production_manager'].includes(role),
-    viewMoneyReports: MONEY.includes(role)
+    anyStatus: any(ANY_STATUS),
+    editRepairOrders: any(EDIT_RO),
+    admin: any(ADMIN),
+    deleteDocuments: any(DELETE_DOCS),
+    acceptImports: any(ACCEPT_IMPORT),
+    voidRepairOrders: any(VOID_RO),
+    editAssignments: any(['owner', 'production_manager', 'estimator']),
+    manageParts: any(['owner', 'parts_manager', 'estimator', 'production_manager']),
+    manageLeads: any(['owner', 'front_office', 'salesperson', 'estimator']),
+    viewReports: any(['owner', 'accounting', 'estimator', 'production_manager']),
+    viewMoneyReports: any(MONEY)
   };
 }
 
-/** Technicians only move files within the lanes their position owns. */
+/**
+ * Rank order, highest first. The first role a person holds in this order is
+ * their primary: what they are labelled as, and who notifications treat them
+ * as. Derived, never stored.
+ */
+export const ROLE_RANK: Role[] = [
+  'owner', 'accounting', 'estimator', 'production_manager',
+  'parts_manager', 'front_office', 'salesperson', 'technician'
+];
+
+export function primaryRole(roles: Role[]): Role | null {
+  for (const r of ROLE_RANK) if (roles.includes(r)) return r;
+  return null;
+}
+
+/** Roles in rank order, de-duplicated. */
+export function sortRoles(roles: Role[]): Role[] {
+  return ROLE_RANK.filter(r => roles.includes(r));
+}
+
+/** Technicians only move files within the lanes their trades own. */
 export const POSITION_OWNS: Record<string, string[]> = {
   pdr: ['pdr'],
   body: ['body'],
@@ -92,11 +127,37 @@ export const POSITION_OWNS: Record<string, string[]> = {
   detail: ['detail']
 };
 
-export function canMoveTo(role: Role, positionKey: string | null, laneKey: string | null): boolean {
-  if (ANY_STATUS.includes(role)) return true;
-  if (role !== 'technician') return false;
-  if (!laneKey || !positionKey) return false;
-  return (POSITION_OWNS[positionKey] ?? []).includes(laneKey);
+/** Every lane a person's trades own, across all of them. */
+export function lanesFor(positionKeys: string[]): string[] {
+  const out = new Set<string>();
+  for (const p of positionKeys) for (const l of POSITION_OWNS[p] ?? []) out.add(l);
+  return [...out];
+}
+
+export function canMoveTo(
+  roles: Role | Role[],
+  positionKeys: string | string[] | null,
+  laneKey: string | null
+): boolean {
+  const list = Array.isArray(roles) ? roles : [roles];
+  if (list.some(r => ANY_STATUS.includes(r))) return true;
+  if (!list.includes('technician')) return false;
+  if (!laneKey || !positionKeys) return false;
+  const trades = Array.isArray(positionKeys) ? positionKeys : [positionKeys];
+  return lanesFor(trades).includes(laneKey);
+}
+
+/**
+ * A car nobody can start. PDR alone is a complete file — a hail car pulled by
+ * one tech needs nobody else. Once body or paint is on it the car is a collision
+ * repair and wants both trades: body and PDR still needs a painter, PDR and
+ * paint still needs a body tech.
+ */
+export function needsTech(assigned: Record<string, unknown>): boolean {
+  const has = (k: string): boolean => !!assigned[k];
+  if (!['pdr', 'body', 'paint', 'ri'].some(has)) return true;
+  if (!has('body') && !has('paint')) return false;
+  return !has('body') || !has('paint');
 }
 
 /** Strip money columns from an object before it leaves the server. */

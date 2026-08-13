@@ -125,7 +125,10 @@ export async function registerAuth(app: FastifyInstance): Promise<void> {
       } : null,
       role: ctx.role,
       roleLabel: ctx.role ? ROLE_LABEL[ctx.role] : null,
+      roles: ctx.roles,
+      roleLabels: ctx.roles.map(r => ROLE_LABEL[r]),
       positionKey: ctx.positionKey,
+      positionKeys: ctx.positionKeys,
       caps: ctx.caps,
       features: [...ctx.features],
       companies: memberships

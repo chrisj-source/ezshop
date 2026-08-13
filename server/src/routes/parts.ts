@@ -5,6 +5,27 @@ import { requireCompany, requireFeature } from '../middleware/context';
 import { notify } from '../notify';
 import { scrubMoney } from '../permissions';
 
+/**
+ * Parts profit is margin on list — what the shop keeps of the list price.
+ * A line under this reads thin on the parts screen. Shop setting eventually.
+ */
+const THIN_MARGIN_PCT = 20;
+
+function marginPct(listCents: number, costCents: number): number | null {
+  if (!listCents) return null;
+  return Math.round(((listCents - costCents) / listCents) * 100);
+}
+
+/** Keeps the file's parts cost equal to what was actually ordered. */
+async function recomputePartsCost(cid: number, roId: number): Promise<void> {
+  await texec(cid, `
+    UPDATE repair_orders r SET r.parts_cost_cents = (
+      SELECT COALESCE(SUM(IF(p.cost_cents > 0, p.cost_cents, p.price_cents) * p.qty), 0)
+      FROM parts_lines p
+      WHERE p.ro_id = r.id AND p.state <> 'not_needed'
+    ) WHERE r.id = ?`, [roId]);
+}
+
 export async function registerParts(app: FastifyInstance): Promise<void> {
 
   /** Every gating part across the shop — the parts desk's working list. */
@@ -26,7 +47,8 @@ export async function registerParts(app: FastifyInstance): Promise<void> {
              DATEDIFF(NOW(), r.opened_at) AS days_in_shop,
              c.name AS customer_name,
              CONCAT_WS(' ', veh.year, veh.make, veh.model) AS vehicle,
-             veh.color,
+             veh.color, veh.vin,
+             RIGHT(veh.vin, 8) AS vin_last8,
              s.label AS status_label, s.lane_key,
              DATEDIFF(CURDATE(), p.eta) AS days_late,
              DATEDIFF(NOW(), p.ordered_at) AS days_since_ordered
@@ -56,12 +78,38 @@ export async function registerParts(app: FastifyInstance): Promise<void> {
       WHERE r.closed_at IS NULL AND r.voided_at IS NULL
     `);
 
+    /* Parts profit: margin on list, over the open lines of each file. Derived,
+       never stored. Money capabilities cover the parts desk. */
+    const perRo = await tq<RowDataPacket[]>(ctx.company!.id, `
+      SELECT p.ro_id,
+             COALESCE(SUM(p.price_cents * p.qty), 0) AS list_cents,
+             COALESCE(SUM(p.cost_cents  * p.qty), 0) AS cost_cents,
+             SUM(p.price_cents > 0 AND (p.price_cents - p.cost_cents) * 100 < p.price_cents * ?) AS thin_lines
+      FROM parts_lines p JOIN repair_orders r ON r.id = p.ro_id
+      WHERE r.closed_at IS NULL AND r.voided_at IS NULL
+        AND p.state IN ('need','ordered','partial','backordered')
+      GROUP BY p.ro_id`, [THIN_MARGIN_PCT]);
+
+    const listC = Number(summary.list_cents ?? 0);
+    const costC = Number(summary.cost_cents ?? 0);
+
     return {
       parts: rows.map(r => scrubMoney(r as Record<string, unknown>, ctx.caps)),
       vendors,
+      thinMarginPct: THIN_MARGIN_PCT,
+      byRo: ctx.caps.money
+        ? perRo.map(r => ({
+          roId: Number(r.ro_id),
+          listCents: Number(r.list_cents ?? 0),
+          costCents: Number(r.cost_cents ?? 0),
+          marginPct: marginPct(Number(r.list_cents ?? 0), Number(r.cost_cents ?? 0)),
+          thinLines: Number(r.thin_lines ?? 0)
+        }))
+        : [],
       summary: {
-        listCents: ctx.caps.money ? Number(summary.list_cents ?? 0) : null,
-        costCents: ctx.caps.money ? Number(summary.cost_cents ?? 0) : null,
+        listCents: ctx.caps.money ? listC : null,
+        costCents: ctx.caps.money ? costC : null,
+        marginPct: ctx.caps.money ? marginPct(listC, costC) : null,
         needed: Number(summary.needed ?? 0),
         ordered: Number(summary.ordered ?? 0),
         backordered: Number(summary.backordered ?? 0),
@@ -169,12 +217,7 @@ export async function registerParts(app: FastifyInstance): Promise<void> {
     }
 
     // Recompute the file's parts cost so the board's totals stay honest.
-    await texec(cid, `
-      UPDATE repair_orders r SET r.parts_cost_cents = (
-        SELECT COALESCE(SUM(IF(p.cost_cents > 0, p.cost_cents, p.price_cents) * p.qty), 0)
-        FROM parts_lines p
-        WHERE p.ro_id = r.id AND p.state <> 'not_needed'
-      ) WHERE r.id = ?`, [before.ro_id]);
+    await recomputePartsCost(cid, before.ro_id);
 
     return { ok: true };
   });
@@ -187,26 +230,129 @@ export async function registerParts(app: FastifyInstance): Promise<void> {
     return { ok: true };
   });
 
-  /** Order several lines at once — the normal way a desk works. */
+  /**
+   * Order several lines at once — the normal way a desk works: one order, one
+   * supplier, one order number, one ETA. Prices come from the lines, which the
+   * modal has already corrected.
+   */
   app.post('/api/parts/bulk-order', async (req, reply) => {
     const ctx = requireCompany(req, reply);
     if (!ctx) return;
     if (!ctx.caps.manageParts) return reply.code(403).send({ error: 'Not permitted' });
 
+    const cid = ctx.company!.id;
     const { ids, vendorId, eta, poNumber } = req.body as
       { ids: number[]; vendorId?: number; eta?: string; poNumber?: string };
     if (!ids?.length) return reply.code(400).send({ error: 'Nothing selected' });
 
-    await texec(ctx.company!.id, `
+    await texec(cid, `
       UPDATE parts_lines
       SET state = 'ordered', ordered_at = CURDATE(),
           vendor_id = COALESCE(?, vendor_id), eta = COALESCE(?, eta),
-          po_number = COALESCE(?, po_number)
+          po_number = COALESCE(NULLIF(?, ''), po_number)
       WHERE id IN (?)`,
       [vendorId ?? null, eta ?? null, poNumber ?? null, ids]
     );
 
-    return { ok: true, count: ids.length };
+    /* One note per file, naming the vendor and what it is against — the parts
+       list should read as what is coming, from whom, when. */
+    const touched = await tq<Array<RowDataPacket & { ro_id: number; n: number; vendor_name: string | null }>>(
+      cid, `SELECT p.ro_id, COUNT(*) AS n, MAX(v.name) AS vendor_name
+            FROM parts_lines p LEFT JOIN vendors v ON v.id = p.vendor_id
+            WHERE p.id IN (?) GROUP BY p.ro_id`, [ids]);
+
+    for (const t of touched) {
+      await texec(cid,
+        `INSERT INTO ro_notes (ro_id, kind, body, user_id, user_name) VALUES (?, 'auto', ?, ?, ?)`,
+        [t.ro_id,
+         `${t.n} part ${t.n === 1 ? 'line' : 'lines'} ordered` +
+         (t.vendor_name ? ` from ${t.vendor_name}` : '') +
+         (poNumber ? ` on order ${poNumber}` : '') +
+         (eta ? `, ETA ${eta}` : '') + '.',
+         ctx.user.id, ctx.user.name]
+      );
+      await recomputePartsCost(cid, t.ro_id);
+    }
+
+    return { ok: true, count: ids.length, files: touched.length };
+  });
+
+  /**
+   * Receive several lines at once. Receiving is quick — a tick — but it records
+   * the date and what came short: a line with anything owed stays on order for
+   * the remainder, because partial arrivals are the normal case.
+   */
+  app.post('/api/parts/bulk-receive', async (req, reply) => {
+    const ctx = requireCompany(req, reply);
+    if (!ctx) return;
+    if (!ctx.caps.manageParts) return reply.code(403).send({ error: 'Not permitted' });
+
+    const cid = ctx.company!.id;
+    const b = req.body as {
+      lines: Array<{ id: number; short?: number; received?: number }>;
+      receivedAt?: string; invoiceNo?: string;
+    };
+    if (!b.lines?.length) return reply.code(400).send({ error: 'Nothing selected' });
+
+    const ids = b.lines.map(l => Number(l.id)).filter(Boolean);
+    const rows = await tq<Array<RowDataPacket & {
+      id: number; ro_id: number; description: string; qty: number; state: string;
+    }>>(cid, 'SELECT id, ro_id, description, qty, state FROM parts_lines WHERE id IN (?)', [ids]);
+
+    const files = new Set<number>();
+    const shorted: string[] = [];
+
+    for (const row of rows) {
+      const ask = b.lines.find(l => Number(l.id) === row.id)!;
+      const short = Math.max(0, Number(ask.short ?? 0) || 0);
+      const received = ask.received !== undefined
+        ? Math.max(0, Math.min(row.qty, Number(ask.received)))
+        : Math.max(0, row.qty - short);
+      const state = received >= row.qty ? 'received' : received > 0 ? 'partial' : 'backordered';
+
+      await texec(cid, `
+        UPDATE parts_lines
+        SET qty_received = ?, state = ?, received_at = COALESCE(?, CURDATE()),
+            invoice_no = COALESCE(NULLIF(?, ''), invoice_no)
+        WHERE id = ?`,
+        [received, state, b.receivedAt ?? null, b.invoiceNo ?? null, row.id]);
+
+      await texec(cid,
+        `INSERT INTO ro_notes (ro_id, kind, body, user_id, user_name) VALUES (?, 'auto', ?, ?, ?)`,
+        [row.ro_id,
+         state === 'received'
+           ? `Part “${row.description}” received.`
+           : `Part “${row.description}” received ${received} of ${row.qty} — ${row.qty - received} short, still on order.`,
+         ctx.user.id, ctx.user.name]);
+
+      if (state !== 'received') shorted.push(row.description);
+      files.add(row.ro_id);
+    }
+
+    for (const roId of files) {
+      await recomputePartsCost(cid, roId);
+
+      /* The last gating line clearing is what opens the file up. */
+      const owed = await tqOne<RowDataPacket & { n: number }>(cid,
+        `SELECT COUNT(*) AS n FROM parts_lines
+         WHERE ro_id = ? AND gating = 1 AND state IN ('need','ordered','partial','backordered')`,
+        [roId]);
+      if (Number(owed?.n ?? 0) === 0) {
+        const ro = await tqOne<RowDataPacket & { ro_number: string }>(
+          cid, 'SELECT ro_number FROM repair_orders WHERE id = ?', [roId]);
+        if (ro) {
+          await notify({
+            companyId: cid, event: 'parts.arrived', roId,
+            title: `Parts in — RO ${ro.ro_number}`,
+            body: `Every gating part is in on ${ro.ro_number}.`,
+            actorUserId: ctx.user.id,
+            dedupeKey: `parts:${roId}:gate-clear`
+          }).catch(e => req.log.error(e));
+        }
+      }
+    }
+
+    return { ok: true, count: rows.length, files: files.size, short: shorted.length };
   });
 
   app.post('/api/vendors', async (req, reply) => {

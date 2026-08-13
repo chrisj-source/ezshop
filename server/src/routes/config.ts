@@ -3,6 +3,7 @@ import { RowDataPacket } from 'mysql2/promise';
 import { texec, tq } from '../db/tenant';
 import { mq } from '../db/master';
 import { requireCompany } from '../middleware/context';
+import { primaryRole, Role, ROLE_LABEL, sortRoles } from '../permissions';
 
 export async function registerShopConfig(app: FastifyInstance): Promise<void> {
 
@@ -27,6 +28,16 @@ export async function registerShopConfig(app: FastifyInstance): Promise<void> {
       tq<RowDataPacket[]>(cid, `SELECT setting_key, setting_value FROM shop_settings`)
     ]);
 
+    /* Trades are a set. Every screen that offers a person for a lane reads this. */
+    const trades = await tq<Array<RowDataPacket & { user_id: number; position_key: string }>>(
+      cid, `SELECT user_id, position_key FROM staff_positions ORDER BY sort_order, position_key`
+    ).catch(() => []);
+    for (const s of staff) {
+      const mine = trades.filter(t => t.user_id === s.user_id).map(t => t.position_key);
+      (s as RowDataPacket & { position_keys: string[] }).position_keys =
+        mine.length ? mine : (s.position_key ? [s.position_key as string] : []);
+    }
+
     const settingsMap: Record<string, string | null> = {};
     for (const s of settings) settingsMap[s.setting_key as string] = s.setting_value as string | null;
 
@@ -40,7 +51,9 @@ export async function registerShopConfig(app: FastifyInstance): Promise<void> {
       features: [...ctx.features],
       caps: ctx.caps,
       role: ctx.role,
-      positionKey: ctx.positionKey
+      roles: ctx.roles,
+      positionKey: ctx.positionKey,
+      positionKeys: ctx.positionKeys
     };
   });
 
@@ -128,16 +141,39 @@ export async function registerShopConfig(app: FastifyInstance): Promise<void> {
       [ctx.company!.id]
     );
 
+    const heldRoles = await mq<Array<RowDataPacket & { user_id: number; role_key: Role }>>(
+      `SELECT user_id, role_key FROM membership_roles WHERE company_id = ?`,
+      [ctx.company!.id]
+    ).catch(() => []);
+
     const profiles = await tq<RowDataPacket[]>(ctx.company!.id,
       `SELECT user_id, display_name, position_key, employee_code, efficiency, commission_rate, active FROM staff`);
 
+    const trades = await tq<Array<RowDataPacket & { user_id: number; position_key: string }>>(
+      ctx.company!.id,
+      `SELECT user_id, position_key FROM staff_positions ORDER BY sort_order, position_key`
+    ).catch(() => []);
+
     const byId = new Map(profiles.map(p => [p.user_id as number, p]));
     return {
-      people: members.map(m => ({
-        ...m,
-        profile: byId.get(m.id as number) ?? null,
-        commission_rate: ctx.caps.money ? byId.get(m.id as number)?.commission_rate ?? null : undefined
-      }))
+      people: members.map(m => {
+        const id = m.id as number;
+        const held = heldRoles.filter(r => r.user_id === id).map(r => r.role_key);
+        const mine = trades.filter(t => t.user_id === id).map(t => t.position_key);
+        const roles = sortRoles(held.length ? held : [m.role as Role]);
+        const positionKeys = mine.length
+          ? mine
+          : (m.position_key ? [m.position_key as string] : []);
+        return {
+          ...m,
+          role: primaryRole(roles) ?? m.role,
+          roles,
+          roleLabels: roles.map(r => ROLE_LABEL[r]),
+          positionKeys,
+          profile: byId.get(id) ?? null,
+          commission_rate: ctx.caps.money ? byId.get(id)?.commission_rate ?? null : undefined
+        };
+      })
     };
   });
 }

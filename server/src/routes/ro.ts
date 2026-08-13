@@ -105,7 +105,7 @@ export async function registerRepairOrders(app: FastifyInstance): Promise<void> 
         `SELECT slot_id, label, lane_key, is_terminal, owner_role FROM statuses WHERE slot_id = ?`, [slot]);
       if (!target) return reply.code(400).send({ error: 'Unknown status' });
 
-      if (!canMoveTo(ctx.role!, ctx.positionKey, target.lane_key)) {
+      if (!canMoveTo(ctx.roles, ctx.positionKeys, target.lane_key)) {
         return reply.code(403).send({ error: 'You cannot move a file into that status.' });
       }
     }
