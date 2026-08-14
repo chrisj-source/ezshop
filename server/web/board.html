@@ -1027,13 +1027,12 @@
     }).join('') + '<div class="legitem" style="margin-left:auto">' + rows.length + ' files</div>';
 
     // Group by lane, unlaned last, in lane order. With a technician picked the
-    // lanes they own come first; their cars that have moved on sit in their own
-    // group at the end rather than vanishing.
+    // lanes they own come first and the rest follow — every lane keeps its own
+    // heading, so a printed list still reads by category.
     var tech = pickedTech();
     var buckets = {};
     rows.forEach(function (f) {
       var key = f.lane || '__none';
-      if (tech && f.lane && tech.lanes.indexOf(f.lane) < 0) key = '__elsewhere';
       (buckets[key] = buckets[key] || []).push(f);
     });
 
@@ -1044,7 +1043,6 @@
       });
     }
     if (buckets.__none) order.push('__none');
-    if (buckets.__elsewhere) order.push('__elsewhere');
 
     if (!order.length) {
       $('cycleBody').innerHTML = '<div class="empty">Nothing to show.</div>';
@@ -1054,16 +1052,18 @@
     var n = 0;
     $('cycleBody').innerHTML = order.map(function (key) {
       var list = buckets[key];
-      var label = key === '__none' ? 'Not in a production lane'
-        : key === '__elsewhere' ? 'Elsewhere in the shop'
-        : laneLabel(key);
+      var label = key === '__none' ? 'Not in a production lane' : laneLabel(key);
       var late = list.filter(function (f) { return variance(f) > 0; }).length;
+      /* A lane this tech does not own — their car has moved on. Said once on the
+         heading rather than by merging the lanes together. */
+      var moved = tech && key !== '__none' && tech.lanes.indexOf(key) < 0;
       n++;
 
       return '<div><div class="lanehead">' +
         '<div class="lanen">' + String(n).padStart(2, '0') + '</div>' +
         '<div class="lanename">' + esc(label) + '</div>' +
         '<div class="sub">' + list.length + '</div>' +
+        (moved ? '<div class="sub">moved on</div>' : '') +
         '<div class="sub" style="margin-left:auto">' +
         (late ? late + ' past target' : 'all inside target') + '</div></div>' +
         list.map(cycleRow).join('') + '</div>';
