@@ -376,7 +376,7 @@
     <button id="vTable" class="sel">Table</button>
     <button id="vCycle">Cycle</button>
   </div>
-  <input type="search" id="fSearch" placeholder="Search RO #, VIN, plate, name…">
+  <input type="search" id="fSearch" placeholder="Search RO #, VIN, plate, colour, name…">
   <select id="fStatus"></select>
   <select id="fGroup"><option value="">All stages</option></select>
   <select id="fTech"><option value="">Everyone</option></select>
@@ -761,7 +761,10 @@
         });
         if (!mine) return false;
       }
-      if (q && [f.ro, f.customer, f.vehicle, f.vin, f.insurer].join(' ').toLowerCase().indexOf(q) < 0) return false;
+      /* Everything a person would type to find a car. Colour matters more than it
+         looks: on the phone a dealer says "the silver Telluride", never the RO. */
+      if (q && [f.ro, f.customer, f.vehicle, f.color, f.vin, f.plate, f.insurer, f.claimNumber]
+        .filter(Boolean).join(' ').toLowerCase().indexOf(q) < 0) return false;
       return true;
     });
 

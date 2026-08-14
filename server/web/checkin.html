@@ -9,7 +9,13 @@
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/shell.css?v=7">
 <style>
-  body { overflow:auto; }
+  /* The shell sizes body to exactly one viewport and scrolls an inner pane. A
+     phone form cannot live in that: focus a field, the keyboard takes half the
+     screen, and a one-viewport-tall page has nothing left to scroll — the button
+     under the fold becomes unreachable. So on check-in the DOCUMENT scrolls,
+     which is what a mobile browser handles properly with the keyboard open. */
+  html, body { height:auto; min-height:100%; }
+  body { display:block; overflow:visible; }
   .phone { max-width:520px; margin:0 auto; width:100%; }
   .step { padding:18px 16px 0; }
   .steptitle { font:500 17px var(--font); }
@@ -77,7 +83,27 @@
     position:sticky; bottom:0; background:var(--bg); border-top:1px solid var(--line);
     padding:12px 16px calc(12px + var(--safe-b)); display:flex; gap:10px; margin-top:22px;
   }
+  /* A sticky element sticks to the scrollport edge, which is the bottom of the
+     window — under the fixed tab bar. Lift it by the bar's own height, and drop
+     the safe-area padding, because the bar already covers that strip. */
+  body.has-tabbar .footbar {
+    bottom:calc(58px + var(--safe-b));
+    padding-bottom:12px;
+  }
+  /* On a phone the bar sits in the flow instead of stuck to the bottom. Stuck to
+     the bottom means stuck to the LAYOUT viewport, which is behind the keyboard
+     the moment a field has focus — the button you are reaching for is the one you
+     cannot get to. In flow, with room beneath, it scrolls up above the keys. */
+  @media (max-width:820px) {
+    .footbar { position:static; margin-top:26px; }
+    body.has-tabbar .footbar { padding-bottom:calc(12px + var(--safe-b)); }
+  }
   .footbar .btn { flex:1; min-height:48px; font-size:13px; }
+  /* Room to scroll the footbar clear of an open keyboard. Without it the last
+     field on a step sits against the bottom of the page and the bar cannot rise
+     above the keys. */
+  .keyroom { height:38vh; }
+  @media (min-width:821px) { .keyroom { height:0; } }
   .finished { padding:56px 20px; text-align:center; }
   .finishedro { font:600 26px var(--font); font-variant-numeric:tabular-nums; margin:10px 0 6px; }
   .hint { font:400 11px var(--font); color:var(--dim); margin-top:6px; line-height:1.5; }
@@ -99,6 +125,7 @@
 <div class="phone">
   <div class="crumbs" id="crumbs"></div>
   <div id="stage"></div>
+  <div class="keyroom"></div>
 </div>
 
 <script src="/photos.js?v=5"></script>

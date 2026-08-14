@@ -73,6 +73,15 @@
   .lage { font:400 11px var(--font); font-variant-numeric:tabular-nums; color:var(--dim); }
   .lage.stale { color:var(--stopped); }
 
+  /* Follow-up marks. Due is the only one that shouts. */
+  .ftag {
+    font:500 9px var(--font); letter-spacing:.06em; text-transform:uppercase;
+    padding:3px 6px; border-radius:3px; white-space:nowrap; flex:none;
+  }
+  .ftag.due { color:var(--stopped); border:1px solid var(--stopped); }
+  .ftag.booked { color:var(--done); border:1px solid var(--done); }
+  .ftag.held { color:var(--dim); border:1px solid var(--line); }
+
   .detcol {
     border-left:1px solid var(--whisper); overflow-y:auto;
     background:var(--surf); padding:15px 16px;
@@ -189,9 +198,34 @@
     return p(d.getMonth() + 1) + '-' + p(d.getDate()) + '-' + String(d.getFullYear()).slice(2) + ' ' +
       d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
   }
-  function ageText(h) {
-    var d = Math.floor(Number(h || 0) / 24);
-    return d === 0 ? 'today' : d + 'd';
+  /**
+   * Age in calendar days, which is what a person means by it. Elapsed hours
+   * over 24 called a lead taken at 4pm yesterday "today" the next morning.
+   */
+  function ageText(days) {
+    var d = Number(days || 0);
+    return d <= 0 ? 'today' : d === 1 ? 'yesterday' : d + 'd';
+  }
+
+  /**
+   * The follow-up tag. Only three states are worth a mark on the row: it is due,
+   * it is booked (which is why it is not due), or it is being held. A lead
+   * quietly inside its window says nothing.
+   */
+  function followTag(l) {
+    if (l.needs_followup) {
+      return '<span class="ftag due" title="Quiet for ' + l.quiet_days +
+        ' days and nothing on the calendar">Follow up</span>';
+    }
+    if (l.followup_reason === 'booked') {
+      return '<span class="ftag booked" title="Booked ' + stamp(l.next_appointment) +
+        '">Booked</span>';
+    }
+    if (l.followup_reason === 'held') {
+      return '<span class="ftag held" title="Held until ' +
+        esc(String(l.followup_snooze_until || '')) + '">Held</span>';
+    }
+    return '';
   }
 
   api('/api/me').then(function (me) {
@@ -225,6 +259,7 @@
     return {
       working: open.length,
       'new': LEADS.filter(function (l) { return l.state === 'new'; }).length,
+      followup: LEADS.filter(function (l) { return l.needs_followup; }).length,
       won: LEADS.filter(function (l) { return l.state === 'won'; }).length,
       lost: LEADS.filter(function (l) { return l.state === 'lost'; }).length,
       all: LEADS.length
@@ -256,6 +291,7 @@
     var tabs = [
       { k: 'working', t: 'Working', c: c.working },
       { k: 'new', t: 'New', c: c['new'] },
+      { k: 'followup', t: 'Follow up', c: c.followup },
       { k: 'won', t: 'Won', c: c.won },
       { k: 'lost', t: 'Lost', c: c.lost },
       { k: 'all', t: 'All', c: c.all }
@@ -283,6 +319,7 @@
     var q = ($('fSearch') ? $('fSearch').value : '').trim().toLowerCase();
     return LEADS.filter(function (l) {
       if (TAB === 'working' && (l.state === 'won' || l.state === 'lost')) return false;
+      if (TAB === 'followup' && !l.needs_followup) return false;
       if (TAB === 'new' && l.state !== 'new') return false;
       if (TAB === 'won' && l.state !== 'won') return false;
       if (TAB === 'lost' && l.state !== 'lost') return false;
@@ -301,7 +338,8 @@
     }).length;
 
     $('headmeta').textContent = LEADS.length + ' lead' + (LEADS.length === 1 ? '' : 's') +
-      ' · ' + c.working + ' still working · ' + never + ' never answered';
+      ' · ' + c.working + ' still working · ' + never + ' never answered' +
+      (c.followup ? ' · ' + c.followup + ' to chase' : '');
 
     if (!rows.length) {
       $('list').innerHTML = '<div style="font:400 11.5px var(--font);color:var(--dim);padding:16px 18px">' +
@@ -315,15 +353,16 @@
       var tone = TONE[l.state] || 'var(--dim)';
       var stale = !l.first_reply_at && l.state !== 'won' && l.state !== 'lost' && l.age_hours >= 24;
       return '<div class="leadgrid leadrow' + (SEL === l.id ? ' sel' : '') + '" data-id="' + l.id + '">' +
-        '<div class="ledge" style="background:' + tone + '"></div>' +
+        '<div class="ledge" style="background:' + (l.needs_followup ? 'var(--stopped)' : tone) + '"></div>' +
         '<div style="min-width:0"><div class="lname">' + esc(name) + '</div>' +
         '<div class="lsub">' + esc(l.damage_note || l.lead_number) + '</div></div>' +
         '<div class="lcell">' + esc(l.vehicle_text || '—') + '</div>' +
         '<div class="lcell hide-sm">' + esc(l.source) + '</div>' +
         '<div class="lcell hide-sm">' + esc(l.owner_name || '—') + '</div>' +
+        '<div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap">' +
         '<div class="lstate" style="color:' + tone + ';border:1px solid ' + tone + '">' +
-        esc(label(l.state)) + '</div>' +
-        '<div class="lage' + (stale ? ' stale' : '') + '">' + esc(ageText(l.age_hours)) + '</div></div>';
+        esc(label(l.state)) + '</div>' + followTag(l) + '</div>' +
+        '<div class="lage' + (stale ? ' stale' : '') + '">' + esc(ageText(l.age_days)) + '</div></div>';
     }).join('');
 
     Array.prototype.forEach.call($('list').querySelectorAll('[data-id]'), function (el) {
@@ -365,12 +404,69 @@
        ['source', lead.source],
        ['damage', lead.damage_note || '—'],
        ['first reply', lead.first_reply_at ? stamp(lead.first_reply_at) : 'no reply yet'],
-       ['age', ageText(lead.age_hours)],
+       ['age', ageText(lead.age_days)],
+       ['last chased', lead.last_followup_at ? stamp(lead.last_followup_at) : 'never'],
        ['email', lead.email || '—']
       ].forEach(function (r) {
         h.push('<div class="detrow"><div class="detk">' + esc(r[0]) + '</div>' +
           '<div class="detv">' + esc(r[1]) + '</div></div>');
       });
+
+      /* Follow-up sits above the editable fields: it is the thing the row was
+         shouting about, so it should be the first thing to hand. */
+      var appts = (d.appointments || []).filter(function (a) { return !a.cancelled_at; });
+      var nextAppt = appts.filter(function (a) { return new Date(a.starts_at) >= new Date(); })[0];
+      var cfgDays = (d.followup && d.followup.days) || 3;
+
+      h.push('<div style="margin-top:14px;padding:11px;border:1px solid ' +
+        (lead.needs_followup ? 'var(--stopped)' : 'var(--line)') + ';border-radius:5px">');
+      h.push('<div style="display:flex;align-items:baseline;gap:8px">' +
+        '<div class="detlbl" style="margin:0">Follow-up</div>' +
+        '<div style="font:400 10.5px var(--font);color:' +
+        (lead.needs_followup ? 'var(--stopped)' : 'var(--dim)') + '">' +
+        (lead.needs_followup
+          ? 'due — quiet ' + lead.quiet_days + ' days, nothing booked'
+          : nextAppt
+            ? 'booked ' + stamp(nextAppt.starts_at)
+            : lead.followup_reason === 'held'
+              ? 'held until ' + esc(String(lead.followup_snooze_until || ''))
+              : (lead.state === 'won' || lead.state === 'lost')
+                ? 'settled'
+                : 'due in ' + lead.followup_due_in + ' day' + (lead.followup_due_in === 1 ? '' : 's')) +
+        '</div></div>');
+
+      if (lead.state !== 'won' && lead.state !== 'lost') {
+        h.push('<div class="row" style="margin-top:9px;gap:7px;flex-wrap:wrap">' +
+          '<select class="detsel" id="fHow" style="width:auto;min-width:104px">' +
+          ['Called', 'Texted', 'Emailed', 'Spoke in person'].map(function (x) {
+            return '<option value="' + x + '">' + x + '</option>';
+          }).join('') + '</select>' +
+          '<button class="btn btn-ghost" id="fDone">Followed up</button>' +
+          '<button class="btn btn-ghost" id="fBook">Book…</button></div>');
+        h.push('<div style="font:400 10px/1.5 var(--font);color:var(--dim);margin-top:7px">' +
+          'Marking it chased holds the flag for ' + cfgDays + ' day' + (cfgDays === 1 ? '' : 's') +
+          '. Booking anything on the calendar holds it until the appointment passes.</div>');
+
+        h.push('<div id="bookBox" hidden style="margin-top:10px;padding-top:10px;' +
+          'border-top:1px solid var(--whisper)">' +
+          '<div class="row" style="gap:7px;flex-wrap:wrap">' +
+          '<input type="datetime-local" id="bWhen" style="flex:1;min-width:172px">' +
+          '<select class="detsel" id="bKind" style="width:auto;min-width:98px">' +
+          [['estimate', 'Estimate'], ['drop', 'Drop off'], ['appraiser', 'Appraiser']].map(function (k) {
+            return '<option value="' + k[0] + '">' + k[1] + '</option>';
+          }).join('') + '</select>' +
+          '<button class="btn btn-solid" id="bSave">Add to calendar</button></div></div>');
+      }
+
+      if (appts.length) {
+        h.push('<div style="margin-top:10px;display:flex;flex-direction:column;gap:4px">');
+        appts.forEach(function (a) {
+          h.push('<div style="font:400 10.5px var(--font);color:var(--muted)">' +
+            esc(a.kind) + ' · ' + stamp(a.starts_at) + '</div>');
+        });
+        h.push('</div>');
+      }
+      h.push('</div>');
 
       h.push('<div style="margin-top:14px;display:flex;flex-direction:column;gap:10px">');
       h.push('<div><div class="detlbl">State</div><select class="detsel" id="dState">' +
@@ -438,6 +534,31 @@
   function wireDetail(lead) {
     var msg = $('dMsg');
     function say(t, k) { msg.textContent = t; msg.className = 'msg ' + k; }
+
+    /* Follow-up. Chasing it resets the clock; booking holds it until the
+       appointment has been and gone. */
+    var fd = $('fDone');
+    if (fd) fd.addEventListener('click', function () {
+      api('/api/leads/' + lead.id + '/followup', {
+        method: 'POST', body: JSON.stringify({ how: $('fHow').value })
+      }).then(load).catch(function (e) { say(e.message, 'err'); });
+    });
+
+    var fb = $('fBook');
+    if (fb) fb.addEventListener('click', function () {
+      var box = $('bookBox');
+      box.hidden = !box.hidden;
+      if (!box.hidden) $('bWhen').focus();
+    });
+
+    var bs = $('bSave');
+    if (bs) bs.addEventListener('click', function () {
+      if (!$('bWhen').value) return say('Pick a date and time.', 'err');
+      api('/api/leads/' + lead.id + '/appointment', {
+        method: 'POST',
+        body: JSON.stringify({ startsAt: $('bWhen').value.replace('T', ' ') + ':00', kind: $('bKind').value })
+      }).then(load).catch(function (e) { say(e.message, 'err'); });
+    });
 
     $('dState').addEventListener('change', function () {
       api('/api/leads/' + lead.id, { method: 'PATCH', body: JSON.stringify({ state: this.value }) })

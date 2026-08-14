@@ -1014,12 +1014,13 @@
     rail('Reference', [
       { k: 'tech', t: 'Tech visibility' },
       { k: 'caps', t: 'Day limits' },
+      { k: 'leads', t: 'Lead follow-up' },
       { k: 'cal', t: 'Google Calendar' }
     ]);
     var s = CFG.settings;
 
     // The rail picks which card is on screen, the same way it filters statuses
-    // and lanes. Nothing selected shows all three.
+    // and lanes. Nothing selected shows them all.
     function shows(k) { return !RAIL || RAIL === k; }
 
     $('mid').innerHTML = '<div class="pad">' +
@@ -1044,6 +1045,21 @@
           '<input class="dinput" type="number" min="0" id="cap_' + k + '" value="' +
           esc(s['cap_' + k] || '0') + '"></div>';
       }).join('') + '</div></div></div>' : '') +
+
+      (shows('leads') ? '<div class="card2" style="margin:0 0 14px" id="leadCard">' +
+        '<div class="card2row" style="grid-template-columns:1fr">' +
+        '<div class="dlbl" style="margin:0 0 4px">Lead follow-up</div>' +
+        '<div class="sub" style="margin-bottom:10px;max-width:560px">A lead nobody has touched gets ' +
+        'flagged for a chase. A lead with something on the calendar does not — being booked ' +
+        '<em>is</em> the follow-up. Marking one chased holds it for the same number of days again.</div>' +
+        '<div class="grid3">' +
+        '<div><div class="dk">Days of silence before flagging</div>' +
+        '<input class="dinput" type="number" min="1" max="90" id="lead_followup_days" value="' +
+        esc(s.lead_followup_days || '3') + '"></div>' +
+        '<div><div class="dk">A booking this far ahead counts</div>' +
+        '<input class="dinput" type="number" min="1" max="365" id="lead_appointment_window_days" value="' +
+        esc(s.lead_appointment_window_days || '30') + '"></div>' +
+        '</div></div></div>' : '') +
 
       (shows('cal') ? '<div class="card2" style="margin:0 0 14px" id="calCard">' +
         '<div class="card2row" style="grid-template-columns:1fr">' +
@@ -1075,6 +1091,9 @@
       if ($('techOwn')) body.tech_sees_own_only = $('techOwn').dataset.on === '1' ? '1' : '0';
       ['drop', 'pickup', 'return', 'estimate', 'appraiser'].forEach(function (k) {
         if ($('cap_' + k)) body['cap_' + k] = $('cap_' + k).value || '0';
+      });
+      ['lead_followup_days', 'lead_appointment_window_days'].forEach(function (k) {
+        if ($(k)) body[k] = $(k).value || (k === 'lead_followup_days' ? '3' : '30');
       });
       api('/api/config/settings', { method: 'PATCH', body: JSON.stringify(body) })
         .then(function () { say('Saved.', 'ok'); return reloadConfig(); })

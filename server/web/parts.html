@@ -99,7 +99,7 @@
 <div class="hairline"></div>
 
 <div class="filters">
-  <input type="search" id="fSearch" placeholder="Search RO #, part #, vendor…">
+  <input type="search" id="fSearch" placeholder="Search RO #, part #, vendor, colour…">
   <select id="fVendor"><option value="">Vendor: All</option></select>
   <select id="fState"><option value="">Type: All</option></select>
   <div class="legend" id="legend"></div>
@@ -265,8 +265,9 @@
     return PARTS.filter(function (p) {
       if (st && p.state !== st) return false;
       if (vend && String(p.vendor_id) !== vend) return false;
-      if (q && [p.ro_number, p.description, p.part_number, p.vendor_name, p.customer_name, p.vehicle]
-        .join(' ').toLowerCase().indexOf(q) < 0) return false;
+      if (q && [p.ro_number, p.description, p.part_number, p.vendor_name, p.customer_name,
+                p.vehicle, p.color, p.vin]
+        .filter(Boolean).join(' ').toLowerCase().indexOf(q) < 0) return false;
       return true;
     });
   }
