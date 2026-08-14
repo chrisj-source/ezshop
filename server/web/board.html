@@ -70,10 +70,15 @@
     .lanename { color:#111 !important; }
 
     .gridrow, .cyclerow {
+      /* The mobile breakpoint hides these in favour of cards, and a portrait
+         sheet is narrow enough to trigger it — so say it outright here. */
+      display:grid !important;
       break-inside:avoid; page-break-inside:avoid;
       border-bottom:1px solid #ccc; padding:5pt 0; min-height:0;
       color:#111 !important; cursor:default;
     }
+    .gridhead, .cyclehead { display:grid !important; }
+    .lanehead { display:flex !important; }
     .gridrow *, .cyclerow *, .lanehead * { color:#111 !important; }
     .cellsub, .sub, .log-m { color:#555 !important; }
     .edge, .track, .pip { display:none !important; }
@@ -86,7 +91,12 @@
        widened template in --printcols so an inline style cannot win. */
     .writein { display:block; border-bottom:1px solid #999; height:1.4em; align-self:end; }
     .gridhead, .gridrow { grid-template-columns:var(--printcols) !important; }
-    .cyclehead, .cyclerow { grid-template-columns:210px 240px 1fr 70px 60px 1.7in !important; }
+    /* Proportional, not fixed pixels — the same sheet has to fit portrait and
+       landscape without pushing the write-in column off the page. */
+    .cyclehead, .cyclerow {
+      grid-template-columns:minmax(0,2.3fr) minmax(0,2fr) minmax(0,1.3fr) 46pt 34pt 1.25in !important;
+      gap:10pt !important;
+    }
 
     .cards, .empty { display:none !important; }
     a[href]::after { content:none !important; }
