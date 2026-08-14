@@ -47,8 +47,12 @@ export async function registerRepairOrders(app: FastifyInstance): Promise<void> 
                                        v.name AS vendor_name
                                 FROM parts_lines p LEFT JOIN vendors v ON v.id = p.vendor_id
                                 WHERE p.ro_id = ? ORDER BY p.id`, [id]),
-      tq<RowDataPacket[]>(cid, `SELECT id, doc_type, label, mime_type, size_bytes, is_money_doc, uploaded_name, created_at
-                                FROM documents WHERE ro_id = ? AND deleted_at IS NULL ORDER BY created_at DESC`, [id]),
+      tq<RowDataPacket[]>(cid, `SELECT id, doc_type, label, mime_type, size_bytes, is_money_doc,
+                                       is_image, is_pdf, thumb_state, rotation, page_count,
+                                       width, height, thumb_key IS NOT NULL AS has_thumb,
+                                       uploaded_name, created_at
+                                FROM documents WHERE ro_id = ? AND deleted_at IS NULL
+                                ORDER BY is_image DESC, is_pdf DESC, created_at, id`, [id]),
       tq<RowDataPacket[]>(cid, `SELECT id, ro_number, reason, note, status_slot, parts_cancelled, parts_flagged,
                                        voided_at, voided_by_name, reopened_at, reopened_by_name, reopened_number
                                 FROM ro_voids WHERE ro_id = ? ORDER BY id DESC`, [id]),
@@ -70,7 +74,11 @@ export async function registerRepairOrders(app: FastifyInstance): Promise<void> 
       supplements: ctx.caps.money ? supplements : supplements.map(s => scrubMoney(s as Record<string, unknown>, ctx.caps)),
       sublets: sublets.map(s => scrubMoney(s as Record<string, unknown>, ctx.caps)),
       parts: parts.map(p => scrubMoney(p as Record<string, unknown>, ctx.caps)),
-      documents: ctx.caps.money ? docs : docs.filter(d => d.is_money_doc !== 1),
+      /* Money documents need the money capability; paperwork needs the office.
+         Both are absent rather than locked. */
+      documents: docs.filter(d =>
+        (ctx.caps.money || d.is_money_doc !== 1) &&
+        (ctx.caps.viewPaperwork || d.is_pdf !== 1)),
       voids,
       insurers,
       canVoid: ctx.caps.voidRepairOrders

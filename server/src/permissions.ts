@@ -41,6 +41,15 @@ const ADMIN: Role[] = ['owner'];
 /** May delete a document off a file. */
 const DELETE_DOCS: Role[] = ['owner', 'estimator'];
 
+/**
+ * May see and upload paperwork — PDFs. The office, the owner and the production
+ * manager. A technician's business is photos: they shoot damage, and they read
+ * the board, not the file's paperwork.
+ */
+const PAPERWORK: Role[] = [
+  'owner', 'accounting', 'estimator', 'production_manager', 'parts_manager', 'front_office'
+];
+
 /** May accept or reject an EMS import. */
 const ACCEPT_IMPORT: Role[] = ['owner', 'estimator', 'production_manager'];
 
@@ -52,6 +61,7 @@ const VOID_RO: Role[] = ['owner'];
 
 export interface Caps {
   money: boolean;
+  viewPaperwork: boolean;
   seesAllRepairOrders: boolean;
   anyStatus: boolean;
   editRepairOrders: boolean;
@@ -83,6 +93,7 @@ export function capsForRoles(roles: Role[], opts: { techSeesOwnOnly: boolean }):
   const seesAll = any(SEES_ALL) || (list.includes('technician') && !opts.techSeesOwnOnly);
   return {
     money: any(MONEY),
+    viewPaperwork: any(PAPERWORK),
     seesAllRepairOrders: seesAll,
     anyStatus: any(ANY_STATUS),
     editRepairOrders: any(EDIT_RO),

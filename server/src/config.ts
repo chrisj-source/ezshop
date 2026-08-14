@@ -28,6 +28,21 @@ export const config = {
   storageDir: process.env.STORAGE_DIR ?? path.resolve(process.cwd(), 'storage'),
 
   /**
+   * Redis, for the thumbnail queue. Unset and the app makes thumbnails inside
+   * the upload request instead — slower for the person uploading, but it works.
+   */
+  redis: {
+    url: process.env.REDIS_URL ?? 'redis://127.0.0.1:6379'
+  },
+
+  media: {
+    /** Jobs at once. Two is right for a shop box; raise it if the box is idle. */
+    concurrency: Number(process.env.MEDIA_CONCURRENCY ?? 2),
+    /** Rendered PDF pages are dropped this long after they were last opened. */
+    pageCacheDays: Number(process.env.PAGE_CACHE_DAYS ?? 30)
+  },
+
+  /**
    * Google Calendar, push only. Optional: with these unset the settings screen
    * says the server is not set up rather than offering a dead button.
    */

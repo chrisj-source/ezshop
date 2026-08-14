@@ -1179,6 +1179,10 @@
     $('mid').innerHTML = '<div class="empty">Loading…</div>';
 
     api('/api/storage').then(function (d) {
+      return api('/api/media-tools').catch(function () { return null; })
+        .then(function (tools) { return { d: d, tools: tools }; });
+    }).then(function (both) {
+      var d = both.d, tools = both.tools;
       function bytes(n) {
         if (!n) return '0 B';
         if (n < 1048576) return Math.round(n / 1024) + ' KB';
@@ -1208,13 +1212,47 @@
             '<td><div style="height:6px;background:var(--whisper);border-radius:3px">' +
             '<div style="height:100%;width:' + pct + '%;background:var(--acc);border-radius:3px">' +
             '</div></div></td></tr>';
-        }).join('') + '</tbody></table></div>';
+        }).join('') + '</tbody></table></div>' +
+
+        /* Rendered PDF pages are a cache, counted apart from the records — it is
+           disk you can throw away, and it reads better knowing that. */
+        '<div class="pad"><div class="dlbl">Rendered PDF pages</div>' +
+        '<div class="sub" style="margin-top:6px">' +
+        (d.pageCache && d.pageCache.pages
+          ? d.pageCache.pages.toLocaleString('en-US') + ' page' +
+            (d.pageCache.pages === 1 ? '' : 's') + ' · ' + bytes(d.pageCache.bytes) +
+            ' — a cache, dropped thirty days after anyone last opened them, ' +
+            'and re-rendered on demand. Not part of the record.'
+          : 'Nothing cached. Pages are rendered when somebody opens them.') +
+        '</div></div>' +
+
+        (d.pending || d.noThumb
+          ? '<div class="pad"><div class="dlbl">Thumbnails</div><div class="sub" style="margin-top:6px">' +
+            (d.pending ? d.pending + ' being made. ' : '') +
+            (d.noThumb ? d.noThumb + ' could not be made — open one in the drawer to try again.' : '') +
+            '</div></div>'
+          : '');
 
       detail('Storage', '<div style="font:400 11.5px/1.6 var(--font);color:var(--muted);padding:12px 0">' +
-        'Photos are shrunk on the phone before they upload — a 2048px version to keep and a small ' +
-        'thumbnail for grids — so a car with two hundred photos costs about 80 MB rather than 800.' +
-        '</div><div class="sub">Watch this against the disk on the server, not the database size. ' +
-        'Photos are what grows.</div>');
+        'Photos are shrunk before they are kept — a 2048px version and a small thumbnail — so a car ' +
+        'with two hundred photos costs about 80 MB rather than 800. iPhone HEIC photos are converted ' +
+        'to JPEG on upload and the HEIC is dropped, so they open anywhere later.' +
+        '</div>' +
+        (tools
+          ? '<div class="dlbl" style="margin-top:12px">This server can make</div>' +
+            '<div class="sub" style="margin-top:6px">' +
+            'Photo thumbnails: ' + (tools.sharp ? 'yes' : 'no') + '<br>' +
+            'iPhone HEIC: ' + (tools.heifConvert || tools.sharp ? 'yes' : 'no') + '<br>' +
+            'PDF thumbnails and pages: ' + (tools.mutool ? 'yes' : 'no') + '<br>' +
+            'Queue: ' + (tools.queue ? 'running' : 'not running — thumbnails are made during the upload') +
+            '</div>' +
+            (tools.missing && tools.missing.length
+              ? '<div class="sub" style="margin-top:8px;color:var(--stopped)">Missing: ' +
+                esc(tools.missing.join('; ')) + '. See INSTALL-MEDIA.md on the server.</div>'
+              : '')
+          : '') +
+        '<div class="sub" style="margin-top:12px">Watch this against the disk on the server, not the ' +
+        'database size. Photos are what grows.</div>');
     }).catch(function (e) {
       $('mid').innerHTML = '<div class="empty">' + esc(e.message) + '</div>';
     });

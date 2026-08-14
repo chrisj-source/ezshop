@@ -219,14 +219,51 @@
   }
   .photocell img { width:100%; height:100%; object-fit:cover; display:block; }
   .photocell:hover { outline:2px solid var(--acc); outline-offset:-2px; }
+  /* Paperwork sits in the same grid as the photos — one sequence, photos first. */
+  .photocell.pdf img { object-fit:cover; object-position:top; }
+  .photocell .kind {
+    position:absolute; left:3px; bottom:3px; font:500 8px var(--font); letter-spacing:.06em;
+    text-transform:uppercase; padding:2px 4px; border-radius:2px;
+    background:rgba(9,13,20,.82); color:var(--acc2);
+  }
+  .photocell .pages {
+    position:absolute; right:3px; bottom:3px; font:400 8px var(--font);
+    padding:2px 4px; border-radius:2px; background:rgba(9,13,20,.82); color:var(--dim);
+  }
+  /* Nothing could be rendered — the extension, in the middle of the tile. */
+  .glyph {
+    width:100%; height:100%; display:grid; place-items:center;
+    font:500 11px var(--font); letter-spacing:.08em; text-transform:uppercase;
+    color:var(--dim); background:var(--surf);
+  }
   .lightbox {
     position:fixed; inset:0; z-index:60; background:rgba(9,13,20,.94);
     display:flex; flex-direction:column; align-items:center; justify-content:center; gap:12px;
   }
   .lightbox[hidden] { display:none; }
   .lightbox img { max-width:94vw; max-height:76vh; border-radius:6px; }
+  /* Zoom to fill: the image goes to its own size and the frame scrolls. */
+  .lightbox.zoom { justify-content:flex-start; }
+  .lightbox.zoom .lbframe { overflow:auto; align-items:flex-start; cursor:zoom-out; }
+  .lightbox.zoom .lbframe img { max-width:none; max-height:none; }
+  .lbframe {
+    display:flex; align-items:center; justify-content:center;
+    max-width:94vw; max-height:76vh; cursor:zoom-in;
+  }
   .lbbar { display:flex; gap:9px; align-items:center; flex-wrap:wrap; justify-content:center; }
   .lbmeta { font:400 11px var(--font); color:var(--dim); text-align:center; }
+  /* Arrows sit off the image on a wide screen, under it on a narrow one. */
+  .lbside {
+    position:absolute; top:50%; transform:translateY(-50%); z-index:2;
+    width:44px; height:64px; border-radius:5px; cursor:pointer;
+    background:rgba(9,13,20,.6); border:1px solid var(--line); color:var(--text);
+    font:400 18px var(--font);
+  }
+  .lbside:hover { border-color:var(--acc); color:var(--acc); }
+  .lbside[disabled] { opacity:.25; cursor:default; }
+  #lbBack { left:16px; }
+  #lbFwd { right:16px; }
+  @media (max-width:640px) { .lbside { display:none; } }
 
   /* ---- mobile: cards instead of a table ---- */
   .cards { display:none; }
@@ -287,11 +324,19 @@
 <body>
 
 <div class="lightbox" id="lightbox" hidden>
-  <img id="lbImg" alt="">
+  <button class="lbside" id="lbBack" aria-label="Previous">&#8249;</button>
+  <button class="lbside" id="lbFwd" aria-label="Next">&#8250;</button>
+  <div class="lbframe" id="lbFrame"><img id="lbImg" alt=""></div>
   <div class="lbmeta" id="lbMeta"></div>
   <div class="lbbar">
     <button class="btn btn-ghost" id="lbPrev">Previous</button>
+    <button class="btn btn-ghost" id="lbPagePrev" hidden>Page &#8249;</button>
+    <span class="lbmeta" id="lbPage" hidden></span>
+    <button class="btn btn-ghost" id="lbPageNext" hidden>Page &#8250;</button>
+    <button class="btn btn-ghost" id="lbRotate" hidden>Rotate</button>
+    <button class="btn btn-ghost" id="lbZoom">Zoom to fill</button>
     <a class="btn" id="lbDownload" download>Download</a>
+    <a class="btn btn-ghost" id="lbTab" target="_blank" rel="noopener">Open in a new tab</a>
     <button class="btn btn-ghost" id="lbNext">Next</button>
     <button class="btn btn-ghost" id="lbClose">Close</button>
   </div>
@@ -398,7 +443,7 @@
 (function () {
   var api = Shell.api, esc = Shell.esc;
   var ME = null, CFG = null, FILES = [], STATUSES = [], GROUPS = [], LANES = [], STAFF = [];
-  var DOCTYPES = [], OPEN = null, VIEW = 'table', PHOTOSET = [], LBAT = 0;
+  var DOCTYPES = [], OPEN = null, VIEW = 'table', MEDIA = [], LBAT = 0, LBPAGE = 1;
   var SORT = { key: 'days', dir: 'desc' };
 
   var STORE = 'es_board_cols';
@@ -1658,21 +1703,38 @@
       'style="flex:1;min-width:150px">' +
       '<button class="btn btn-ghost" id="addPromise">Add</button></div>');
 
-    /* Documents and photos */
+    /* Documents and photos.
+
+       One grid and one sequence: photos first, then paperwork, each in the order
+       it was uploaded. A tile whose thumbnail is still being made is not here
+       yet — it appears on the next load, a second or two later. */
     if (ME.features.indexOf('docs') >= 0) {
-      var photos = d.documents.filter(function (x) { return x.is_image; });
-      var others = d.documents.filter(function (x) { return !x.is_image; });
-      PHOTOSET = photos;
+      var ready = d.documents.filter(function (x) { return x.thumb_state !== 'pending'; });
+      var pending = d.documents.length - ready.length;
+      var tiles = ready.filter(function (x) { return x.is_image || x.is_pdf; });
+      var files = ready.filter(function (x) { return !x.is_image && !x.is_pdf; });
+      MEDIA = tiles;
 
       L.push('<div class="sec">Photos and documents</div>');
-      if (photos.length) {
-        L.push('<div class="photogrid">' + photos.map(function (p, i) {
-          return '<button class="photocell" data-photo="' + i + '" title="' + esc(p.label) + '">' +
-            '<img loading="lazy" src="/api/documents/' + p.id +
-            (p.has_thumb ? '?variant=thumb' : '') + '" alt=""></button>';
+      if (tiles.length) {
+        L.push('<div class="photogrid">' + tiles.map(function (p, i) {
+          var failed = p.thumb_state === 'failed' || (!p.has_thumb && p.is_pdf);
+          return '<button class="photocell' + (p.is_pdf ? ' pdf' : '') + '" data-media="' + i + '" ' +
+            'title="' + esc(p.label) + '">' +
+            (failed
+              ? '<span class="glyph">' + esc(extOf(p)) + '</span>'
+              : '<img loading="lazy" src="/api/documents/' + p.id +
+                (p.has_thumb ? '?variant=thumb' : '') + '" alt=""' +
+                (p.rotation ? ' style="transform:rotate(' + p.rotation + 'deg)"' : '') + '>') +
+            (p.is_pdf ? '<span class="kind">PDF</span>' : '') +
+            (p.is_pdf && p.page_count > 1 ? '<span class="pages">' + p.page_count + 'pp</span>' : '') +
+            '</button>';
         }).join('') + '</div>');
       }
-      others.forEach(function (doc) {
+      if (pending) {
+        L.push('<div class="sub" style="margin-top:8px">' + pending + ' more being prepared…</div>');
+      }
+      files.forEach(function (doc) {
         L.push('<div class="docrow">' +
           '<span class="flag" style="color:var(--acc2);border:1px solid var(--line)">' +
           esc(String(doc.doc_type).replace(/_/g, ' ')) + '</span>' +
@@ -1688,11 +1750,17 @@
       });
       L.push('<div class="row" style="margin:12px 0 8px">' +
         '<select id="docType" style="flex:1;min-width:150px">' +
+        '<option value="">Set the type from the file — a photo, or paperwork</option>' +
         DOCTYPES.map(function (t) {
           return '<option value="' + esc(t.key) + '">' + esc(t.label) + '</option>';
         }).join('') + '</select></div>');
-      L.push('<div class="dropzone" id="drop">Drop files here, or choose a file — estimate, ' +
-        'supplement, invoice, proof of payment<input type="file" id="fileInput" multiple hidden></div>');
+      L.push('<div class="dropzone" id="drop">' +
+        (ME.caps.viewPaperwork
+          ? 'Drop files here, or choose a file — photos, estimate, supplement, invoice, ' +
+            'proof of payment'
+          : 'Drop photos here, or tap to choose — damage, teardown, progress') +
+        '<input type="file" id="fileInput" multiple hidden' +
+        (ME.caps.viewPaperwork ? '' : ' accept="image/*"') + '></div>');
     }
 
     $('dLeft').innerHTML = L.join('');
@@ -1937,8 +2005,8 @@
       });
     });
 
-    Array.prototype.forEach.call(document.querySelectorAll('[data-photo]'), function (el) {
-      el.addEventListener('click', function () { showPhoto(Number(el.dataset.photo)); });
+    Array.prototype.forEach.call(document.querySelectorAll('[data-media]'), function (el) {
+      el.addEventListener('click', function () { showMedia(Number(el.dataset.media)); });
     });
 
     var drop = $('drop'), input = $('fileInput');
@@ -1963,7 +2031,7 @@
 
       Photos.prepareAll(files).then(function (items) {
         var fd = new FormData();
-        fd.append('docType', $('docType').value);
+        if ($('docType').value) fd.append('docType', $('docType').value);
         var before = 0, after = 0;
         items.forEach(function (it, i) {
           Photos.appendTo(fd, i, it.file, it.prepared);
@@ -1983,7 +2051,22 @@
               drop.textContent = 'Drop files here, or tap to choose';
               return;
             }
+            /* Tiles do not appear until their thumbnail is made, so the toast is
+               what tells the person it worked. */
+            var got = (res.j.documents || []).length;
+            say(got + ' file' + (got === 1 ? '' : 's') + ' uploaded' +
+              (res.j.pending ? ' · preparing thumbnails' : '') +
+              (res.j.rejected && res.j.rejected.length
+                ? ' · ' + res.j.rejected.length + ' skipped, photos only' : ''), 'ok');
             openRo(OPEN);
+            /* Come back for the ones still being made. */
+            if (res.j.pending) {
+              var tries = 0;
+              var poll = setInterval(function () {
+                if (++tries > 6 || OPEN == null) return clearInterval(poll);
+                openRo(OPEN);
+              }, 2500);
+            }
           });
       }).catch(function () {
         say('Upload failed.', 'err');
@@ -1992,24 +2075,105 @@
     }
   }
 
-  /* -------------------------------------------------------------- lightbox */
+  /* -------------------------------------------------------------- the viewer */
 
-  function showPhoto(i) {
-    if (!PHOTOSET.length) return;
-    LBAT = (i + PHOTOSET.length) % PHOTOSET.length;
-    var p = PHOTOSET[LBAT];
-    $('lbImg').src = '/api/documents/' + p.id;
-    $('lbMeta').textContent = (LBAT + 1) + ' of ' + PHOTOSET.length + ' · ' + p.label +
-      (p.width ? ' · ' + p.width + '×' + p.height : '') + ' · ' + Photos.bytes(p.size_bytes);
-    $('lbDownload').href = '/api/documents/' + p.id + '?download=1';
-    $('lbDownload').setAttribute('download', p.label || 'photo.jpg');
+  /** The extension, for a tile we could not render. */
+  function extOf(m) {
+    var n = String(m.label || '');
+    var dot = n.lastIndexOf('.');
+    if (dot > 0 && n.length - dot <= 6) return n.slice(dot + 1);
+    return m.is_pdf ? 'pdf' : (m.source_mime || m.mime_type || 'file').split('/').pop();
+  }
+
+  /**
+   * One modal over one sequence — photos first, then paperwork. The side arrows
+   * always move between documents; a multi-page PDF gets its own page arrows in
+   * the bar, so turning a page never walks off the file you are reading.
+   */
+  function showMedia(i, page) {
+    if (!MEDIA.length) return;
+    LBAT = (i + MEDIA.length) % MEDIA.length;
+    LBPAGE = page || 1;
+    var m = MEDIA[LBAT];
+    var pdf = !!m.is_pdf;
+    var pages = Number(m.page_count || 1);
+
+    $('lightbox').classList.remove('zoom');
+    $('lbImg').style.transform = (!pdf && m.rotation) ? 'rotate(' + m.rotation + 'deg)' : '';
+    $('lbImg').src = pdf
+      ? '/api/documents/' + m.id + '?page=' + LBPAGE
+      : '/api/documents/' + m.id;
+
+    $('lbMeta').textContent = (LBAT + 1) + ' of ' + MEDIA.length + ' · ' + m.label +
+      (pdf
+        ? (pages ? ' · ' + pages + ' page' + (pages === 1 ? '' : 's') : '')
+        : (m.width ? ' · ' + m.width + '×' + m.height : '')) +
+      ' · ' + Photos.bytes(m.size_bytes) +
+      (m.source_mime ? ' · from ' + String(m.source_mime).split('/').pop().toUpperCase() : '');
+
+    /* Page controls belong to the PDF; rotate belongs to a photo. */
+    var many = pdf && pages > 1;
+    $('lbPagePrev').hidden = !many;
+    $('lbPageNext').hidden = !many;
+    $('lbPage').hidden = !many;
+    if (many) $('lbPage').textContent = 'page ' + LBPAGE + ' of ' + pages;
+    $('lbPagePrev').disabled = LBPAGE <= 1;
+    $('lbPageNext').disabled = LBPAGE >= pages;
+    $('lbRotate').hidden = pdf || !ME.caps.editRepairOrders;
+
+    $('lbDownload').href = '/api/documents/' + m.id + '?download=1';
+    $('lbDownload').setAttribute('download', m.label || (pdf ? 'document.pdf' : 'photo.jpg'));
+    $('lbTab').href = '/api/documents/' + m.id;
+
+    $('lbBack').disabled = MEDIA.length < 2;
+    $('lbFwd').disabled = MEDIA.length < 2;
     $('lightbox').hidden = false;
   }
-  function hidePhoto() { $('lightbox').hidden = true; $('lbImg').removeAttribute('src'); }
+
+  function hidePhoto() {
+    $('lightbox').hidden = true;
+    $('lightbox').classList.remove('zoom');
+    $('lbImg').removeAttribute('src');
+  }
+
+  function turnPage(step) {
+    var m = MEDIA[LBAT];
+    var pages = Number(m.page_count || 1);
+    var next = LBPAGE + step;
+    if (next < 1 || next > pages) return;
+    showMedia(LBAT, next);
+  }
 
   $('lbClose').addEventListener('click', hidePhoto);
-  $('lbPrev').addEventListener('click', function () { showPhoto(LBAT - 1); });
-  $('lbNext').addEventListener('click', function () { showPhoto(LBAT + 1); });
+  $('lbPrev').addEventListener('click', function () { showMedia(LBAT - 1); });
+  $('lbNext').addEventListener('click', function () { showMedia(LBAT + 1); });
+  $('lbBack').addEventListener('click', function () { showMedia(LBAT - 1); });
+  $('lbFwd').addEventListener('click', function () { showMedia(LBAT + 1); });
+  $('lbPagePrev').addEventListener('click', function () { turnPage(-1); });
+  $('lbPageNext').addEventListener('click', function () { turnPage(1); });
+
+  $('lbZoom').addEventListener('click', function () {
+    $('lightbox').classList.toggle('zoom');
+    $('lbZoom').textContent = $('lightbox').classList.contains('zoom') ? 'Fit to window' : 'Zoom to fill';
+  });
+  $('lbFrame').addEventListener('click', function () { $('lbZoom').click(); });
+
+  /* Rotation is saved on the record and turned on display — the file on disk
+     stays as the camera wrote it. */
+  $('lbRotate').addEventListener('click', function () {
+    var m = MEDIA[LBAT];
+    api('/api/documents/' + m.id + '/rotate', { method: 'PATCH', body: JSON.stringify({ turn: 90 }) })
+      .then(function (r) {
+        m.rotation = r.rotation;
+        $('lbImg').style.transform = r.rotation ? 'rotate(' + r.rotation + 'deg)' : '';
+        var cell = document.querySelector('[data-media="' + LBAT + '"] img');
+        if (cell) cell.style.transform = r.rotation ? 'rotate(' + r.rotation + 'deg)' : '';
+      }).catch(function (e) {
+        var m = $('dMsg');
+        if (m) { m.textContent = e.message; m.className = 'msg err'; }
+      });
+  });
+
   $('lightbox').addEventListener('click', function (e) { if (e.target.id === 'lightbox') hidePhoto(); });
 
   /* ---------------------------------------------------------------- wiring */
@@ -2068,8 +2232,12 @@
       else tryCloseRo();
     }
     if (!$('lightbox').hidden) {
-      if (e.key === 'ArrowLeft') showPhoto(LBAT - 1);
-      if (e.key === 'ArrowRight') showPhoto(LBAT + 1);
+      var m = MEDIA[LBAT] || {};
+      /* Up and down turn the pages of a PDF; left and right change document. */
+      if (e.key === 'ArrowLeft') showMedia(LBAT - 1);
+      if (e.key === 'ArrowRight') showMedia(LBAT + 1);
+      if (m.is_pdf && e.key === 'ArrowUp') turnPage(-1);
+      if (m.is_pdf && e.key === 'ArrowDown') turnPage(1);
     }
   });
   on('newRo', 'click', function () { location.href = '/new-ro.html'; });

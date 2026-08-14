@@ -26,6 +26,10 @@ import { registerReports } from './routes/reports';
 import { registerSales } from './routes/sales';
 import { registerCalendar } from './routes/gcal';
 import { purgeExpiredSessions } from './auth/session';
+import { closeQueue, startWorker } from './queue';
+import { makeDerivatives } from './jobs/derivatives';
+import { prunePageCache } from './jobs/page-cache';
+import { mediaTools } from './lib/media';
 
 async function main(): Promise<void> {
   const app = Fastify({
@@ -92,6 +96,25 @@ async function main(): Promise<void> {
   const sweep = setInterval(() => { void purgeExpiredSessions().catch(() => {}); }, 6 * 3600 * 1000);
   sweep.unref();
 
+  /* Thumbnails are made behind the upload, in this same process — one service to
+     start, one to watch. */
+  const worker = startWorker(makeDerivatives, (msg, err) => {
+    if (err) app.log.error({ err }, msg); else app.log.warn(msg);
+  });
+
+  const tools = await mediaTools();
+  app.log.info(
+    `media tools — sharp: ${tools.sharp ? 'yes' : 'no'}, ` +
+    `heif-convert: ${tools.heifConvert ? 'yes' : 'no'}, mutool: ${tools.mutool ? 'yes' : 'no'}` +
+    (tools.sharp && tools.mutool ? '' : ' (see INSTALL-MEDIA.md)')
+  );
+
+  /* Rendered PDF pages nobody has opened in a month. */
+  const pageSweep = setInterval(() => {
+    void prunePageCache().catch(err => app.log.error({ err }, 'page cache sweep'));
+  }, 12 * 3600 * 1000);
+  pageSweep.unref();
+
   await app.listen({ port: config.port, host: '127.0.0.1' });
   app.log.info(`Easy Shop listening on 127.0.0.1:${config.port}`);
 
@@ -100,6 +123,8 @@ async function main(): Promise<void> {
       void (async () => {
         app.log.info('shutting down');
         await app.close();
+        await worker?.close().catch(() => undefined);
+        await closeQueue();
         await closeAllTenants();
         await closeMaster();
         process.exit(0);
