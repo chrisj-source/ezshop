@@ -454,6 +454,9 @@
   var api = Shell.api, esc = Shell.esc;
   var ME = null, CFG = null, FILES = [], STATUSES = [], GROUPS = [], LANES = [], STAFF = [];
   var DOCTYPES = [], OPEN = null, VIEW = 'table', MEDIA = [], LBAT = 0, LBPAGE = 1;
+  /* Set while the browser is producing a printout, so the sheet can leave off
+     what a paper list does not need. */
+  var PRINTING = false;
   var SORT = { key: 'days', dir: 'desc' };
 
   var STORE = 'es_board_cols';
@@ -725,11 +728,16 @@
     var tech = pickedTech();
     var wantNone = $('fTech').value === 'none';
     var done = $('fDone').checked ? completeSlots() : null;
+    /* A tech's printed list is a work list: a car at Vehicle Ready or gone is
+       nothing for them to do, so it stays off the sheet. On screen it is still
+       there — this only applies while printing. */
+    var drop = (PRINTING && tech && !$('fDone').checked) ? completeSlots() : null;
 
     var out = FILES.filter(function (f) {
       if (g && f.group !== g) return false;
       if (st && f.statusSlot !== st) return false;
       if (done && done.indexOf(f.statusSlot) < 0) return false;
+      if (drop && drop.indexOf(f.statusSlot) >= 0) return false;
       if (wantNone && !needsTech(f)) return false;
       if (tech) {
         var ids = f.assignedIds || {};
@@ -1168,6 +1176,10 @@
 
     if ($('fDone').checked) bits.push('complete');
     if ($('fClosed').checked) bits.push('closed files');
+    /* Say what the sheet left off, so nobody reads it as the whole picture. */
+    if (PRINTING && t.value && t.value !== 'none' && !$('fDone').checked) {
+      bits.push('finished cars left off');
+    }
     var q = $('fSearch').value.trim();
     if (q) bits.push('matching “' + q + '”');
 
@@ -2212,6 +2224,11 @@
   on('fDone', 'change', render);
   on('fClosed', 'change', function () { load(); });
   on('fPrint', 'click', function () { window.print(); });
+
+  /* Ctrl+P and the toolbar button both come through here, so the sheet is built
+     the same way either way. */
+  window.addEventListener('beforeprint', function () { PRINTING = true; render(); });
+  window.addEventListener('afterprint', function () { PRINTING = false; render(); });
   on('refresh', 'click', function () { load(); });
   on('scrim', 'click', tryCloseRo);
   on('dClose', 'click', tryCloseRo);
