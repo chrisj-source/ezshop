@@ -11,9 +11,20 @@ import { scrubMoney } from '../permissions';
  */
 const THIN_MARGIN_PCT = 20;
 
+/** What a vendor is to the shop. Sublet vendors sit in the same list. */
+const VENDOR_KINDS = ['OEM dealer', 'Aftermarket', 'Recycled / LKQ', 'Glass', 'Paint / materials', 'Sublet'];
+
 function marginPct(listCents: number, costCents: number): number | null {
   if (!listCents) return null;
   return Math.round(((listCents - costCents) / listCents) * 100);
+}
+
+/** Keeps the file's sublet figure equal to the sublet lines on it. */
+async function recomputeSubletCost(cid: number, roId: number): Promise<void> {
+  await texec(cid, `
+    UPDATE repair_orders r SET r.sublet_cost_cents = (
+      SELECT COALESCE(SUM(s.cost_cents), 0) FROM sublets s WHERE s.ro_id = r.id
+    ) WHERE r.id = ?`, [roId]);
 }
 
 /** Keeps the file's parts cost equal to what was actually ordered. */
@@ -355,6 +366,38 @@ export async function registerParts(app: FastifyInstance): Promise<void> {
     return { ok: true, count: rows.length, files: files.size, short: shorted.length };
   });
 
+  /**
+   * The shop's vendor list. Admin gets everything including retired ones;
+   * everywhere else only asks for what is still in use.
+   */
+  app.get('/api/vendors', async (req, reply) => {
+    const ctx = requireCompany(req, reply);
+    if (!ctx) return;
+    const all = (req.query as { all?: string }).all === '1' && ctx.caps.admin;
+
+    const vendors = await tq<RowDataPacket[]>(ctx.company!.id, `
+      SELECT v.id, v.name, v.kind, v.phone, v.email, v.active,
+             (SELECT COUNT(*) FROM parts_lines p WHERE p.vendor_id = v.id) AS parts_lines,
+             (SELECT COUNT(*) FROM parts_lines p
+               WHERE p.vendor_id = v.id
+                 AND p.state IN ('ordered','partial','backordered')) AS on_order,
+             (SELECT MAX(p.ordered_at) FROM parts_lines p WHERE p.vendor_id = v.id) AS last_ordered
+      FROM vendors v
+      ${all ? '' : 'WHERE v.active = 1'}
+      ORDER BY v.active DESC, v.name`);
+
+    /* Sublet vendors are typed as free text on the file rather than picked, so
+       the admin screen shows what has actually been used — a name that keeps
+       appearing there is one worth adding to the list properly. */
+    const subletNames = await tq<Array<RowDataPacket & { vendor: string; n: number }>>(
+      ctx.company!.id,
+      `SELECT vendor, COUNT(*) AS n FROM sublets
+       WHERE vendor IS NOT NULL AND vendor <> '' GROUP BY vendor ORDER BY n DESC, vendor`
+    );
+
+    return { vendors, subletVendors: subletNames, kinds: VENDOR_KINDS };
+  });
+
   app.post('/api/vendors', async (req, reply) => {
     const ctx = requireCompany(req, reply);
     if (!ctx) return;
@@ -364,17 +407,58 @@ export async function registerParts(app: FastifyInstance): Promise<void> {
 
     const res = await texec(ctx.company!.id,
       'INSERT INTO vendors (name, kind, phone, email) VALUES (?, ?, ?, ?)',
-      [b.name, b.kind ?? null, b.phone ?? null, b.email ?? null]
+      [b.name.trim().slice(0, 160), b.kind ?? null, b.phone ?? null, b.email ?? null]
     );
     return { ok: true, id: res.insertId };
   });
 
+  /**
+   * Edit a vendor, or retire one. Retiring keeps every order that already names
+   * it — the vendor simply stops being offered.
+   */
+  app.patch('/api/vendors/:id', async (req, reply) => {
+    const ctx = requireCompany(req, reply);
+    if (!ctx) return;
+    if (!ctx.caps.manageParts) return reply.code(403).send({ error: 'Not permitted' });
+
+    const id = Number((req.params as { id: string }).id);
+    const b = req.body as {
+      name?: string; kind?: string | null; phone?: string | null;
+      email?: string | null; active?: boolean;
+    };
+
+    const map: Array<[keyof typeof b, string]> = [
+      ['name', 'name'], ['kind', 'kind'], ['phone', 'phone'], ['email', 'email']
+    ];
+    const sets: string[] = [];
+    const vals: unknown[] = [];
+    for (const [k, col] of map) {
+      if (b[k] === undefined) continue;
+      const v = b[k];
+      sets.push(`${col} = ?`);
+      vals.push(typeof v === 'string' ? (v.trim() || null) : v);
+    }
+    if (b.active !== undefined) { sets.push('active = ?'); vals.push(b.active ? 1 : 0); }
+    if (!sets.length) return reply.code(400).send({ error: 'Nothing to change' });
+
+    vals.push(id);
+    await texec(ctx.company!.id, `UPDATE vendors SET ${sets.join(', ')} WHERE id = ?`, vals);
+    return { ok: true };
+  });
+
   /* ------------------------------------------------------- sublet + supplements */
 
+  /**
+   * Sublet: a vehicle out for calibration, glass or mechanical. It is still on
+   * the board — the sublet line is what explains the day.
+   *
+   * Parts, estimators and managers move sublets; a technician does not.
+   */
   app.post('/api/ro/:id/sublets', async (req, reply) => {
     const ctx = requireCompany(req, reply);
     if (!ctx) return;
     if (!requireFeature(ctx, 'supp', reply)) return;
+    if (!ctx.caps.manageParts) return reply.code(403).send({ error: 'Not permitted' });
 
     const roId = Number((req.params as { id: string }).id);
     const b = req.body as {
@@ -386,8 +470,8 @@ export async function registerParts(app: FastifyInstance): Promise<void> {
     const res = await texec(ctx.company!.id, `
       INSERT INTO sublets (ro_id, service, vendor, state, out_at, back_at, cost_cents, po_number)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [roId, b.service, b.vendor ?? null, b.state ?? 'scheduled',
-       b.outAt ?? null, b.backAt ?? null, b.costCents ?? 0, b.poNumber ?? null]
+      [roId, b.service.slice(0, 64), b.vendor?.trim() || null, b.state ?? 'scheduled',
+       b.outAt || null, b.backAt || null, b.costCents ?? 0, b.poNumber?.trim() || null]
     );
 
     await texec(ctx.company!.id,
@@ -395,6 +479,7 @@ export async function registerParts(app: FastifyInstance): Promise<void> {
       [roId, `Sublet added: ${b.service}${b.vendor ? ' — ' + b.vendor : ''}.`, ctx.user.id, ctx.user.name]
     );
 
+    await recomputeSubletCost(ctx.company!.id, roId);
     return { ok: true, id: res.insertId };
   });
 
@@ -471,8 +556,16 @@ export async function registerParts(app: FastifyInstance): Promise<void> {
   app.patch('/api/sublets/:id', async (req, reply) => {
     const ctx = requireCompany(req, reply);
     if (!ctx) return;
+    if (!ctx.caps.manageParts) return reply.code(403).send({ error: 'Not permitted' });
+
+    const cid = ctx.company!.id;
     const id = Number((req.params as { id: string }).id);
     const b = req.body as Record<string, unknown>;
+
+    const before = await tqOne<RowDataPacket & {
+      ro_id: number; service: string; vendor: string | null; state: string;
+    }>(cid, 'SELECT ro_id, service, vendor, state FROM sublets WHERE id = ?', [id]);
+    if (!before) return reply.code(404).send({ error: 'No such sublet' });
 
     const map: Record<string, string> = {
       service: 'service', vendor: 'vendor', state: 'state',
@@ -481,12 +574,49 @@ export async function registerParts(app: FastifyInstance): Promise<void> {
     const sets: string[] = [];
     const vals: unknown[] = [];
     for (const [k, col] of Object.entries(map)) {
-      if (b[k] !== undefined) { sets.push(`${col} = ?`); vals.push(b[k]); }
+      if (b[k] === undefined) continue;
+      const v = b[k];
+      sets.push(`${col} = ?`);
+      vals.push(typeof v === 'string' ? (v.trim() || null) : v);
     }
     if (!sets.length) return reply.code(400).send({ error: 'Nothing to change' });
 
+    /* Moving it out or back stamps the date if nobody typed one — the dates are
+       what the day is explained by, so they should not need remembering. */
+    if (b.state === 'out' && b.outAt === undefined) sets.push('out_at = COALESCE(out_at, CURDATE())');
+    if (b.state === 'returned' && b.backAt === undefined) sets.push('back_at = COALESCE(back_at, CURDATE())');
+
     vals.push(id);
-    await texec(ctx.company!.id, `UPDATE sublets SET ${sets.join(', ')} WHERE id = ?`, vals);
+    await texec(cid, `UPDATE sublets SET ${sets.join(', ')} WHERE id = ?`, vals);
+
+    if (b.state !== undefined && b.state !== before.state) {
+      await texec(cid,
+        `INSERT INTO ro_notes (ro_id, kind, body, user_id, user_name) VALUES (?, 'auto', ?, ?, ?)`,
+        [before.ro_id,
+         `Sublet — ${before.service} (${before.vendor || 'no vendor'}) marked ${b.state}.`,
+         ctx.user.id, ctx.user.name]);
+    }
+    if (b.costCents !== undefined) await recomputeSubletCost(cid, before.ro_id);
+
+    return { ok: true };
+  });
+
+  app.delete('/api/sublets/:id', async (req, reply) => {
+    const ctx = requireCompany(req, reply);
+    if (!ctx) return;
+    if (!ctx.caps.manageParts) return reply.code(403).send({ error: 'Not permitted' });
+
+    const cid = ctx.company!.id;
+    const id = Number((req.params as { id: string }).id);
+    const row = await tqOne<RowDataPacket & { ro_id: number; service: string }>(
+      cid, 'SELECT ro_id, service FROM sublets WHERE id = ?', [id]);
+    if (!row) return reply.code(404).send({ error: 'No such sublet' });
+
+    await texec(cid, 'DELETE FROM sublets WHERE id = ?', [id]);
+    await texec(cid,
+      `INSERT INTO ro_notes (ro_id, kind, body, user_id, user_name) VALUES (?, 'auto', ?, ?, ?)`,
+      [row.ro_id, `Sublet removed: ${row.service}.`, ctx.user.id, ctx.user.name]);
+    await recomputeSubletCost(cid, row.ro_id);
     return { ok: true };
   });
 

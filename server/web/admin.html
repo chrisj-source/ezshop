@@ -206,6 +206,7 @@
     { k: 'lanes', t: 'Lanes and gates' },
     { k: 'notify', t: 'Notification groups' },
     { k: 'people', t: 'People' },
+    { k: 'vendors', t: 'Vendors' },
     { k: 'settings', t: 'Shop settings' },
     { k: 'storage', t: 'Storage' }
   ];
@@ -265,7 +266,8 @@
   function render() {
     ({
       statuses: renderStatuses, lanes: renderLanes, notify: renderNotify,
-      people: renderPeople, settings: renderSettings, storage: renderStorage
+      people: renderPeople, vendors: renderVendors,
+      settings: renderSettings, storage: renderStorage
     }[TAB])();
   }
 
@@ -1169,6 +1171,164 @@
       });
     }).catch(function (e) {
       if ($('calBody')) $('calBody').textContent = e.message;
+    });
+  }
+
+  /* ====================================================== vendors */
+
+  /**
+   * Who the shop buys from. One list, used by the parts desk when ordering and
+   * offered as suggestions when someone types a sublet vendor on a file.
+   *
+   * Retiring a vendor keeps every order that already names it — the name stops
+   * being offered, nothing in the history changes.
+   */
+  function renderVendors() {
+    rail('Reference', []);
+    $('mid').innerHTML = '<div class="empty">Loading…</div>';
+
+    api('/api/vendors?all=1').then(function (d) {
+      var kinds = d.kinds || [];
+      var live = d.vendors.filter(function (v) { return Number(v.active) === 1; });
+      var gone = d.vendors.filter(function (v) { return Number(v.active) !== 1; });
+
+      /* Sublet vendors are typed on the file rather than picked. A name that
+         keeps appearing there is one worth adding to the list properly. */
+      var known = {};
+      d.vendors.forEach(function (v) { known[v.name.toLowerCase()] = 1; });
+      var strays = (d.subletVendors || []).filter(function (s) {
+        return !known[String(s.vendor).toLowerCase()];
+      });
+
+      var h = ['<div class="pad"><div class="card2" style="margin:0 0 18px">' +
+        '<div class="card2row" style="grid-template-columns:1fr">' +
+        '<div class="dlbl">Add a vendor</div>' +
+        '<div class="grid3" style="margin-top:4px;row-gap:14px">' +
+        '<div><div class="dk">Name</div><input class="dinput" id="vName"></div>' +
+        '<div><div class="dk">Kind</div><select class="dsel" id="vKind">' +
+        '<option value="">—</option>' +
+        kinds.map(function (k) { return '<option value="' + esc(k) + '">' + esc(k) + '</option>'; }).join('') +
+        '</select></div>' +
+        '<div><div class="dk">Phone</div><input class="dinput" id="vPhone"></div>' +
+        '<div><div class="dk">Email</div><input class="dinput" id="vEmail" type="email"></div>' +
+        '</div>' +
+        '<div class="row" style="margin-top:12px">' +
+        '<button class="btn btn-solid" id="addVendor">Add</button></div>' +
+        '</div></div></div>'];
+
+      if (strays.length) {
+        h.push('<div class="pad"><div class="dlbl">Typed on a file but not on the list</div>' +
+          '<div class="sub" style="margin-top:6px">' +
+          strays.map(function (s) {
+            return '<button class="setchip" data-adopt="' + esc(s.vendor) + '">' +
+              esc(s.vendor) + ' · ' + s.n + '</button>';
+          }).join(' ') + '</div>' +
+          '<div class="sub" style="margin-top:6px">Tap one to add it as a sublet vendor.</div></div>');
+      }
+
+      h.push('<div class="prow2" style="border-top:1px solid var(--line);min-height:32px">' +
+        '<div></div><div class="dk">Name</div><div class="dk">Kind</div>' +
+        '<div class="dk hide-sm">Phone</div><div class="dk hide-sm">Used</div>' +
+        '<div class="dk">On the list</div></div>');
+
+      live.concat(gone).forEach(function (v) {
+        var off = Number(v.active) !== 1;
+        h.push('<div class="prow2" data-vendor="' + v.id + '"' +
+          (off ? ' style="opacity:.5"' : '') + '>' +
+          '<div></div>' +
+          '<div><input class="dinput v-name" value="' + esc(v.name) + '"></div>' +
+          '<select class="dsel v-kind"><option value="">—</option>' +
+          kinds.map(function (k) {
+            return '<option value="' + esc(k) + '"' + (v.kind === k ? ' selected' : '') + '>' +
+              esc(k) + '</option>';
+          }).join('') + '</select>' +
+          '<div class="hide-sm"><input class="dinput v-phone" value="' + esc(v.phone || '') + '"></div>' +
+          '<div class="scell num hide-sm" title="Part lines ever ordered from them">' +
+          (Number(v.parts_lines) || 0) +
+          (Number(v.on_order) ? ' · ' + v.on_order + ' out' : '') + '</div>' +
+          '<button class="visbtn' + (off ? '' : ' on') + '" data-vactive="' + (off ? 0 : 1) + '">' +
+          (off ? 'Retired' : 'Offered') + '</button></div>');
+      });
+
+      h.push('<div class="pad" style="padding-top:16px"><div class="row">' +
+        '<button class="btn btn-solid" id="saveVendors">Save vendors</button>' +
+        '<span class="sub">' + live.length + ' offered' +
+        (gone.length ? ' · ' + gone.length + ' retired' : '') +
+        ' · a retired vendor stays on every order that already names it</span></div></div>');
+
+      $('mid').innerHTML = h.join('');
+      detail('Vendors', '<div style="font:400 11.5px/1.6 var(--font);color:var(--muted);padding:12px 0">' +
+        'One list for the whole shop. The parts desk picks from it when ordering, and it fills the ' +
+        'suggestions when somebody types a sublet vendor onto a file. Kind is only a label \u2014 it groups ' +
+        'the list, it does not restrict anything.</div>' +
+        '<div class="sub" style="margin-top:10px">Retire rather than delete. Deleting would orphan the ' +
+        'orders that name them; retiring just takes the name out of the dropdowns.</div>');
+
+      $('addVendor').addEventListener('click', function () {
+        var name = $('vName').value.trim();
+        if (!name) return say('A name is required.', 'err');
+        api('/api/vendors', {
+          method: 'POST',
+          body: JSON.stringify({
+            name: name,
+            kind: $('vKind').value || undefined,
+            phone: $('vPhone').value.trim() || undefined,
+            email: $('vEmail').value.trim() || undefined
+          })
+        }).then(function () {
+          say('Added.', 'ok');
+          renderVendors();
+        }).catch(function (e) { say(e.message, 'err'); });
+      });
+
+      Array.prototype.forEach.call($('mid').querySelectorAll('[data-adopt]'), function (b) {
+        b.addEventListener('click', function () {
+          api('/api/vendors', {
+            method: 'POST',
+            body: JSON.stringify({ name: b.dataset.adopt, kind: 'Sublet' })
+          }).then(renderVendors).catch(function (e) { say(e.message, 'err'); });
+        });
+      });
+
+      Array.prototype.forEach.call($('mid').querySelectorAll('[data-vactive]'), function (b) {
+        b.addEventListener('click', function () {
+          var on = b.dataset.vactive === '1';
+          b.dataset.vactive = on ? '0' : '1';
+          b.classList.toggle('on', !on);
+          b.textContent = on ? 'Retired' : 'Offered';
+          b.closest('.prow2').style.opacity = on ? '.5' : '';
+        });
+      });
+
+      $('saveVendors').addEventListener('click', function () {
+        var jobs = [];
+        Array.prototype.forEach.call($('mid').querySelectorAll('[data-vendor]'), function (row) {
+          var id = Number(row.dataset.vendor);
+          var was = d.vendors.filter(function (v) { return v.id === id; })[0];
+          var body = {};
+          var name = row.querySelector('.v-name').value.trim();
+          var kind = row.querySelector('.v-kind').value;
+          var phoneEl = row.querySelector('.v-phone');
+          var phone = phoneEl ? phoneEl.value.trim() : (was.phone || '');
+          var active = row.querySelector('[data-vactive]').dataset.vactive === '1';
+
+          if (name && name !== was.name) body.name = name;
+          if (kind !== (was.kind || '')) body.kind = kind || null;
+          if (phone !== (was.phone || '')) body.phone = phone || null;
+          if (active !== (Number(was.active) === 1)) body.active = active;
+          if (Object.keys(body).length) jobs.push({ id: id, body: body });
+        });
+
+        if (!jobs.length) return say('Nothing changed.', 'ok');
+        Promise.all(jobs.map(function (j) {
+          return api('/api/vendors/' + j.id, { method: 'PATCH', body: JSON.stringify(j.body) });
+        })).then(function () {
+          say(jobs.length + (jobs.length === 1 ? ' vendor' : ' vendors') + ' saved.', 'ok');
+          renderVendors();
+        }).catch(function (e) { say(e.message, 'err'); });
+      });
+    }).catch(function (e) {
+      $('mid').innerHTML = '<div class="empty">' + esc(e.message) + '</div>';
     });
   }
 

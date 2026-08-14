@@ -198,6 +198,12 @@
   .savehint {
     font:400 11px var(--font); color:var(--dim); margin:9px 0 2px;
   }
+  /* A small action that belongs to one row — removing a sublet line, say. */
+  .linebtn {
+    flex:none; font:400 11px var(--font); padding:4px 8px; border-radius:3px;
+    background:transparent; border:1px solid var(--line); color:var(--dim); cursor:pointer;
+  }
+  .linebtn:hover { border-color:var(--stopped); color:var(--stopped); }
 
   @media (max-width:1100px) {
     .mbody { grid-template-columns:1fr; }
@@ -454,6 +460,9 @@
   var api = Shell.api, esc = Shell.esc;
   var ME = null, CFG = null, FILES = [], STATUSES = [], GROUPS = [], LANES = [], STAFF = [];
   var DOCTYPES = [], OPEN = null, VIEW = 'table', MEDIA = [], LBAT = 0, LBPAGE = 1;
+  var SUBLET_STATES = ['scheduled', 'out', 'returned', 'invoiced'];
+  var SUBLET_SERVICES = ['ADAS calibration', 'Windshield / glass', 'Alignment', 'Mechanical', 'Other'];
+  var VENDOR_NAMES = [];
   /* Set while the browser is producing a printout, so the sheet can leave off
      what a paper list does not need. */
   var PRINTING = false;
@@ -568,12 +577,18 @@
     if (me.features.indexOf('ems') >= 0 && me.caps.acceptImports) $('importLink').hidden = false;
     return Promise.all([
       api('/api/config'),
-      api('/api/doc-types').catch(function () { return { types: [] }; })
+      api('/api/doc-types').catch(function () { return { types: [] }; }),
+      api('/api/sublet-services').catch(function () { return { services: [] }; }),
+      api('/api/vendors').catch(function () { return { vendors: [] }; })
     ]);
   }).then(function (r) {
     if (!r) return;
     CFG = r[0]; STATUSES = CFG.statuses; GROUPS = CFG.groups; LANES = CFG.lanes;
     STAFF = CFG.staff || []; DOCTYPES = r[1].types;
+    if (r[2].services && r[2].services.length) SUBLET_SERVICES = r[2].services;
+    /* Sublet vendors are typed, not picked — but the shop's own list is what
+       they are usually typing, so it fills the suggestions. */
+    VENDOR_NAMES = (r[3].vendors || []).map(function (v) { return v.name; });
 
     CFG.groups.forEach(function (g) {
       var o = document.createElement('option');
@@ -1084,7 +1099,12 @@
         (moved ? '<div class="sub">moved on</div>' : '') +
         '<div class="sub" style="margin-left:auto">' +
         (late ? late + ' past target' : 'all inside target') + '</div></div>' +
-        list.map(cycleRow).join('') + '</div>';
+        list.map(cycleRow).join('') +
+        /* A phone cannot read a six-column row, so each lane also carries cards.
+           `.cards` is hidden above the mobile breakpoint, so only one of the two
+           is ever on screen. */
+        '<div class="cards">' + list.map(cycleCard).join('') + '</div>' +
+        '</div>';
     }).join('');
 
     bindRows();
@@ -1093,6 +1113,36 @@
   function variance(f) {
     if (f.targetDays == null) return null;
     return f.daysInShop - f.targetDays;
+  }
+
+  /**
+   * The same file as a card, for a phone. It keeps the progression strip and the
+   * variance, because those are what the cycle view is for — the rest of the row
+   * is columns a phone has no width for.
+   */
+  function cycleCard(f) {
+    var segs = progressionFor(f);
+    var v = variance(f);
+    var over = v != null && v > 0;
+
+    return '<button class="card" data-id="' + f.id + '">' +
+      '<div class="cardtop"><div class="cardro">' + esc(f.ro) + '</div>' +
+      '<div class="carddays" style="color:' + AGE[f.age] + '">' + f.daysInShop + 'd' +
+      (f.targetDays ? ' of ' + f.targetDays : '') + '</div></div>' +
+      '<div class="cardveh">' + esc(f.vehicle || '—') +
+      (f.color ? ' · ' + esc(f.color) : '') + '</div>' +
+      '<div class="sub">' + esc([f.customer, f.insurer].filter(Boolean).join(' · ') || '') + '</div>' +
+      '<div class="progress" style="margin-top:9px">' + segs.map(function (s) {
+        return '<div class="pseg" style="background:' + s.tone + '" title="' + esc(s.title) + '"></div>';
+      }).join('') + '</div>' +
+      '<div class="cardline"><span style="font:500 12px var(--font);color:' + tone(f) + '">' +
+      esc(f.status || 'No status') + '</span>' +
+      (v == null
+        ? ''
+        : '<span style="font:500 11px var(--font);font-variant-numeric:tabular-nums;color:' +
+          (over ? 'var(--stopped)' : 'var(--done)') + '">' +
+          (v > 0 ? '+' : '') + v + 'd</span>') +
+      flagsFor(f) + '</div></button>';
   }
 
   function cycleRow(f) {
@@ -1697,18 +1747,61 @@
         'outcome. Supplement-to-approval time is what the cycle time report reads.</div>');
     }
 
-    if (d.sublets && d.sublets.length) {
-      L.push('<div class="sec">Sublet</div>');
-      d.sublets.forEach(function (x) {
-        L.push('<div class="log"><div class="log-b">' + esc(x.service) +
-          (x.vendor ? ' — ' + esc(x.vendor) : '') + '</div>' +
-          '<div class="log-m">' + esc(x.state) +
-          (x.out_at ? ' · out ' + shopDate(x.out_at) : '') +
-          (x.back_at ? ' · back ' + shopDate(x.back_at) : '') +
-          (ME.caps.money && x.cost_cents ? ' · ' + money(x.cost_cents) : '') + '</div></div>');
+    /* Sublet. A vehicle out for calibration or glass is still on the board —
+       this is the line that explains the day, so it has to be movable here. */
+    if (ME.features.indexOf('supp') >= 0) {
+      var maySub = ME.caps.manageParts && !r.voided_at;
+      var subs = d.sublets || [];
+      var subOut = subs.filter(function (x) { return x.state === 'out'; }).length;
+      var subCost = subs.reduce(function (a, x) { return a + Number(x.cost_cents || 0); }, 0);
+
+      L.push('<div class="sec">Sublet <span class="sub" style="text-transform:none;letter-spacing:0">' +
+        (subs.length
+          ? subs.length + ' on this file' + (subOut ? ', ' + subOut + ' out now' : '') +
+            (ME.caps.money && subCost ? ' · ' + money(subCost) : '')
+          : 'none on this file') + '</span></div>');
+
+      subs.forEach(function (x) {
+        L.push('<div class="log" style="display:flex;gap:10px;align-items:flex-start">' +
+          '<div style="min-width:0;flex:1">' +
+          '<div class="log-b">' + esc(x.service) + (x.vendor ? ' — ' + esc(x.vendor) : '') + '</div>' +
+          '<div class="log-m">' +
+          esc([x.out_at ? 'out ' + shopDate(x.out_at) : '',
+               x.back_at ? 'back ' + shopDate(x.back_at) : '',
+               x.po_number ? 'order ' + x.po_number : ''].filter(Boolean).join(' · ') ||
+              'no dates yet') +
+          (ME.caps.money && x.cost_cents ? ' · ' + money(x.cost_cents) : '') + '</div></div>' +
+          (maySub
+            ? '<select data-sublet="' + x.id + '" style="width:118px;flex:none">' +
+              SUBLET_STATES.map(function (s) {
+                return '<option value="' + s + '"' + (x.state === s ? ' selected' : '') + '>' +
+                  s.charAt(0).toUpperCase() + s.slice(1) + '</option>';
+              }).join('') + '</select>' +
+              '<button class="linebtn" data-subdel="' + x.id + '" title="Remove this sublet line">×</button>'
+            : '<span class="pill">' + esc(x.state) + '</span>') +
+          '</div>');
       });
-      L.push('<div class="sub" style="margin-top:8px">A vehicle out for calibration or glass is still ' +
-        'on the board — the sublet line is what explains the day.</div>');
+
+      if (maySub) {
+        L.push('<div class="row" style="margin-top:10px">' +
+          '<select id="subService" style="flex:1;min-width:130px">' +
+          SUBLET_SERVICES.map(function (s) {
+            return '<option value="' + esc(s) + '">' + esc(s) + '</option>';
+          }).join('') + '</select>' +
+          '<input type="text" id="subVendor" list="vendorNames" placeholder="Vendor" ' +
+          'style="flex:1;min-width:120px">' +
+          (ME.caps.money
+            ? '<input type="number" id="subCost" placeholder="Cost" step="0.01" style="width:96px">'
+            : '') +
+          '<button class="btn btn-ghost" id="addSublet">Add</button></div>' +
+          '<datalist id="vendorNames">' + (VENDOR_NAMES || []).map(function (n) {
+            return '<option value="' + esc(n) + '"></option>';
+          }).join('') + '</datalist>' +
+          '<div class="savehint">Scheduled while it is booked, out when it leaves, returned when it ' +
+          'is back. The dates stamp themselves.</div>');
+      } else if (subs.length) {
+        L.push('<div class="sub" style="margin-top:8px">Parts, estimators and managers move sublets.</div>');
+      }
     }
 
     /* Promises */
@@ -1989,6 +2082,36 @@
         api('/api/promises/' + cb.dataset.promise, {
           method: 'PATCH', body: JSON.stringify({ done: cb.checked })
         }).then(reopen).catch(function (e) { say(e.message, 'err'); });
+      });
+    });
+
+    /* ------------------------------------------------------------- sublet */
+
+    var asb = $('addSublet');
+    if (asb) asb.addEventListener('click', function () {
+      var cost = $('subCost');
+      api('/api/ro/' + OPEN + '/sublets', {
+        method: 'POST',
+        body: JSON.stringify({
+          service: $('subService').value,
+          vendor: $('subVendor').value.trim() || undefined,
+          costCents: cost && cost.value ? Math.round(Number(cost.value) * 100) : undefined
+        })
+      }).then(reopen).catch(function (e) { say(e.message, 'err'); });
+    });
+
+    Array.prototype.forEach.call(document.querySelectorAll('[data-sublet]'), function (sel) {
+      sel.addEventListener('change', function () {
+        api('/api/sublets/' + sel.dataset.sublet, {
+          method: 'PATCH', body: JSON.stringify({ state: sel.value })
+        }).then(reopen).catch(function (e) { say(e.message, 'err'); });
+      });
+    });
+
+    Array.prototype.forEach.call(document.querySelectorAll('[data-subdel]'), function (b) {
+      b.addEventListener('click', function () {
+        api('/api/sublets/' + b.dataset.subdel, { method: 'DELETE' })
+          .then(reopen).catch(function (e) { say(e.message, 'err'); });
       });
     });
 
