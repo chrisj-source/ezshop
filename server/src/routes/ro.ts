@@ -5,6 +5,33 @@ import { requireCompany, requireFeature, Ctx } from '../middleware/context';
 import { canMoveTo, scrubMoney } from '../permissions';
 import { notify } from '../notify';
 
+/** Anything that stops this file being closed. Empty means it can be. */
+function closeBlockers(
+  ro: RowDataPacket,
+  parts: RowDataPacket[],
+  sublets: RowDataPacket[]
+): Array<{ what: string; where: string }> {
+  const out: Array<{ what: string; where: string }> = [];
+  if (!Number(ro.amount_cents)) {
+    out.push({ what: 'No approval amount on the file.', where: 'Money block' });
+  }
+  const onOrder = parts.filter(p => ['ordered', 'partial', 'backordered'].includes(String(p.state))).length;
+  if (onOrder) {
+    out.push({
+      what: `${onOrder} parts line${onOrder === 1 ? '' : 's'} still on order.`,
+      where: 'Parts block'
+    });
+  }
+  const outAt = sublets.filter(s => ['scheduled', 'out'].includes(String(s.state))).length;
+  if (outAt) {
+    out.push({
+      what: `${outAt} sublet${outAt === 1 ? '' : 's'} not returned.`,
+      where: 'Sublet block'
+    });
+  }
+  return out;
+}
+
 export async function registerRepairOrders(app: FastifyInstance): Promise<void> {
 
   /** One repair order, everything the drawer shows. */
@@ -81,7 +108,13 @@ export async function registerRepairOrders(app: FastifyInstance): Promise<void> 
         (ctx.caps.viewPaperwork || d.is_pdf !== 1)),
       voids,
       insurers,
-      canVoid: ctx.caps.voidRepairOrders
+      canVoid: ctx.caps.voidRepairOrders,
+      canClose: ctx.caps.closeRepairOrders,
+      /* What would stop a close, worked out here so the file shows it rather than
+         the close finding out on submit. The approval amount is the hard check;
+         parts on order and an unreturned sublet are the two that catch a file
+         being closed while money is still going out. */
+      closeBlockers: closeBlockers(ro, parts, sublets)
     };
   });
 

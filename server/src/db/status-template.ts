@@ -18,6 +18,7 @@ export const LANES: LaneDef[] = [
   { key: 'prep',       name: 'Prep',       gate: 'no',  owner: 'paint tech',  mod: 'refinish' },
   { key: 'paint',      name: 'Paint',      gate: 'no',  owner: 'paint tech',  mod: 'refinish' },
   { key: 'reassembly', name: 'Reassembly', gate: 'yes', owner: 'r&i tech',    mod: 'body' },
+  { key: 'sublet',     name: 'Sublet',     gate: 'no',  owner: 'parts manager', mod: 'sublet' },
   { key: 'buff',       name: 'Buff',       gate: 'no',  owner: 'paint tech',  mod: 'refinish' },
   { key: 'detail',     name: 'Detail',     gate: 'no',  owner: 'detail tech', mod: 'detail' }
 ];
@@ -30,6 +31,7 @@ export const LANE_GROUPS = [
   { id: 'body',       name: 'Body',       lanes: ['body'],          note: 'Conventional repair. Gated on parts by default.' },
   { id: 'refinish',   name: 'Refinish',   lanes: ['prep', 'paint'], note: 'Prep and paint share a group and a department but keep separate lanes, so a car can sit in prep without blocking the booth.' },
   { id: 'reassembly', name: 'Reassembly', lanes: ['reassembly'],    note: 'Gated on parts — this is where a missing clip stops the file.' },
+  { id: 'sublet',     name: 'Sublet',     lanes: ['sublet'],        note: 'A car out at a vendor. The lane says where the car is; the sublet lines on the file say what is owed and to whom.' },
   { id: 'buff',       name: 'Buff',       lanes: ['buff'],          note: '' },
   { id: 'detail',     name: 'Detail',     lanes: ['detail'],        note: '' }
 ];
@@ -106,7 +108,24 @@ const G_TAIL = [
   }
 ];
 
+/**
+ * Sublet does not follow the awaiting / working / complete shape: a car waits to
+ * go, goes, is worked on, and then rests until somebody moves it along. At
+ * Sublet is the one lane status that does not count toward cycle time — the car
+ * is off site and the day is not the shop's.
+ */
+const SUBLET_SLOTS: SlotRow[] = [
+  ['lane.sublet.awaiting', 'Awaiting Sublet', 'Waiting on outside work', 'queue', 'parts manager', '1d', '2d', '', 'sublet'],
+  ['lane.sublet.at', 'At Sublet', 'Out for outside work', 'queue', 'parts manager', '2d', '4d', '', 'sublet'],
+  ['lane.sublet.working', 'Working Sublet', 'Outside work under way', 'active', 'parts manager', '2d', '4d', '', 'sublet'],
+  ['lane.sublet.complete', 'Sublet Complete', 'Outside work done', 'complete', 'parts manager', '1d', '2d', '', 'sublet']
+];
+
+/** Statuses that do not count toward cycle time, by slot. */
+export const OFF_CLOCK_SLOTS = ['lane.sublet.at'];
+
 function laneSlots(key: string): SlotRow[] {
+  if (key === 'sublet') return SUBLET_SLOTS;
   const l = LANES.find(x => x.key === key)!;
   const base: SlotRow[] = [
     [`lane.${key}.awaiting`, `Awaiting ${l.name}`, `In line for ${l.name.toLowerCase()}`, 'queue', l.owner, '1d', '2d', '', l.mod],
@@ -128,9 +147,9 @@ export type ShopType = 'pdr' | 'collision' | 'both' | 'detail';
 
 /** Which lanes a shop type starts with, and whether it deals with insurance. */
 export const TEMPLATES: Record<ShopType, { lanes: string[]; insurance: boolean }> = {
-  pdr:       { lanes: ['pdr', 'detail'], insurance: true },
-  collision: { lanes: ['body', 'prep', 'paint', 'reassembly', 'buff', 'detail'], insurance: true },
-  both:      { lanes: ['pdr', 'body', 'prep', 'paint', 'reassembly', 'buff', 'detail'], insurance: true },
+  pdr:       { lanes: ['pdr', 'sublet', 'detail'], insurance: true },
+  collision: { lanes: ['body', 'prep', 'paint', 'reassembly', 'sublet', 'buff', 'detail'], insurance: true },
+  both:      { lanes: ['pdr', 'body', 'prep', 'paint', 'reassembly', 'sublet', 'buff', 'detail'], insurance: true },
   detail:    { lanes: ['detail'], insurance: false }
 };
 

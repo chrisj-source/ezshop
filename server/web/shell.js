@@ -15,6 +15,7 @@ window.Shell = (function () {
     { key: 'clients',  href: '/clients.html',  label: 'Clients',  feature: 'clients' },
     { key: 'schedule', href: '/schedule.html', label: 'Schedule', feature: 'sched' },
     { key: 'import',   href: '/import.html',   label: 'Import',   feature: 'ems',     cap: 'acceptImports' },
+    { key: 'closed',   href: '/closed.html',   label: 'Closed',   feature: 'board',   cap: 'closeRepairOrders' },
     { key: 'reports',  href: '/reports.html',  label: 'Reports',  feature: 'reports', cap: 'viewReports' },
     { key: 'sales',    href: '/sales.html',    label: 'Sales',    feature: 'msales',  cap: 'manageLeads' },
     { key: 'checkin',  href: '/checkin.html',  label: 'Check-in', feature: 'mcheck' },

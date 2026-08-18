@@ -335,6 +335,38 @@
     #fPrint { display:none; }
     .cardsum b { font:500 12px var(--font); font-variant-numeric:tabular-nums; color:var(--text); }
   }
+
+  /* Sublets needed — under the cycle lanes, on the same column grid. */
+  .subhead {
+    display:flex; align-items:center; gap:11px; padding:9px 18px; margin-top:16px;
+    background:var(--surf); border-top:1px solid var(--whisper); border-bottom:1px solid var(--whisper);
+  }
+  .subttl { font:500 12px var(--font); letter-spacing:.06em; text-transform:uppercase; color:var(--acc2); }
+  .subnote { font:400 11px var(--font); color:var(--dim); }
+  .submeta { margin-left:auto; display:flex; gap:16px; font:400 11px var(--font); color:var(--muted); }
+  .subgrid {
+    display:grid; grid-template-columns:minmax(180px,1.3fr) minmax(200px,1.4fr) 118px 108px 96px;
+    gap:14px; align-items:center; padding:0 18px;
+  }
+  .subghead { height:26px; }
+  .subghead > div { font:600 8.5px var(--font); letter-spacing:.12em; text-transform:uppercase; color:var(--dim); }
+  .subrow { height:42px; border-bottom:1px solid var(--whisper); cursor:pointer; }
+  .subrow:hover { background:var(--whisper); }
+  .subrow.needed { background:rgba(217,164,65,.06); }
+  .subrow.needed:hover { background:rgba(217,164,65,.12); }
+  .subveh { font:400 12px var(--font); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .subro { font:400 10px var(--font); font-variant-numeric:tabular-nums; color:var(--dim);
+           white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .subcell { font:400 11px var(--font); color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .subnum { font:400 11px var(--font); font-variant-numeric:tabular-nums; color:var(--muted); }
+  .subflag {
+    font:600 8px var(--font); letter-spacing:.09em; text-transform:uppercase;
+    padding:2px 5px; border:1px solid var(--acc); border-radius:3px; color:var(--acc); white-space:nowrap;
+  }
+  @media (max-width:900px) {
+    .subgrid { grid-template-columns:1fr 1fr 96px; }
+    .subgrid > div:nth-child(4), .subgrid > div:nth-child(5) { display:none; }
+  }
 </style>
 </head>
 <body>
@@ -417,6 +449,7 @@
       <div>Days</div><div style="text-align:right">Variance</div><div class="writein"></div>
     </div>
     <div id="cycleBody"></div>
+    <div id="subletBlock"></div>
   </div>
 </main>
 
@@ -517,6 +550,11 @@
     if (c == null) return '—';
     return '$' + (c / 100).toLocaleString('en-US',
       { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+  /** Today in the browser's own day, for the close-date default. */
+  function isoToday() {
+    var d = new Date(), p = function (n) { return String(n).padStart(2, '0'); };
+    return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
   }
   function money0(c) {
     if (c == null) return '—';
@@ -662,6 +700,83 @@
   }
 
   /** The picked technician, as { userId, position, lanes } — or null. */
+  /**
+   * Sublets needed — every live sublet line in the shop, under the lanes. The
+   * lane says where the car is; this says what is owed and to whom, so the desk
+   * can work the list without opening ten files. Reads the same lines the file's
+   * sublet block edits; invoiced lines drop off.
+   */
+  var SUBLETS = null;
+
+  function loadSublets() {
+    return api('/api/sublets').then(function (d) {
+      SUBLETS = d;
+      if (VIEW === 'cycle') renderSublets();
+    }).catch(function (e) {
+      if (e.message !== 'signed out') SUBLETS = { rows: [] };
+    });
+  }
+
+  var SUB_TONE = {
+    scheduled: 'var(--blocked)', out: 'var(--move)', returned: 'var(--done)'
+  };
+  var SUB_WORD = { scheduled: 'To send', out: 'At sublet', returned: 'Back' };
+
+  function renderSublets() {
+    var el = $('subletBlock');
+    if (!el) return;
+    if (!SUBLETS) { el.innerHTML = ''; return; }
+
+    var rows = SUBLETS.rows || [];
+    if (!rows.length) {
+      el.innerHTML = '<div class="subhead"><div class="subttl">Sublets needed</div>' +
+        '<div class="subnote">Nothing out and nothing waiting to go.</div></div>';
+      return;
+    }
+
+    var meta = [];
+    if (SUBLETS.needed) {
+      meta.push('<span style="color:var(--acc)">' + SUBLETS.needed + ' to send' +
+        (SUBLETS.noVendor ? ' · ' + SUBLETS.noVendor + ' with no vendor named' : '') + '</span>');
+    }
+    if (SUBLETS.out) meta.push('<span>' + SUBLETS.out + ' out</span>');
+
+    el.innerHTML =
+      '<div class="subhead">' +
+        '<div class="subttl">Sublets needed</div>' +
+        '<div class="subnote">' + rows.length + (rows.length === 1 ? ' line' : ' lines') + '</div>' +
+        '<div class="submeta">' + meta.join('') + '</div>' +
+      '</div>' +
+      '<div class="subgrid subghead"><div>Vehicle</div><div>Service · vendor</div>' +
+        '<div>State</div><div>Out · back</div><div style="text-align:right">Cost</div></div>' +
+      rows.map(function (s) {
+        var tone = SUB_TONE[s.state] || 'var(--dim)';
+        return '<div class="subgrid subrow' + (s.state === 'scheduled' ? ' needed' : '') +
+            '" data-ro="' + s.ro_id + '">' +
+          '<div style="min-width:0"><div class="subveh">' + esc(s.vehicle || '—') + '</div>' +
+            '<div class="subro">' + esc(s.ro_number) +
+            (s.status_label ? ' · ' + esc(s.status_label) : '') + '</div></div>' +
+          '<div class="subcell"><span style="color:var(--text)">' + esc(s.service) + '</span> ' +
+            esc(s.vendor || 'Vendor TBD') +
+            (s.vendor ? '' : ' <span class="subflag">name one</span>') + '</div>' +
+          '<div class="row" style="gap:8px;align-items:center">' +
+            '<div style="width:3px;height:18px;border-radius:1px;background:' + tone + '"></div>' +
+            '<span style="font:400 11px var(--font);color:' + tone + '">' +
+            (SUB_WORD[s.state] || s.state) + '</span></div>' +
+          '<div class="subnum">' + (s.out_at ? String(s.out_at).slice(5, 10) : '—') + ' · ' +
+            (s.back_at ? String(s.back_at).slice(5, 10) : '—') + '</div>' +
+          '<div class="subnum" style="text-align:right">' +
+            (s.cost_cents === undefined ? '—' : money(s.cost_cents)) + '</div>' +
+        '</div>';
+      }).join('');
+
+    Array.prototype.forEach.call(el.querySelectorAll('.subrow'), function (rowEl) {
+      rowEl.addEventListener('click', function () {
+        openRo(Number(rowEl.getAttribute('data-ro')));
+      });
+    });
+  }
+
   function pickedTech() {
     var v = $('fTech').value;
     if (!v || v === 'none') return null;
@@ -690,6 +805,7 @@
   }
 
   function load() {
+    loadSublets();
     var closed = $('fClosed').checked ? '?closed=1' : '';
     return Promise.all([api('/api/board' + closed), api('/api/board/summary')])
       .then(function (r) { FILES = r[0].files; renderKpis(r[1]); render(); });
@@ -1082,6 +1198,7 @@
 
     if (!order.length) {
       $('cycleBody').innerHTML = '<div class="empty">Nothing to show.</div>';
+      renderSublets();
       return;
     }
 
@@ -1901,6 +2018,49 @@
 
     var LAST = [];
 
+    /* Closing a file puts its money on the books and takes the car off the
+       production schedule. The close date is set by hand and can be moved
+       afterwards from the Closed screen — that is what books it into a month. */
+    if (d.canClose && !r.voided_at) {
+      if (r.close_date) {
+        LAST.push('<div class="sec">Closed</div>');
+        LAST.push('<div class="stack">' +
+          '<div class="row" style="gap:9px;align-items:baseline">' +
+          '<span class="flag" style="color:' + (r.paid ? 'var(--done)' : 'var(--stopped)') +
+            ';border:1px solid ' + (r.paid ? 'var(--done)' : 'var(--stopped)') + '">' +
+            (r.paid ? 'paid' : 'unpaid') + '</span>' +
+          '<span style="font:400 11.5px var(--font);color:var(--muted)">Booked to ' +
+            esc(String(r.close_date).slice(0, 10)) + '</span></div>' +
+          '<span class="sub" style="text-transform:none;letter-spacing:0">Move the date or change ' +
+          'the payment on <a href="/closed.html">Closed files</a>.</span></div>');
+      } else if ((d.closeBlockers || []).length) {
+        LAST.push('<div class="sec">Close this file</div>');
+        LAST.push('<div class="stack" style="border-color:var(--stopped)">' +
+          '<span class="sub" style="text-transform:none;letter-spacing:0;color:var(--stopped)">' +
+          ((d.closeBlockers || []).length === 1 ? 'One thing first' : 'Some things first') + '</span>' +
+          (d.closeBlockers || []).map(function (x) {
+            return '<div style="font:400 11.5px/1.45 var(--font);color:var(--text)">· ' +
+              esc(x.what) + ' <span style="color:var(--dim)">' + esc(x.where) + '</span></div>';
+          }).join('') + '</div>');
+      } else {
+        LAST.push('<div class="sec">Close this file</div>');
+        LAST.push('<div class="stack">' +
+          '<span class="sub" style="text-transform:none;letter-spacing:0">Books ' +
+          esc(money(r.amount_cents)) + ' to the close date and takes the car off the production ' +
+          'schedule. Marking it unpaid still closes it — it shows as unpaid on the closed board ' +
+          'so it can be chased.</span>' +
+          '<div class="row" style="gap:9px;flex-wrap:wrap">' +
+          '<label class="row" style="gap:7px;align-items:center">' +
+          '<span class="sub" style="text-transform:none;letter-spacing:0">Close date</span>' +
+          '<input type="date" id="clDate" value="' + esc(isoToday()) + '"></label>' +
+          '<select id="clPaid"><option value="1">Paid</option>' +
+          '<option value="0">Not paid</option></select></div>' +
+          '<div class="row" style="justify-content:flex-end">' +
+          '<button class="btn btn-solid" id="doClose">Close RO ' + esc(r.ro_number) +
+          '</button></div></div>');
+      }
+    }
+
     if (r.voided_at && d.canVoid) {
       LAST.push('<div class="sec">Bring it back</div>');
       LAST.push('<div class="stack">' +
@@ -2036,6 +2196,25 @@
       api('/api/ro/' + OPEN + '/status', {
         method: 'POST', body: JSON.stringify({ slot: slot || undefined, note: note || undefined })
       }).then(reopen).catch(function (e) { say(e.message, 'err'); });
+    });
+
+    var dc = $('doClose');
+    if (dc) dc.addEventListener('click', function () {
+      var paid = $('clPaid').value === '1';
+      var date = $('clDate').value;
+      if (!date) return say('Pick a close date.', 'err');
+      dc.disabled = true;
+      api('/api/ro/' + OPEN + '/close', {
+        method: 'POST', body: JSON.stringify({ paid: paid, closeDate: date })
+      }).then(function () {
+        dc.disabled = false;
+        say('Closed and booked to ' + date + '.', 'ok');
+        closeRo();
+        load();
+      }).catch(function (e) {
+        dc.disabled = false;
+        say(e.message, 'err');
+      });
     });
 
     var dv = $('doVoid');

@@ -75,12 +75,126 @@
       min-width:0;
     }
     .pgrid > .hide-md, .prow > .hide-md { display:none; }
+    /* Six visible cells into six tracks: .hide-md removes three of the nine. */
     .lgrid {
-      grid-template-columns:minmax(140px,1fr) 96px 54px 92px 150px;
+      grid-template-columns:22px minmax(130px,1fr) 52px 92px 74px 88px 150px;
       padding-left:24px; min-width:0;
     }
     .lgrid > .hide-md { display:none; }
     main { overflow-x:visible; }
+    .lines { overflow-x:visible; }
+  }
+
+  /* ------------------------------------------------------------ phone
+     Below 760 the nine-column table has no honest form. Each file becomes a
+     card and each part line a stacked card; no sideways scroll anywhere. */
+  @media (max-width:760px) {
+    .phead { display:none; }
+    .pgrid { padding:0; gap:0; }
+    .grouphead { padding:8px 14px; }
+    .grouphead .sub:last-child { display:none; }
+
+    .prow[data-ro] {
+      display:grid; height:auto; padding:11px 14px 12px; gap:5px 10px;
+      grid-template-columns:14px minmax(0,1fr) auto; align-items:start;
+      grid-template-areas:
+        "car ro    days"
+        "car veh   money"
+        "car stat  stat";
+    }
+    .prow[data-ro] > div:nth-child(1) { grid-area:car; align-self:center; }
+    .prow[data-ro] > div:nth-child(2) { grid-area:ro; }
+    .prow[data-ro] > div:nth-child(3) { grid-area:veh; }
+    .prow[data-ro] > div:nth-child(4) { grid-area:stat; }
+    .prow[data-ro] > div:nth-child(6) { grid-area:days; }
+    .prow[data-ro] > div:nth-child(6) > div { justify-content:flex-end; }
+    .prow[data-ro] > div:nth-child(8) { grid-area:money; align-self:end; }
+    .prow[data-ro] > div:nth-child(4) > div:first-child { flex-wrap:wrap; }
+    .prow[data-ro] .segs { max-width:none; min-width:80px; }
+
+    /* Part lines: description, then a meta run, then the actions on their own
+       row at a thumb-sized target. Part number and type come back — the parts
+       desk needs them more on a phone than at a screen. */
+    .lhead { display:none; }
+    .lines { padding:0 0 4px; }
+    .lines > .row { padding:8px 14px 10px; }
+    .lgrid {
+      display:flex; flex-wrap:wrap; align-items:center; gap:4px 10px;
+      height:auto; padding:10px 14px 11px; min-width:0;
+    }
+    .lgrid > .hide-md { display:block; }
+    .lgrid > div:nth-child(1) { flex:none; min-width:14px; }
+    .lgrid > div:nth-child(2) { flex:1 1 auto; min-width:0; white-space:normal; }
+    .lgrid > div:nth-child(8) { margin-left:auto; }
+    .lgrid > div:nth-child(9) { flex:1 1 100%; flex-wrap:wrap; margin-top:2px; }
+    .lgrid .linebtn { min-height:44px; padding:0 14px; font-size:11.5px; }
+  }
+
+  /* ------------------------------------------------------- pull sheet */
+  .pmodal[hidden], .pmscrim[hidden] { display:none; }
+  .pmscrim { position:fixed; inset:0; background:rgba(9,13,20,.72); z-index:60; }
+  .pmodal {
+    position:fixed; z-index:61; left:50%; top:50%; transform:translate(-50%,-50%);
+    width:min(680px,calc(100vw - 24px)); max-height:min(84vh,900px);
+    display:flex; flex-direction:column;
+    background:var(--bg); border:1px solid var(--line); border-radius:8px;
+    box-shadow:0 24px 60px rgba(0,0,0,.5);
+  }
+  .pmhead { padding:14px 16px 12px; box-shadow:inset 0 -1px 0 var(--line); }
+  .pmbody { flex:1; overflow-y:auto; padding:4px 16px 12px; }
+  .pmfoot {
+    display:flex; align-items:center; gap:10px; padding:12px 16px;
+    box-shadow:inset 0 1px 0 var(--line);
+  }
+  .pmveh {
+    display:flex; align-items:center; gap:9px; padding:11px 0 9px;
+    border-bottom:1px solid var(--whisper); margin-top:6px;
+  }
+  .pmline {
+    display:grid; grid-template-columns:20px minmax(0,1fr) auto; gap:4px 10px;
+    align-items:start; padding:8px 0; border-bottom:1px solid var(--whisper);
+  }
+  .pmodal input[type=checkbox] { width:16px; height:16px; accent-color:var(--acc); margin:2px 0 0; }
+
+  #printroot { display:none; }
+
+  @media print {
+    html, body {
+      display:block; overflow:visible; height:auto;
+      background:#fff; color:#111;
+    }
+    body > *:not(#printroot) { display:none !important; }
+    #printroot { display:block; }
+
+    @page { size:letter portrait; margin:.5in; }
+
+    .sheetpage { break-after:page; page-break-after:always; }
+    .sheetpage:last-child { break-after:auto; page-break-after:auto; }
+    .sheettop {
+      display:flex; align-items:baseline; justify-content:space-between;
+      border-bottom:1.5px solid #111; padding-bottom:6px;
+    }
+    .sheetco { font:600 11pt var(--font); letter-spacing:.02em; }
+    .sheetkind { font:600 8.5pt var(--font); letter-spacing:.14em; text-transform:uppercase; }
+    .sheetro { font:600 17pt var(--font); margin:12px 0 2px; }
+    .sheetveh { font:400 12pt var(--font); }
+    .sheetvin { font:400 9.5pt var(--font); letter-spacing:.06em; margin-top:3px; color:#333; }
+    .sheettbl { width:100%; border-collapse:collapse; margin-top:14px; }
+    .sheettbl thead { display:table-header-group; }
+    .sheettbl th {
+      font:600 7.5pt var(--font); letter-spacing:.11em; text-transform:uppercase;
+      text-align:left; padding:0 6px 5px; border-bottom:1px solid #111; color:#111;
+    }
+    .sheettbl td {
+      font:400 10pt var(--font); padding:7px 6px; border-bottom:1px solid #ccc;
+      vertical-align:top; color:#111;
+    }
+    .sheettbl tr { break-inside:avoid; page-break-inside:avoid; }
+    .sheettbl .n { text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap; }
+    .sheettbl tfoot td {
+      font-weight:600; border-top:1.5px solid #111; border-bottom:none; padding-top:8px;
+    }
+    .sheetfoot { font:400 8.5pt var(--font); color:#444; margin-top:10px; }
   }
 </style>
 </head>
@@ -127,6 +241,31 @@
   </div>
   <div class="dbody" id="dBody"></div>
 </aside>
+
+<div class="pmscrim" id="pmScrim" hidden></div>
+<div class="pmodal" id="pmodal" hidden role="dialog" aria-modal="true" aria-label="Print pull sheet">
+  <div class="pmhead">
+    <div style="display:flex;align-items:flex-start;gap:12px">
+      <div style="flex:1;min-width:0">
+        <div style="font:500 15px var(--font)">Print pull sheet</div>
+        <div class="sub" id="pmScope">—</div>
+      </div>
+      <button class="close" id="pmClose" aria-label="Close">&times;</button>
+    </div>
+    <div class="segctl" id="pmMode" style="margin-top:11px;width:max-content">
+      <button data-mode="order" class="sel">To order</button>
+      <button data-mode="ordered">Ordered</button>
+    </div>
+  </div>
+  <div class="pmbody" id="pmBody"></div>
+  <div class="pmfoot">
+    <button class="btn btn-solid" id="pmPrint">Print</button>
+    <button class="btn btn-ghost" id="pmCancel">Cancel</button>
+    <span class="sub" id="pmCount" style="margin:0 0 0 auto"></span>
+  </div>
+</div>
+
+<div id="printroot"></div>
 
 <script src="/shell.js?v=7"></script>
 <script>
@@ -820,6 +959,192 @@
     });
   }
 
+  /* ------------------------------------------------------- pull sheet */
+
+  /**
+   * A sheet is a vendor and receiving document, not the screen with its chrome
+   * hidden. One page per vehicle, only the lines the desk ticked, on white.
+   */
+  var PM_MODES = {
+    order: { t: 'To order', states: ['need'],
+      note: 'nothing ordered yet — what to buy' },
+    ordered: { t: 'Ordered', states: ['ordered', 'partial', 'backordered'],
+      note: 'out at a vendor — what to check in' }
+  };
+  var PM = { mode: 'order', off: {} };
+
+  /* One vehicle if the desk has a single file open, otherwise everything the
+     filters left on screen. */
+  function pmScope() {
+    var files = byRo();
+    if (!ALL_OPEN) {
+      var open = files.filter(function (f) { return OPEN[f.roId]; });
+      if (open.length === 1) return open;
+    }
+    return files;
+  }
+
+  function pmGroups() {
+    var states = PM_MODES[PM.mode].states;
+    return pmScope().map(function (f) {
+      return { f: f, lines: f.lines.filter(function (l) { return states.indexOf(l.state) >= 0; }) };
+    }).filter(function (g) { return g.lines.length; });
+  }
+
+  /* Ticks are remembered per mode, so flipping the toggle does not lose them. */
+  function pmOn(l) { return !PM.off[PM.mode + ':' + l.id]; }
+  function pmSet(id, on) {
+    var k = PM.mode + ':' + id;
+    if (on) delete PM.off[k]; else PM.off[k] = 1;
+  }
+
+  function partType(t) {
+    if (!t) return '—';
+    var s = String(t);
+    return /^oem$/i.test(s) ? 'OEM' : s.charAt(0).toUpperCase() + s.slice(1);
+  }
+
+  function openPrint() {
+    PM.off = {};
+    $('pmScrim').hidden = false;
+    $('pmodal').hidden = false;
+    renderPm();
+  }
+
+  function closePrint() {
+    $('pmScrim').hidden = true;
+    $('pmodal').hidden = true;
+  }
+
+  function renderPm() {
+    var groups = pmGroups(), scope = pmScope();
+
+    $('pmScope').textContent = (scope.length === 1
+      ? scope[0].ro + ' · ' + (scope[0].vehicle || '')
+      : scope.length + ' vehicles matching the filters') +
+      ' · ' + PM_MODES[PM.mode].note;
+
+    if (!groups.length) {
+      $('pmBody').innerHTML = '<div class="empty" style="padding:40px 8px">Nothing ' +
+        (PM.mode === 'order' ? 'left to order' : 'on order') + ' in this scope.</div>';
+      $('pmCount').textContent = '';
+      $('pmPrint').disabled = true;
+      return;
+    }
+    $('pmPrint').disabled = false;
+
+    var total = 0, on = 0;
+    $('pmBody').innerHTML = groups.map(function (g) {
+      var gOn = g.lines.filter(pmOn).length;
+      total += g.lines.length; on += gOn;
+      var f = g.f;
+
+      return '<div class="pmveh">' +
+        '<input type="checkbox" data-pmveh="' + f.roId + '"' +
+        (gOn === g.lines.length ? ' checked' : '') + '>' +
+        '<div style="min-width:0;flex:1">' +
+        '<div style="font:500 12.5px var(--font)">' + esc(f.ro) + ' · ' +
+        esc(f.vehicle || '—') + (f.color ? ' · ' + esc(f.color) : '') + '</div>' +
+        '<div class="sub" style="margin:2px 0 0">' +
+        (f.vin ? 'VIN ' + esc(f.vin) : 'no VIN on file') + '</div></div>' +
+        '<div class="sub" style="margin:0">' + gOn + ' of ' + g.lines.length + '</div></div>' +
+        g.lines.map(function (l) {
+          return '<label class="pmline">' +
+            '<input type="checkbox" data-pmline="' + l.id + '"' + (pmOn(l) ? ' checked' : '') + '>' +
+            '<div style="min-width:0">' +
+            '<div style="font:400 12px var(--font)">' + esc(l.description) + '</div>' +
+            '<div class="sub" style="margin:2px 0 0;white-space:normal">' +
+            esc([l.part_number || 'no part #', partType(l.part_type), 'qty ' + l.qty,
+              l.vendor_name].filter(Boolean).join(' · ')) + '</div></div>' +
+            (ME.caps.money
+              ? '<div class="cellnum" style="font-weight:400">' + money(l.price_cents) +
+                '<div class="sub" style="margin:2px 0 0">' +
+                (Number(l.cost_cents) ? money(l.cost_cents) + ' cost' : 'no cost') + '</div></div>'
+              : '<div></div>') +
+            '</label>';
+        }).join('');
+    }).join('');
+
+    $('pmCount').textContent = on + ' of ' + total + ' line' + (total === 1 ? '' : 's');
+
+    Array.prototype.forEach.call($('pmBody').querySelectorAll('[data-pmline]'), function (c) {
+      c.addEventListener('change', function () { pmSet(c.dataset.pmline, c.checked); renderPm(); });
+    });
+
+    Array.prototype.forEach.call($('pmBody').querySelectorAll('[data-pmveh]'), function (c) {
+      var g = groups.filter(function (x) { return String(x.f.roId) === c.dataset.pmveh; })[0];
+      if (g) {
+        var n = g.lines.filter(pmOn).length;
+        c.indeterminate = n > 0 && n < g.lines.length;
+      }
+      c.addEventListener('change', function () {
+        if (g) g.lines.forEach(function (l) { pmSet(l.id, c.checked); });
+        renderPm();
+      });
+    });
+  }
+
+  function sheetsHtml() {
+    var kind = PM_MODES[PM.mode].t;
+    var co = (ME.company && ME.company.name) || 'Easy Shop';
+    var when = new Date().toLocaleDateString('en-US',
+      { year: 'numeric', month: 'short', day: 'numeric' });
+    var showCost = !!ME.caps.money;
+
+    return pmGroups().map(function (g) {
+      var lines = g.lines.filter(pmOn);
+      if (!lines.length) return '';
+      var f = g.f, list = 0, cost = 0;
+
+      var rows = lines.map(function (l) {
+        var q = Number(l.qty || 1);
+        list += Number(l.price_cents || 0) * q;
+        cost += Number(l.cost_cents || 0) * q;
+        return '<tr><td class="n">' + esc(String(l.line_no || '·')) + '</td>' +
+          '<td>' + esc(l.description) + '</td>' +
+          '<td>' + esc(l.part_number || '—') + '</td>' +
+          '<td>' + esc(partType(l.part_type)) + '</td>' +
+          '<td class="n">' + esc(String(l.qty)) + '</td>' +
+          '<td>' + esc(l.vendor_name || '—') + '</td>' +
+          (showCost
+            ? '<td class="n">' + money(l.price_cents) + '</td>' +
+              '<td class="n">' + (Number(l.cost_cents) ? money(l.cost_cents) : '—') + '</td>'
+            : '') + '</tr>';
+      }).join('');
+
+      return '<section class="sheetpage">' +
+        '<div class="sheettop"><div class="sheetco">' + esc(co) + '</div>' +
+        '<div class="sheetkind">Pull sheet · ' + esc(kind) + '</div></div>' +
+        '<div class="sheetro">RO ' + esc(f.ro) + '</div>' +
+        '<div class="sheetveh">' + esc(f.vehicle || '—') +
+        (f.color ? ' · ' + esc(f.color) : '') + '</div>' +
+        '<div class="sheetvin">VIN ' + esc(f.vin || '—') + '</div>' +
+        '<table class="sheettbl"><thead><tr>' +
+        '<th class="n">Line</th><th>Description</th><th>Part #</th><th>Type</th>' +
+        '<th class="n">Qty</th><th>Vendor</th>' +
+        (showCost ? '<th class="n">List</th><th class="n">Cost</th>' : '') +
+        '</tr></thead><tbody>' + rows + '</tbody>' +
+        (showCost
+          ? '<tfoot><tr><td colspan="6">' + lines.length + ' line' +
+            (lines.length === 1 ? '' : 's') + '</td><td class="n">' + money(list) +
+            '</td><td class="n">' + money(cost) + '</td></tr></tfoot>'
+          : '') +
+        '</table>' +
+        '<div class="sheetfoot">' + esc(co) + ' · printed ' + esc(when) + '</div>' +
+        '</section>';
+    }).join('');
+  }
+
+  function doPrint() {
+    var html = sheetsHtml();
+    if (!html) return;
+    $('printroot').innerHTML = html;
+    closePrint();
+    setTimeout(function () { window.print(); }, 40);
+  }
+
+  window.addEventListener('afterprint', function () { $('printroot').innerHTML = ''; });
+
   function closeDrawer() {
     $('scrim').classList.remove('open');
     $('drawer').classList.remove('open');
@@ -830,7 +1155,20 @@
   $('fVendor').addEventListener('change', render);
   $('fState').addEventListener('change', render);
   $('vendorsBtn').addEventListener('click', openVendors);
-  $('printBtn').addEventListener('click', function () { ALL_OPEN = true; render(); window.print(); });
+  $('printBtn').addEventListener('click', openPrint);
+  $('pmCancel').addEventListener('click', closePrint);
+  $('pmClose').addEventListener('click', closePrint);
+  $('pmScrim').addEventListener('click', closePrint);
+  $('pmPrint').addEventListener('click', doPrint);
+  Array.prototype.forEach.call($('pmMode').querySelectorAll('button'), function (b) {
+    b.addEventListener('click', function () {
+      PM.mode = b.dataset.mode;
+      Array.prototype.forEach.call($('pmMode').querySelectorAll('button'), function (x) {
+        x.classList.toggle('sel', x === b);
+      });
+      renderPm();
+    });
+  });
   $('expandAll').addEventListener('click', function () {
     ALL_OPEN = !ALL_OPEN;
     if (!ALL_OPEN) OPEN = {};
@@ -839,7 +1177,10 @@
   });
   $('scrim').addEventListener('click', closeDrawer);
   $('dClose').addEventListener('click', closeDrawer);
-  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeDrawer(); });
+  document.addEventListener('keydown', function (e) {
+    if (e.key !== 'Escape') return;
+    if (!$('pmodal').hidden) closePrint(); else closeDrawer();
+  });
 })();
 </script>
 </body>

@@ -412,7 +412,8 @@ export async function registerReports(app: FastifyInstance): Promise<void> {
              SUM(l.state = 'won') AS won,
              SUM(l.state = 'lost') AS lost
       FROM leads l LEFT JOIN staff sf ON sf.user_id = l.owner_user_id
-      WHERE l.received_at >= ? AND l.received_at < DATE_ADD(?, INTERVAL 1 DAY)
+      WHERE l.deleted_at IS NULL
+        AND l.received_at >= ? AND l.received_at < DATE_ADD(?, INTERVAL 1 DAY)
       GROUP BY l.owner_user_id, name ORDER BY leads DESC`,
       [r.from, r.to]);
 
@@ -487,13 +488,15 @@ export async function registerReports(app: FastifyInstance): Promise<void> {
              SUM(state = 'won') AS won, SUM(state = 'lost') AS lost,
              AVG(TIMESTAMPDIFF(HOUR, received_at, first_reply_at)) AS avg_reply_hours
       FROM leads
-      WHERE received_at >= ? AND received_at < DATE_ADD(?, INTERVAL 1 DAY)
+      WHERE deleted_at IS NULL
+        AND received_at >= ? AND received_at < DATE_ADD(?, INTERVAL 1 DAY)
       GROUP BY source ORDER BY leads DESC`, [r.from, r.to]);
 
     const lost = await tq<RowDataPacket[]>(ctx.company!.id, `
       SELECT COALESCE(lost_reason, 'Not recorded') AS reason, COUNT(*) AS n
       FROM leads
-      WHERE state = 'lost' AND received_at >= ? AND received_at < DATE_ADD(?, INTERVAL 1 DAY)
+      WHERE deleted_at IS NULL AND state = 'lost'
+        AND received_at >= ? AND received_at < DATE_ADD(?, INTERVAL 1 DAY)
       GROUP BY reason ORDER BY n DESC`, [r.from, r.to]);
 
     return { window: r, bySource, lostReasons: lost };

@@ -55,6 +55,7 @@ export async function registerBoard(app: FastifyInstance): Promise<void> {
         v.vin, v.year, v.make, v.model, v.color, v.plate, v.plate_state,
         s.label AS status_label, s.customer_label, s.group_id, s.lane_key, s.kind,
         s.age_yellow_hours, s.age_red_hours,
+        r.close_date, r.paid,
         g.label AS group_label,
         (SELECT COUNT(*) FROM parts_lines p
           WHERE p.ro_id = r.id AND p.gating = 1
@@ -149,7 +150,8 @@ export async function registerBoard(app: FastifyInstance): Promise<void> {
     const statuses = await tq<RowDataPacket[]>(ctx.company!.id, `
       SELECT s.slot_id, s.label, s.customer_label, s.group_id, s.lane_key, s.kind,
              s.owner_role, s.age_yellow_hours, s.age_red_hours, s.sort_order, s.is_terminal,
-             g.label AS group_label, g.sort_order AS group_order
+             r.close_date, r.paid,
+        g.label AS group_label, g.sort_order AS group_order
       FROM statuses s JOIN status_groups g ON g.group_id = s.group_id
       WHERE s.visible = 1
       ORDER BY g.sort_order, s.sort_order

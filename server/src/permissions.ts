@@ -59,6 +59,13 @@ const ACCEPT_IMPORT: Role[] = ['owner', 'estimator', 'production_manager'];
  */
 const VOID_RO: Role[] = ['owner'];
 
+/**
+ * Closing a file puts its money on the books, so it is the office and the people
+ * who answer for the books — owner, accounting, front office. Widen this list,
+ * not the endpoint.
+ */
+const CLOSE_RO: Role[] = ['owner', 'accounting', 'front_office'];
+
 export interface Caps {
   money: boolean;
   viewPaperwork: boolean;
@@ -72,6 +79,7 @@ export interface Caps {
   editAssignments: boolean;
   manageParts: boolean;
   manageLeads: boolean;
+  closeRepairOrders: boolean;
   viewReports: boolean;
   viewMoneyReports: boolean;
 }
@@ -104,6 +112,7 @@ export function capsForRoles(roles: Role[], opts: { techSeesOwnOnly: boolean }):
     editAssignments: any(['owner', 'production_manager', 'estimator']),
     manageParts: any(['owner', 'parts_manager', 'estimator', 'production_manager']),
     manageLeads: any(['owner', 'front_office', 'salesperson', 'estimator']),
+    closeRepairOrders: any(CLOSE_RO),
     viewReports: any(['owner', 'accounting', 'estimator', 'production_manager']),
     viewMoneyReports: any(MONEY)
   };

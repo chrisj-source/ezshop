@@ -224,7 +224,8 @@ export async function registerSales(app: FastifyInstance): Promise<void> {
       FROM leads l
       LEFT JOIN repair_orders r ON r.id = l.ro_id
       LEFT JOIN appointments a ON a.id = l.appointment_id
-      WHERE l.owner_user_id = ? AND l.received_at > DATE_SUB(NOW(), INTERVAL 60 DAY)
+      WHERE l.deleted_at IS NULL AND l.owner_user_id = ?
+        AND l.received_at > DATE_SUB(NOW(), INTERVAL 60 DAY)
       ORDER BY l.received_at DESC LIMIT 100`, [ctx.user.id]);
 
     const [sum] = await tq<RowDataPacket[]>(ctx.company!.id, `
@@ -232,7 +233,8 @@ export async function registerSales(app: FastifyInstance): Promise<void> {
              SUM(state = 'won') AS won,
              SUM(state = 'lost') AS lost
       FROM leads
-      WHERE owner_user_id = ? AND received_at > DATE_SUB(NOW(), INTERVAL 30 DAY)`, [ctx.user.id]);
+      WHERE deleted_at IS NULL AND owner_user_id = ?
+        AND received_at > DATE_SUB(NOW(), INTERVAL 30 DAY)`, [ctx.user.id]);
 
     return {
       opportunities: rows,

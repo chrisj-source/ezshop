@@ -74,12 +74,16 @@ export async function registerLeads(app: FastifyInstance): Promise<void> {
     if (!ctx) return;
     if (!requireFeature(ctx, 'leads', reply)) return;
 
-    const q = req.query as { state?: string; mine?: string; settled?: string };
+    const q = req.query as { state?: string; mine?: string; settled?: string; deleted?: string };
     const where: string[] = [];
     const params: unknown[] = [];
 
     if (q.state) { where.push('l.state = ?'); params.push(q.state); }
     else if (q.settled !== '1') where.push("l.state NOT IN ('won','lost')");
+
+    /* A deleted lead is off the list and out of the response clock, but the
+       record stays. deleted=1 shows them so one can be restored. */
+    where.push(q.deleted === '1' ? 'l.deleted_at IS NOT NULL' : 'l.deleted_at IS NULL');
 
     if (q.mine === '1') { where.push('l.owner_user_id = ?'); params.push(ctx.user.id); }
 
@@ -120,7 +124,7 @@ export async function registerLeads(app: FastifyInstance): Promise<void> {
              SUM(state = 'lost') AS lost,
              AVG(TIMESTAMPDIFF(HOUR, received_at, first_reply_at)) AS avg_reply_hours
       FROM leads
-      WHERE received_at > DATE_SUB(NOW(), INTERVAL 90 DAY)`);
+      WHERE deleted_at IS NULL AND received_at > DATE_SUB(NOW(), INTERVAL 90 DAY)`);
 
     const staff = await mq<RowDataPacket[]>(
       `SELECT u.id, u.name FROM memberships m JOIN users u ON u.id = m.user_id
@@ -316,6 +320,72 @@ export async function registerLeads(app: FastifyInstance): Promise<void> {
     });
 
     return { ok: true, id };
+  });
+
+  /**
+   * Delete a lead — soft, like a void. It comes off the list and out of the
+   * response clock; the record, its notes and its history stay and it can be
+   * restored. A converted lead belongs to an RO and cannot be deleted: mark it
+   * lost instead.
+   */
+  app.delete('/api/leads/:id', async (req, reply) => {
+    const ctx = requireCompany(req, reply);
+    if (!ctx) return;
+    if (!requireFeature(ctx, 'leads', reply)) return;
+    if (!ctx.caps.manageLeads) return reply.code(403).send({ error: 'Not permitted' });
+
+    const id = Number((req.params as { id: string }).id);
+    const b = (req.body ?? {}) as { reason?: string };
+    const cid = ctx.company!.id;
+
+    const lead = await tqOne<RowDataPacket>(cid,
+      `SELECT lead_number, ro_id, deleted_at FROM leads WHERE id = ?`, [id]);
+    if (!lead) return reply.code(404).send({ error: 'No such lead' });
+    if (lead.deleted_at) return reply.code(400).send({ error: 'That lead is already deleted.' });
+    if (lead.ro_id) {
+      return reply.code(400).send({
+        error: 'That lead was converted to a repair order, so it cannot be deleted. Mark it lost instead.'
+      });
+    }
+
+    const reason = (b.reason ?? '').trim().slice(0, 64) || 'No reason given';
+
+    await texec(cid,
+      `UPDATE leads SET deleted_at = NOW(), deleted_by = ?, delete_reason = ? WHERE id = ?`,
+      [ctx.user.id, reason, id]);
+    await texec(cid,
+      `INSERT INTO lead_events (lead_id, kind, body, user_id, user_name)
+       VALUES (?, 'auto', ?, ?, ?)`,
+      [id, `Lead deleted — ${reason}. Restorable.`, ctx.user.id, ctx.user.name]);
+    await texec(cid,
+      `INSERT INTO audit_log (user_id, user_name, entity, entity_id, action, detail)
+       VALUES (?, ?, 'lead', ?, 'delete', ?)`,
+      [ctx.user.id, ctx.user.name, id, JSON.stringify({ leadNumber: lead.lead_number, reason })]);
+
+    return { ok: true };
+  });
+
+  app.post('/api/leads/:id/restore', async (req, reply) => {
+    const ctx = requireCompany(req, reply);
+    if (!ctx) return;
+    if (!ctx.caps.manageLeads) return reply.code(403).send({ error: 'Not permitted' });
+
+    const id = Number((req.params as { id: string }).id);
+    const cid = ctx.company!.id;
+    const lead = await tqOne<RowDataPacket>(cid,
+      `SELECT lead_number, deleted_at FROM leads WHERE id = ?`, [id]);
+    if (!lead) return reply.code(404).send({ error: 'No such lead' });
+    if (!lead.deleted_at) return reply.code(400).send({ error: 'That lead is not deleted.' });
+
+    await texec(cid,
+      `UPDATE leads SET deleted_at = NULL, deleted_by = NULL, delete_reason = NULL WHERE id = ?`,
+      [id]);
+    await texec(cid,
+      `INSERT INTO lead_events (lead_id, kind, body, user_id, user_name)
+       VALUES (?, 'auto', 'Lead restored.', ?, ?)`,
+      [id, ctx.user.id, ctx.user.name]);
+
+    return { ok: true };
   });
 
   app.patch('/api/leads/:id', async (req, reply) => {

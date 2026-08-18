@@ -23,6 +23,7 @@ import { registerEms } from './routes/ems';
 import { registerLeads } from './routes/leads';
 import { registerScheduler } from './routes/scheduler';
 import { registerReports } from './routes/reports';
+import { registerClosed } from './routes/closed';
 import { registerSales } from './routes/sales';
 import { registerCalendar } from './routes/gcal';
 import { purgeExpiredSessions } from './auth/session';
@@ -66,6 +67,7 @@ async function main(): Promise<void> {
   await registerLeads(app);
   await registerScheduler(app);
   await registerReports(app);
+  await registerClosed(app);
   await registerSales(app);
   await registerCalendar(app);
 

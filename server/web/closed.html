@@ -1,0 +1,539 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1c2740">
+<title>Closed — Easy Shop</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/shell.css?v=7">
+<style>
+  .titlerow { display:flex; align-items:flex-end; gap:22px; padding:16px 18px 0; flex:none; flex-wrap:wrap; }
+  .titlerow h1 { font:500 18px var(--font); margin:0; }
+  .titlemeta { font:400 11.5px var(--font); color:var(--dim); margin-top:4px; }
+
+  .viewrow { display:flex; align-items:center; gap:3px; padding:14px 18px 0; flex:none; }
+  .viewtab {
+    font:400 12px var(--font); color:var(--dim); background:transparent; border:none;
+    border-bottom:2px solid transparent; padding:8px 13px; margin-bottom:-1px;
+  }
+  .viewtab.sel { color:var(--acc); font-weight:500; border-bottom-color:var(--acc); }
+
+  .ctrls { display:flex; align-items:center; gap:9px; padding:13px 18px; flex:none; flex-wrap:wrap; }
+  .ctrl {
+    display:flex; align-items:center; gap:7px; font:400 11.5px var(--font); color:var(--text);
+    background:var(--chip); border:1px solid var(--line); border-radius:4px; padding:6px 10px;
+  }
+  .ctrl input { background:transparent; border:none; color:var(--text); font:400 11.5px var(--font); width:104px; }
+  .ctrl select { background:transparent; border:none; color:var(--text); font:400 11.5px var(--font); }
+  .toggle {
+    font:400 11.5px var(--font); color:var(--muted); background:var(--chip);
+    border:1px solid var(--line); border-radius:4px; padding:7px 11px;
+  }
+  .toggle.on { color:var(--acc); border-color:var(--acc); background:rgba(217,164,65,.1); font-weight:500; }
+
+  .countline { display:flex; gap:24px; padding:0 18px 12px; font:400 11.5px var(--font); color:var(--muted); flex:none; flex-wrap:wrap; }
+  .countline .un { color:var(--stopped); }
+
+  .scroll { flex:1; min-height:0; overflow-y:auto; padding-bottom:28px; }
+
+  /* Closed board. Sorts like production; the columns a car needs once it is gone. */
+  .cgrid {
+    display:grid;
+    grid-template-columns:96px minmax(210px,1.5fr) minmax(130px,1fr) 108px 92px 84px 56px 108px 96px 106px;
+    column-gap:14px; align-items:center; padding:0 18px;
+  }
+  .chead { height:28px; background:var(--surf); position:sticky; top:0; z-index:2; }
+  .chead > div { font:600 8.5px var(--font); letter-spacing:.12em; text-transform:uppercase; color:var(--acc2); }
+  .chead .sortable { cursor:pointer; }
+  .chead .sortable.on { color:var(--acc); }
+  .crow { height:46px; border-bottom:1px solid var(--whisper); cursor:pointer; }
+  .crow:hover { background:var(--whisper); }
+  /* Unpaid tints the whole row, so an unpaid list reads at a glance. */
+  .crow.unpaid { background:rgba(208,126,111,.10); }
+  .crow.unpaid:hover { background:rgba(208,126,111,.16); }
+
+  .cro { font:500 12px var(--font); font-variant-numeric:tabular-nums; color:var(--acc2); }
+  .cveh { font:400 12px var(--font); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .csub { font:400 10px var(--font); color:var(--dim); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .ccell { font:400 11px var(--font); color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .cnum { font:400 11.5px var(--font); font-variant-numeric:tabular-nums; color:var(--muted); }
+  .camt { font:500 12px var(--font); font-variant-numeric:tabular-nums; text-align:right; }
+  .ptag {
+    font:500 8.5px var(--font); letter-spacing:.09em; text-transform:uppercase;
+    padding:3px 7px; border-radius:3px; justify-self:start;
+  }
+  .ptag.paid { color:#a9d8c2; background:rgba(111,174,140,.16); border:1px solid rgba(111,174,140,.34); }
+  .ptag.un { color:#f0bdb2; background:rgba(208,126,111,.2); border:1px solid rgba(208,126,111,.5); }
+  .cdate { display:flex; align-items:center; gap:6px; font:400 11.5px var(--font); font-variant-numeric:tabular-nums; color:var(--muted); }
+  .cdate .pen { color:var(--dim); font-size:10px; }
+  .crow:hover .pen { color:var(--acc); }
+
+  .grouphead {
+    display:flex; align-items:center; gap:11px; padding:0 18px; height:30px;
+    background:var(--chip); border-top:1px solid var(--whisper); border-bottom:1px solid var(--whisper);
+  }
+  .grouphead .g { font:500 9.5px var(--font); letter-spacing:.1em; text-transform:uppercase; }
+  .grouphead .n { font:400 10.5px var(--font); color:var(--dim); }
+  .grouphead .t { margin-left:auto; font:500 11px var(--font); font-variant-numeric:tabular-nums; color:var(--muted); }
+
+  /* Report */
+  .kpis { display:flex; gap:14px; padding:4px 18px 18px; flex-wrap:wrap; }
+  .kpi { flex:1; min-width:190px; padding:13px 15px; background:var(--surf); border:1px solid var(--line); border-radius:6px; }
+  .kpi .k { font:400 9.5px var(--font); letter-spacing:.08em; text-transform:uppercase; color:var(--dim); }
+  .kpi .v { font:500 21px/1.2 var(--font); font-variant-numeric:tabular-nums; margin-top:5px; }
+  .kpi .n { font:400 10px var(--font); color:var(--dim); margin-top:3px; }
+
+  .rgrid { display:grid; grid-template-columns:1fr 76px 124px 124px 124px 100px; column-gap:14px; align-items:center; padding:0 18px; }
+  .rhead { height:28px; background:var(--surf); position:sticky; top:0; z-index:2; }
+  .rhead > div { font:600 8.5px var(--font); letter-spacing:.12em; text-transform:uppercase; color:var(--acc2); }
+  .rrow { height:40px; border-bottom:1px solid var(--whisper); }
+  .rtot { height:44px; background:var(--chip); }
+  .rk { font:400 12px var(--font); }
+  .rn { font:400 11.5px var(--font); font-variant-numeric:tabular-nums; color:var(--muted); text-align:right; }
+  .rt { font:500 12px var(--font); font-variant-numeric:tabular-nums; text-align:right; }
+  .rt.acc { color:var(--acc2); }
+  .rn.un { color:var(--stopped); }
+  .rn.zero { color:var(--dim); }
+
+  .empty { padding:30px 18px; font:400 12px var(--font); color:var(--dim); }
+  .note { padding:12px 18px 0; font:400 10.5px/1.5 var(--font); color:var(--dim); max-width:760px; }
+
+  /* Adjust dialog */
+  .scrim { position:fixed; inset:0; background:rgba(9,13,20,.72); z-index:60; }
+  .dlg {
+    position:fixed; z-index:61; left:50%; top:50%; transform:translate(-50%,-50%);
+    width:min(420px, calc(100vw - 28px)); background:var(--surf);
+    border:1px solid var(--line); border-radius:8px; box-shadow:0 24px 60px rgba(0,0,0,.5);
+  }
+  .dlg[hidden], .scrim[hidden] { display:none; }
+  .dhead { padding:15px 18px 13px; border-bottom:1px solid var(--line); }
+  .dhead .t { font:500 14px var(--font); }
+  .dhead .s { font:400 11.5px var(--font); color:var(--dim); margin-top:3px; }
+  .dbody { padding:15px 18px; display:flex; flex-direction:column; gap:13px; }
+  .flabel { font:400 9.5px var(--font); letter-spacing:.07em; text-transform:uppercase; color:var(--dim); margin-bottom:6px; }
+  .dinput {
+    width:100%; box-sizing:border-box; background:var(--bg); border:1px solid var(--line);
+    border-radius:4px; color:var(--text); font:400 13px var(--font); padding:9px 11px; min-height:42px;
+  }
+  .seg { display:flex; border:1px solid var(--line); border-radius:4px; overflow:hidden; }
+  .segopt { flex:1; text-align:center; padding:10px 0; font:500 12px var(--font); color:var(--muted); background:transparent; border:none; }
+  .segopt.on.paid { background:rgba(111,174,140,.18); color:#a9d8c2; }
+  .segopt.on.un { background:rgba(208,126,111,.18); color:#f0bdb2; }
+  .dfoot { display:flex; align-items:center; gap:9px; padding:14px 18px; border-top:1px solid var(--line); }
+  .dfoot .sp { margin-left:auto; }
+
+  @media (max-width:1100px) {
+    .cgrid { grid-template-columns:88px minmax(160px,1.4fr) 108px 84px 78px 100px 92px 100px; }
+    .cgrid .hide-md { display:none; }
+  }
+  @media (max-width:760px) {
+    .cgrid { grid-template-columns:1fr 96px 100px; column-gap:10px; }
+    .cgrid .hide-sm { display:none; }
+    .crow { height:auto; padding:11px 18px; }
+    .rgrid { grid-template-columns:1fr 64px 104px 92px; }
+    .rgrid .hide-sm { display:none; }
+  }
+</style>
+</head>
+<body>
+
+<div class="bar">
+  <div class="brand"><div class="mark">ES</div><div class="word">Easy Shop</div></div>
+  <div class="vr"></div>
+  <div class="co" id="coName">—</div>
+  <div id="nav"></div>
+  <div class="spacer"></div>
+  <div id="bell"></div>
+  <div class="who" id="who">—</div>
+  <button class="ghostbtn" id="signout">Sign out</button>
+</div>
+<div class="hairline"></div>
+
+<div class="titlerow">
+  <div>
+    <h1>Closed</h1>
+    <div class="titlemeta" id="headmeta">Loading…</div>
+  </div>
+</div>
+
+<div class="viewrow" id="views"></div>
+<div class="ctrls" id="ctrls"></div>
+<div class="countline" id="counts"></div>
+<div class="scroll" id="scroll"></div>
+
+<div class="scrim" id="scrim" hidden></div>
+<div class="dlg" id="dlg" hidden role="dialog" aria-modal="true" aria-label="Adjust closed file">
+  <div class="dhead">
+    <div class="t" id="dlgTitle">Adjust</div>
+    <div class="s" id="dlgSub">—</div>
+  </div>
+  <div class="dbody">
+    <div>
+      <div class="flabel">Close date</div>
+      <input class="dinput" type="date" id="dlgDate">
+      <div style="font:400 10.5px/1.45 var(--font);color:var(--dim);margin-top:6px">
+        Moving it re-books the file into that month, week and day.
+      </div>
+    </div>
+    <div>
+      <div class="flabel">Payment</div>
+      <div class="seg">
+        <button class="segopt paid" id="dlgPaid">Paid</button>
+        <button class="segopt un" id="dlgUnpaid">Not paid</button>
+      </div>
+    </div>
+    <div class="msg" id="dlgMsg"></div>
+  </div>
+  <div class="dfoot">
+    <button class="ghostbtn sp" id="dlgCancel">Cancel</button>
+    <button class="btn" id="dlgSave">Save</button>
+  </div>
+</div>
+
+<script src="/shell.js?v=7"></script>
+<script>
+(function () {
+  var api = Shell.api, esc = Shell.esc;
+  var ME = null, VIEW = 'board';
+  var ROWS = [], TOTALS = {}, REPORT = null;
+  var PAID = 'all', GROUP = false, SORT = 'close_date', CUT = 'month';
+  var FROM = '', TO = '';
+  var EDIT = null, EDITPAID = true;
+
+  function $(id) { return document.getElementById(id); }
+
+  function usd(cents) {
+    if (cents === null || cents === undefined) return '—';
+    return '$' + (Number(cents) / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+  function usd0(cents) {
+    if (cents === null || cents === undefined) return '—';
+    return '$' + Math.round(Number(cents) / 100).toLocaleString('en-US');
+  }
+  function iso(d) {
+    var p = function (n) { return String(n).padStart(2, '0'); };
+    return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
+  }
+  /** 2026-08-18 -> 18 Aug. Dates on this screen are read, not parsed. */
+  var MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  function short(v) {
+    if (!v) return '—';
+    var s = String(v).slice(0, 10).split('-');
+    return Number(s[2]) + ' ' + MON[Number(s[1]) - 1];
+  }
+  function monthName(k) {
+    var s = String(k).split('-');
+    return MON[Number(s[1]) - 1] + ' ' + s[0];
+  }
+
+  function defaultRange() {
+    var now = new Date();
+    FROM = iso(new Date(now.getFullYear(), now.getMonth(), 1));
+    TO = iso(now);
+  }
+
+  /* ------------------------------------------------------------- chrome */
+
+  function renderViews() {
+    var tabs = [['board', 'Closed files']];
+    if (ME.caps.viewMoneyReports) tabs.push(['report', 'Closed report']);
+    $('views').innerHTML = tabs.map(function (t) {
+      return '<button class="viewtab' + (VIEW === t[0] ? ' sel' : '') + '" data-v="' + t[0] + '">' +
+        esc(t[1]) + '</button>';
+    }).join('');
+    Array.prototype.forEach.call($('views').querySelectorAll('.viewtab'), function (b) {
+      b.addEventListener('click', function () {
+        VIEW = b.getAttribute('data-v');
+        renderViews(); renderCtrls(); load();
+      });
+    });
+  }
+
+  function renderCtrls() {
+    if (VIEW === 'board') {
+      $('ctrls').innerHTML =
+        '<div class="ctrl">From <input type="date" id="from" value="' + esc(FROM) + '"></div>' +
+        '<div class="ctrl">To <input type="date" id="to" value="' + esc(TO) + '"></div>' +
+        '<div class="ctrl"><select id="paid">' +
+          [['all', 'All payments'], ['paid', 'Paid only'], ['unpaid', 'Unpaid only']].map(function (o) {
+            return '<option value="' + o[0] + '"' + (PAID === o[0] ? ' selected' : '') + '>' + o[1] + '</option>';
+          }).join('') +
+        '</select></div>' +
+        '<button class="toggle' + (GROUP ? ' on' : '') + '" id="group">Group by payment</button>';
+
+      $('from').addEventListener('change', function () { FROM = this.value; load(); });
+      $('to').addEventListener('change', function () { TO = this.value; load(); });
+      $('paid').addEventListener('change', function () { PAID = this.value; load(); });
+      $('group').addEventListener('click', function () { GROUP = !GROUP; renderCtrls(); draw(); });
+    } else {
+      $('ctrls').innerHTML =
+        '<div class="ctrl">From <input type="date" id="from" value="' + esc(FROM) + '"></div>' +
+        '<div class="ctrl">To <input type="date" id="to" value="' + esc(TO) + '"></div>' +
+        (REPORT ? REPORT.cuts.map(function (c) {
+          return '<button class="toggle' + (CUT === c.key ? ' on' : '') + '" data-c="' + c.key + '">' +
+            esc(c.label) + '</button>';
+        }).join('') : '');
+
+      $('from').addEventListener('change', function () { FROM = this.value; load(); });
+      $('to').addEventListener('change', function () { TO = this.value; load(); });
+      Array.prototype.forEach.call($('ctrls').querySelectorAll('[data-c]'), function (b) {
+        b.addEventListener('click', function () { CUT = b.getAttribute('data-c'); load(); });
+      });
+    }
+  }
+
+  /* --------------------------------------------------------------- load */
+
+  function load() {
+    if (VIEW === 'board') {
+      api('/api/closed?from=' + FROM + '&to=' + TO + '&paid=' + PAID + '&sort=' + SORT)
+        .then(function (d) {
+          ROWS = d.rows; TOTALS = d.totals;
+          $('headmeta').textContent = 'Booked by close date · ' + short(FROM) + ' to ' + short(TO);
+          draw();
+        })
+        .catch(fail);
+    } else {
+      api('/api/reports/closed?cut=' + CUT + '&from=' + FROM + '&to=' + TO)
+        .then(function (d) {
+          REPORT = d;
+          $('headmeta').textContent = 'Keyed on close date, not any production date';
+          renderCtrls();
+          draw();
+        })
+        .catch(fail);
+    }
+  }
+
+  function fail(e) {
+    if (e.message === 'signed out') return;
+    $('scroll').innerHTML = '<div class="empty">' + esc(e.message) + '</div>';
+    $('counts').innerHTML = '';
+  }
+
+  /* -------------------------------------------------------------- board */
+
+  var COLS = [
+    ['ro', 'RO #', 'ro'],
+    ['veh', 'Vehicle', null],
+    ['cust', 'Customer', 'customer'],
+    ['sales', 'Salesperson', 'salesperson'],
+    ['type', 'Type', null],
+    ['din', 'Date in', 'opened'],
+    ['days', 'Days', 'days'],
+    ['amt', 'Approval', 'amount'],
+    ['pay', 'Payment', null],
+    ['cd', 'Close date', 'close_date']
+  ];
+
+  function head() {
+    return '<div class="cgrid chead">' + COLS.map(function (c) {
+      var cls = c[0] === 'sales' || c[0] === 'din' ? ' class="hide-md"' : '';
+      if (c[0] === 'cust' || c[0] === 'type') cls = ' class="hide-sm"';
+      var inner = c[2]
+        ? '<span class="sortable' + (SORT === c[2] ? ' on' : '') + '" data-s="' + c[2] + '">' + esc(c[1]) + '</span>'
+        : esc(c[1]);
+      return '<div' + cls + '>' + inner + '</div>';
+    }).join('') + '</div>';
+  }
+
+  function row(r) {
+    var paid = r.paid === true;
+    return '<div class="cgrid crow' + (paid ? '' : ' unpaid') + '" data-id="' + r.id + '">' +
+      '<div class="cro">' + esc(r.ro_number) + '</div>' +
+      '<div><div class="cveh">' + esc(r.vehicle || '—') + '</div>' +
+        (r.colour ? '<div class="csub">' + esc(r.colour) + '</div>' : '') + '</div>' +
+      '<div class="ccell hide-sm">' + esc(r.customer || '—') + '</div>' +
+      '<div class="ccell hide-md">' + esc(r.salesperson || 'Unassigned') + '</div>' +
+      '<div class="ccell hide-sm">' + (r.pay_type === 'cash' ? 'Cash-pay' : 'Insurance') + '</div>' +
+      '<div class="cnum hide-md">' + short(r.opened_at) + '</div>' +
+      '<div class="cnum">' + (r.days_in_shop === null ? '—' : r.days_in_shop) + '</div>' +
+      '<div class="camt">' + usd(r.amount_cents) + '</div>' +
+      '<div><span class="ptag ' + (paid ? 'paid' : 'un') + '">' + (paid ? 'Paid' : 'Unpaid') + '</span></div>' +
+      '<div class="cdate">' + short(r.close_date) + ' <span class="pen">✎</span></div>' +
+    '</div>';
+  }
+
+  function groupHead(label, tint, rows) {
+    var sum = rows.reduce(function (n, r) { return n + Number(r.amount_cents || 0); }, 0);
+    return '<div class="grouphead">' +
+      '<div class="g" style="color:' + tint + '">' + label + '</div>' +
+      '<div class="n">' + rows.length + (rows.length === 1 ? ' file' : ' files') + '</div>' +
+      '<div class="t">' + usd(sum) + '</div>' +
+    '</div>';
+  }
+
+  function drawBoard() {
+    if (!ROWS.length) {
+      $('counts').innerHTML = '';
+      $('scroll').innerHTML = '<div class="empty">No files closed in this range.</div>';
+      return;
+    }
+
+    $('counts').innerHTML =
+      '<div>' + TOTALS.files + (TOTALS.files === 1 ? ' closed file' : ' closed files') +
+        (TOTALS.totalCents !== undefined ? ' · ' + usd(TOTALS.totalCents) : '') + '</div>' +
+      (TOTALS.unpaidFiles ? '<div class="un">' + TOTALS.unpaidFiles + ' unpaid · ' + usd(TOTALS.unpaidCents) + '</div>' : '') +
+      (GROUP ? '' : '<div style="color:var(--dim)">Sorted by ' +
+        (COLS.filter(function (c) { return c[2] === SORT; })[0] || [,'close date'])[1].toLowerCase() + '</div>');
+
+    var body;
+    if (GROUP) {
+      var un = ROWS.filter(function (r) { return r.paid !== true; });
+      var pd = ROWS.filter(function (r) { return r.paid === true; });
+      body = (un.length ? groupHead('Unpaid', '#f0bdb2', un) + un.map(row).join('') : '') +
+             (pd.length ? groupHead('Paid', '#a9d8c2', pd) + pd.map(row).join('') : '');
+    } else {
+      body = ROWS.map(row).join('');
+    }
+
+    $('scroll').innerHTML = head() + body +
+      '<div class="note">Close date is editable — click a row to move it, which re-books the file into that ' +
+      'month and week. Sorting a grouped list sorts inside each group; the headings stay put.</div>';
+
+    Array.prototype.forEach.call($('scroll').querySelectorAll('.sortable'), function (s) {
+      s.addEventListener('click', function (e) {
+        e.stopPropagation();
+        SORT = s.getAttribute('data-s');
+        load();
+      });
+    });
+    Array.prototype.forEach.call($('scroll').querySelectorAll('.crow'), function (el) {
+      el.addEventListener('click', function () { openEdit(Number(el.getAttribute('data-id'))); });
+    });
+  }
+
+  /* ------------------------------------------------------------- report */
+
+  function drawReport() {
+    var t = REPORT.total;
+    var avg = REPORT.rows.length
+      ? Math.round(REPORT.rows.reduce(function (n, r) { return n + Number(r.avg_days || 0); }, 0) / REPORT.rows.length)
+      : 0;
+
+    $('counts').innerHTML = '';
+    var kpis =
+      '<div class="kpis">' +
+      kpi('Files closed', t.files + (t.files === 1 ? ' file' : ' files'), REPORT.cutLabel.toLowerCase() + ' cut', '') +
+      kpi('On the books', usd0(t.totalCents), 'approval amounts', 'color:var(--acc2)') +
+      kpi('Unpaid', usd0(t.unpaidCents), t.unpaidFiles + ' to chase', 'color:#f0bdb2') +
+      kpi('Average cycle', avg + ' days', 'date in to close date', '') +
+      '</div>';
+
+    var rows = REPORT.rows.map(function (r) {
+      var k = REPORT.cut === 'month' ? monthName(r.k)
+        : REPORT.cut === 'week' ? 'w/c ' + short(r.k)
+        : REPORT.cut === 'type' ? (r.k === 'cash' ? 'Cash-pay' : 'Insurance')
+        : r.k;
+      var un = Number(r.unpaid_cents || 0);
+      return '<div class="rgrid rrow">' +
+        '<div class="rk">' + esc(k) + '</div>' +
+        '<div class="rn">' + r.files + '</div>' +
+        '<div class="rn hide-sm">' + usd0(r.insurance_cents) + '</div>' +
+        '<div class="rn hide-sm">' + usd0(r.cash_cents) + '</div>' +
+        '<div class="rt">' + usd0(r.total_cents) + '</div>' +
+        '<div class="rn ' + (un ? 'un' : 'zero') + '">' + usd0(un) + '</div>' +
+      '</div>';
+    }).join('');
+
+    $('scroll').innerHTML = kpis +
+      '<div class="rgrid rhead">' +
+        '<div>' + esc(REPORT.cutLabel) + '</div>' +
+        '<div style="text-align:right">Files</div>' +
+        '<div class="hide-sm" style="text-align:right">Insurance</div>' +
+        '<div class="hide-sm" style="text-align:right">Cash-pay</div>' +
+        '<div style="text-align:right">Closed total</div>' +
+        '<div style="text-align:right">Unpaid</div>' +
+      '</div>' +
+      (rows || '<div class="empty">Nothing closed in this range.</div>') +
+      (REPORT.rows.length ? '<div class="rgrid rtot">' +
+        '<div class="rk" style="font-weight:500">Range total</div>' +
+        '<div class="rn">' + t.files + '</div>' +
+        '<div class="rn hide-sm">' + usd0(t.insuranceCents) + '</div>' +
+        '<div class="rn hide-sm">' + usd0(t.cashCents) + '</div>' +
+        '<div class="rt acc">' + usd0(t.totalCents) + '</div>' +
+        '<div class="rn un">' + usd0(t.unpaidCents) + '</div>' +
+      '</div>' : '') +
+      '<div class="note">Unpaid is a column rather than a subtraction, so the books and the chase list read off ' +
+      'one figure. Whether an unpaid closed file should count as revenue is still open.</div>';
+  }
+
+  function kpi(k, v, n, style) {
+    return '<div class="kpi"><div class="k">' + esc(k) + '</div>' +
+      '<div class="v" style="' + style + '">' + esc(v) + '</div>' +
+      '<div class="n">' + esc(n) + '</div></div>';
+  }
+
+  function draw() { if (VIEW === 'board') drawBoard(); else drawReport(); }
+
+  /* --------------------------------------------------------- adjusting */
+
+  function openEdit(id) {
+    var r = ROWS.filter(function (x) { return x.id === id; })[0];
+    if (!r) return;
+    EDIT = r;
+    EDITPAID = r.paid === true;
+    $('dlgTitle').textContent = 'RO ' + r.ro_number;
+    $('dlgSub').textContent = (r.vehicle || 'Vehicle unknown') + ' · ' + (r.customer || 'No customer');
+    $('dlgDate').value = String(r.close_date).slice(0, 10);
+    $('dlgMsg').textContent = '';
+    $('dlgMsg').className = 'msg';
+    paintSeg();
+    $('scrim').hidden = false;
+    $('dlg').hidden = false;
+  }
+
+  function paintSeg() {
+    $('dlgPaid').className = 'segopt paid' + (EDITPAID ? ' on' : '');
+    $('dlgUnpaid').className = 'segopt un' + (EDITPAID ? '' : ' on');
+  }
+
+  function closeEdit() {
+    $('scrim').hidden = true;
+    $('dlg').hidden = true;
+    EDIT = null;
+  }
+
+  $('dlgPaid').addEventListener('click', function () { EDITPAID = true; paintSeg(); });
+  $('dlgUnpaid').addEventListener('click', function () { EDITPAID = false; paintSeg(); });
+  $('dlgCancel').addEventListener('click', closeEdit);
+  $('scrim').addEventListener('click', closeEdit);
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && EDIT) closeEdit(); });
+
+  $('dlgSave').addEventListener('click', function () {
+    if (!EDIT) return;
+    var btn = this;
+    btn.disabled = true;
+    api('/api/ro/' + EDIT.id + '/close', {
+      method: 'PATCH',
+      body: JSON.stringify({ closeDate: $('dlgDate').value, paid: EDITPAID })
+    }).then(function () {
+      btn.disabled = false;
+      closeEdit();
+      load();
+    }).catch(function (e) {
+      btn.disabled = false;
+      $('dlgMsg').textContent = e.message;
+      $('dlgMsg').className = 'msg err';
+    });
+  });
+
+  /* ---------------------------------------------------------------- go */
+
+  defaultRange();
+  api('/api/me').then(function (me) {
+    ME = me;
+    Shell.mount({ active: 'closed' });
+    if (!ME.caps.closeRepairOrders && !ME.caps.viewReports) {
+      $('scroll').innerHTML = '<div class="empty">Closed files are for the office — owner, accounting and front office.</div>';
+      return;
+    }
+    renderViews();
+    renderCtrls();
+    load();
+  }).catch(function (e) { if (e.message !== 'signed out') console.error(e); });
+})();
+</script>
+</body>
+</html>

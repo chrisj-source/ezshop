@@ -113,6 +113,13 @@
     border:1px solid var(--acc); border-radius:5px; padding:10px;
   }
   .winbtn:hover { background:var(--acc2); border-color:var(--acc2); }
+  /* Back out of the mobile detail panel. Hidden on desktop, where the panel is pinned. */
+  .detback {
+    display:none; align-items:center; gap:7px; cursor:pointer;
+    background:transparent; border:1px solid var(--line); border-radius:5px;
+    color:var(--muted); font:400 12px var(--font); padding:9px 12px; margin-bottom:10px;
+  }
+  .detback:active { background:var(--whisper); }
   .logline { padding:8px 0; border-bottom:1px solid var(--whisper); }
   .logb { font:400 11px/1.5 var(--font); }
   .logm { font:400 9.5px var(--font); color:var(--dim); margin-top:2px; }
@@ -123,6 +130,20 @@
     .leadgrid { grid-template-columns:3px 1.5fr 1fr 70px 54px; }
     .leadgrid > .hide-sm, .leadrow > .hide-sm { display:none; }
     .titlerow { flex-wrap:wrap; }
+  }
+
+  /* Phones: the detail panel is a full screen, not a squeezed row under the list.
+     Stacked, it was short enough that Save sat below its own scroll. */
+  @media (max-width:760px) {
+    .detcol {
+      display:none; position:fixed; inset:0; z-index:45; border-top:none;
+      padding:calc(var(--safe-t) + 12px) 15px calc(24px + var(--safe-b));
+      -webkit-overflow-scrolling:touch;
+    }
+    .detcol.open { display:block; }
+    .detback { display:flex; }
+    .detsel { font-size:16px; min-height:44px; }
+    .winbtn { min-height:46px; font-size:14px; }
   }
 </style>
 </head>
@@ -148,6 +169,7 @@
   <div style="margin-left:auto;display:flex;align-items:center;gap:9px">
     <div class="clocklbl">Response clock</div>
     <div class="clocknote">a lead unanswered past a day turns red</div>
+    <button class="ghostbtn" id="showDeleted">Show deleted</button>
     <button class="btn" id="newLead">New lead</button>
   </div>
 </div>
@@ -169,7 +191,8 @@
     </div>
     <div id="list"></div>
   </div>
-  <div class="detcol">
+  <div class="detcol" id="detCol">
+    <button class="detback" id="detBack">Back to leads</button>
     <div class="dethead" id="detHead">Lead</div>
     <div id="detBody"></div>
   </div>
@@ -180,7 +203,7 @@
 (function () {
   var api = Shell.api, esc = Shell.esc;
   var ME = null, META = null, LEADS = [], STAFF = [], SEL = null, TAB = 'working', SRC = 'All sources';
-  var ADDING = false;
+  var ADDING = false, DELETED = false;
 
   var TONE = {
     'new': 'var(--acc)', contacted: 'var(--move)', estimate_sent: 'var(--move)',
@@ -244,7 +267,7 @@
   }).catch(function (e) { if (e.message !== 'signed out') console.error(e); });
 
   function load() {
-    return api('/api/leads?settled=1').then(function (d) {
+    return api('/api/leads?settled=1' + (DELETED ? '&deleted=1' : '')).then(function (d) {
       LEADS = d.leads;
       STAFF = d.staff;
       renderKpis(d.summary);
@@ -377,7 +400,12 @@
 
   /* ---------------------------------------------------------------- detail */
 
+  function syncPanel() {
+    $('detCol').classList.toggle('open', ADDING || SEL != null);
+  }
+
   function renderDetail() {
+    syncPanel();
     if (ADDING) return renderNew();
 
     var l = LEADS.filter(function (x) { return x.id === SEL; })[0];
@@ -524,6 +552,23 @@
       });
       h.push('</div>');
 
+      /* Deleting is soft, like a void: off the list and out of the response
+         clock, with the record and its history kept. A converted lead belongs to
+         an RO and can only be marked lost. */
+      if (ME.caps.manageLeads) {
+        if (lead.deleted_at) {
+          h.push('<div style="margin-top:18px;padding-top:14px;border-top:1px solid var(--line)">' +
+            '<div style="font:400 11px/1.5 var(--font);color:var(--dim);margin-bottom:9px">' +
+            'Deleted ' + esc(stamp(lead.deleted_at)) +
+            (lead.delete_reason ? ' — ' + esc(lead.delete_reason) : '') + '.</div>' +
+            '<button class="winbtn" id="restoreLead">Restore this lead</button></div>');
+        } else if (!lead.ro_id) {
+          h.push('<div style="margin-top:18px;padding-top:14px;border-top:1px solid var(--line);text-align:right">' +
+            '<button class="ghostbtn" id="delLead" style="color:var(--stopped);border-color:var(--line)">' +
+            'Delete lead</button></div>');
+        }
+      }
+
       $('detBody').innerHTML = h.join('');
       wireDetail(lead);
     }).catch(function (e) {
@@ -589,6 +634,26 @@
         .catch(function (e) { say(e.message, 'err'); });
     });
 
+    var del = $('delLead');
+    if (del) del.addEventListener('click', function () {
+      var reason = window.prompt(
+        'Delete lead ' + lead.lead_number + '?\n\n' +
+        'It comes off the list and out of the response clock. The record, its notes ' +
+        'and its history stay, and it can be restored from Show deleted.\n\n' +
+        'Reason — Duplicate, Test, Opened by mistake:', 'Duplicate');
+      if (reason === null) return;
+      api('/api/leads/' + lead.id, { method: 'DELETE', body: JSON.stringify({ reason: reason }) })
+        .then(function () { SEL = null; return load(); })
+        .catch(function (e) { say(e.message, 'err'); });
+    });
+
+    var res = $('restoreLead');
+    if (res) res.addEventListener('click', function () {
+      api('/api/leads/' + lead.id + '/restore', { method: 'POST' })
+        .then(function () { return load(); })
+        .catch(function (e) { say(e.message, 'err'); });
+    });
+
     $('addNote').addEventListener('click', function () {
       var body = $('noteBody').value.trim();
       if (!body) return say('The note is empty.', 'err');
@@ -643,6 +708,25 @@
         .catch(function (e) { msg.textContent = e.message; msg.className = 'msg err'; });
     });
   }
+
+  $('detBack').addEventListener('click', function () {
+    ADDING = false;
+    SEL = null;
+    render();
+    renderDetail();
+  });
+
+  /* Deleted leads are off the list by default. The toggle is how one is found
+     and restored; it is not a filter anybody works from. */
+  $('showDeleted').addEventListener('click', function () {
+    DELETED = !DELETED;
+    this.textContent = DELETED ? 'Hide deleted' : 'Show deleted';
+    this.style.color = DELETED ? 'var(--acc)' : '';
+    this.style.borderColor = DELETED ? 'var(--acc)' : '';
+    SEL = null;
+    ADDING = false;
+    load();
+  });
 
   $('newLead').addEventListener('click', function () {
     ADDING = true;
