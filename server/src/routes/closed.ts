@@ -278,7 +278,7 @@ export async function registerClosed(app: FastifyInstance): Promise<void> {
              r.opened_at, ${PAY_TYPE} AS pay_type,
              GREATEST(DATEDIFF(COALESCE(r.delivered_at, r.close_date), DATE(r.opened_at)) - r.voided_days, 0) AS days_in_shop,
              c.display_name AS customer,
-             TRIM(CONCAT(COALESCE(v.\`year\`,''), ' ', COALESCE(v.make,''), ' ', COALESCE(v.model,''))) AS vehicle,
+             TRIM(CONCAT(COALESCE(v.year,''), ' ', COALESCE(v.make,''), ' ', COALESCE(v.model,''))) AS vehicle,
              v.color AS colour,
              ic.display_name AS insurer,
              (SELECT a.display_name FROM ro_assignments a
@@ -388,7 +388,7 @@ export async function registerClosed(app: FastifyInstance): Promise<void> {
       SELECT sb.id, sb.ro_id, sb.service, sb.vendor, sb.state, sb.out_at, sb.back_at,
              sb.cost_cents, sb.po_number,
              r.ro_number, s.label AS status_label, s.lane_key,
-             TRIM(CONCAT(COALESCE(v.\`year\`,''), ' ', COALESCE(v.make,''), ' ', COALESCE(v.model,''))) AS vehicle,
+             TRIM(CONCAT(COALESCE(v.year,''), ' ', COALESCE(v.make,''), ' ', COALESCE(v.model,''))) AS vehicle,
              v.color AS colour
       FROM sublets sb
       JOIN repair_orders r ON r.id = sb.ro_id
