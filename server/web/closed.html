@@ -308,8 +308,13 @@
 
   function fail(e) {
     if (e.message === 'signed out') return;
+    /* Say it where the eye already is. A message only in the list area reads as
+       an empty screen with a stuck "Loading…" above it. */
+    $('headmeta').textContent = 'Could not load — ' + e.message;
+    $('headmeta').style.color = 'var(--stopped)';
     $('scroll').innerHTML = '<div class="empty">' + esc(e.message) + '</div>';
     $('counts').innerHTML = '';
+    console.error('closed:', e);
   }
 
   /* -------------------------------------------------------------- board */
@@ -524,7 +529,7 @@
   defaultRange();
   api('/api/me').then(function (me) {
     ME = me;
-    Shell.mount({ active: 'closed' });
+    Shell.mount({ me: me, active: 'closed' });
     if (!ME.caps.closeRepairOrders && !ME.caps.viewReports) {
       $('scroll').innerHTML = '<div class="empty">Closed files are for the office — owner, accounting and front office.</div>';
       return;
