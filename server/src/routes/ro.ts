@@ -110,6 +110,9 @@ export async function registerRepairOrders(app: FastifyInstance): Promise<void> 
       insurers,
       canVoid: ctx.caps.voidRepairOrders,
       canClose: ctx.caps.closeRepairOrders,
+      /* Un-closing takes money back off the books and puts the car back on the
+         schedule, so it is owner only — narrower than closing. */
+      canUnclose: ctx.roles.includes('owner'),
       /* What would stop a close, worked out here so the file shows it rather than
          the close finding out on submit. The approval amount is the hard check;
          parts on order and an unreturned sublet are the two that catch a file

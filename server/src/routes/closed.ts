@@ -277,10 +277,10 @@ export async function registerClosed(app: FastifyInstance): Promise<void> {
       SELECT r.id, r.ro_number, r.amount_cents, r.paid, r.paid_at, r.close_date,
              r.opened_at, ${PAY_TYPE} AS pay_type,
              GREATEST(DATEDIFF(COALESCE(r.delivered_at, r.close_date), DATE(r.opened_at)) - r.voided_days, 0) AS days_in_shop,
-             c.display_name AS customer,
+             c.name AS customer,
              TRIM(CONCAT(COALESCE(v.year,''), ' ', COALESCE(v.make,''), ' ', COALESCE(v.model,''))) AS vehicle,
              v.color AS colour,
-             ic.display_name AS insurer,
+             ic.name AS insurer,
              (SELECT a.display_name FROM ro_assignments a
                WHERE a.ro_id = r.id AND a.position_key = 'sales' LIMIT 1) AS salesperson
       FROM repair_orders r

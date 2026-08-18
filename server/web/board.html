@@ -2023,6 +2023,9 @@
        afterwards from the Closed screen — that is what books it into a month. */
     if (d.canClose && !r.voided_at) {
       if (r.close_date) {
+        /* Editable here as well as on the Closed screen — the close date is meant
+           to be moved, and the file is where somebody is standing when they find
+           it is wrong. Same endpoint either way. */
         LAST.push('<div class="sec">Closed</div>');
         LAST.push('<div class="stack">' +
           '<div class="row" style="gap:9px;align-items:baseline">' +
@@ -2031,8 +2034,18 @@
             (r.paid ? 'paid' : 'unpaid') + '</span>' +
           '<span style="font:400 11.5px var(--font);color:var(--muted)">Booked to ' +
             esc(String(r.close_date).slice(0, 10)) + '</span></div>' +
-          '<span class="sub" style="text-transform:none;letter-spacing:0">Move the date or change ' +
-          'the payment on <a href="/closed.html">Closed files</a>.</span></div>');
+          '<span class="sub" style="text-transform:none;letter-spacing:0">Moving the date re-books ' +
+          'the file into that month and week.</span>' +
+          '<div class="row" style="gap:9px;flex-wrap:wrap">' +
+          '<label class="row" style="gap:7px;align-items:center">' +
+          '<span class="sub" style="text-transform:none;letter-spacing:0">Close date</span>' +
+          '<input type="date" id="clDate" value="' + esc(String(r.close_date).slice(0, 10)) + '"></label>' +
+          '<select id="clPaid">' +
+          '<option value="1"' + (r.paid ? ' selected' : '') + '>Paid</option>' +
+          '<option value="0"' + (r.paid ? '' : ' selected') + '>Not paid</option></select></div>' +
+          '<div class="row" style="justify-content:flex-end;gap:9px">' +
+          (d.canUnclose ? '<button class="btn" id="unClose">Reopen this file</button>' : '') +
+          '<button class="btn btn-solid" id="saveClose">Save</button></div></div>');
       } else if ((d.closeBlockers || []).length) {
         LAST.push('<div class="sec">Close this file</div>');
         LAST.push('<div class="stack" style="border-color:var(--stopped)">' +
@@ -2215,6 +2228,37 @@
         dc.disabled = false;
         say(e.message, 'err');
       });
+    });
+
+    var sc = $('saveClose');
+    if (sc) sc.addEventListener('click', function () {
+      var date = $('clDate').value;
+      if (!date) return say('Pick a close date.', 'err');
+      sc.disabled = true;
+      api('/api/ro/' + OPEN + '/close', {
+        method: 'PATCH',
+        body: JSON.stringify({ closeDate: date, paid: $('clPaid').value === '1' })
+      }).then(function () {
+        sc.disabled = false;
+        say('Saved. Booked to ' + date + '.', 'ok');
+        return reopen();
+      }).catch(function (e) {
+        sc.disabled = false;
+        say(e.message, 'err');
+      });
+    });
+
+    var uc = $('unClose');
+    if (uc) uc.addEventListener('click', function () {
+      if (!confirm('Reopen this file? It comes off the books and goes back on the production schedule.')) return;
+      uc.disabled = true;
+      api('/api/ro/' + OPEN + '/close', { method: 'DELETE' })
+        .then(function () {
+          uc.disabled = false;
+          say('Reopened. Back on the board.', 'ok');
+          return reopen();
+        })
+        .catch(function (e) { uc.disabled = false; say(e.message, 'err'); });
     });
 
     var dv = $('doVoid');
