@@ -303,6 +303,9 @@ export async function registerClosed(app: FastifyInstance): Promise<void> {
       ro: 'r.ro_number DESC',
       amount: 'r.amount_cents DESC',
       days: 'days_in_shop DESC',
+      /* The day the car left, which is not the close date — that is a
+         bookkeeping decision and can be moved after the fact. */
+      pickup: 'r.closed_at DESC',
       opened: 'r.opened_at DESC',
       customer: 'customer ASC',
       salesperson: 'salesperson ASC'

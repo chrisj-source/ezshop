@@ -40,7 +40,7 @@
   /* Closed board. Sorts like production; the columns a car needs once it is gone. */
   .cgrid {
     display:grid;
-    grid-template-columns:96px minmax(210px,1.5fr) minmax(130px,1fr) 108px 92px 84px 56px 108px 96px 106px;
+    grid-template-columns:92px minmax(190px,1.4fr) minmax(120px,1fr) 104px 88px 80px 84px 56px 104px 92px 102px;
     column-gap:14px; align-items:center; padding:0 18px;
   }
   .chead { height:28px; background:var(--surf); position:sticky; top:0; z-index:2; }
@@ -327,6 +327,7 @@
     ['sales', 'Salesperson', 'salesperson'],
     ['type', 'Type', null],
     ['din', 'Date in', 'opened'],
+    ['pickup', 'Picked up', 'pickup'],
     ['days', 'Days', 'days'],
     ['amt', 'Approval', 'amount'],
     ['pay', 'Payment', null],
@@ -335,7 +336,7 @@
 
   function head() {
     return '<div class="cgrid chead">' + COLS.map(function (c) {
-      var cls = c[0] === 'sales' || c[0] === 'din' ? ' class="hide-md"' : '';
+      var cls = c[0] === 'sales' || c[0] === 'din' || c[0] === 'pickup' ? ' class="hide-md"' : '';
       if (c[0] === 'cust' || c[0] === 'type') cls = ' class="hide-sm"';
       var inner = c[2]
         ? '<span class="sortable' + (SORT === c[2] ? ' on' : '') + '" data-s="' + c[2] + '">' + esc(c[1]) + '</span>'
@@ -354,6 +355,9 @@
       '<div class="ccell hide-md">' + esc(r.salesperson || 'Unassigned') + '</div>' +
       '<div class="ccell hide-sm">' + (r.pay_type === 'cash' ? 'Cash-pay' : 'Insurance') + '</div>' +
       '<div class="cnum hide-md">' + short(r.opened_at) + '</div>' +
+      /* The day the car actually left — not the close date, which is a bookkeeping
+         decision and can be moved. */
+      '<div class="cnum hide-md">' + short(r.closed_at) + '</div>' +
       '<div class="cnum">' + (r.days_in_shop === null ? '—' : r.days_in_shop) +
         /* In to picked up, where a rental was on the hook for it. */
         (r.rental_days != null
