@@ -16,10 +16,13 @@
 --
 -- A tech is paid by the hour, a flat rate per car, or — PDR only — a share of the
 -- job. `rate_cents` carries the first two; `rate_pct` the third.
-ALTER TABLE staff
-  ADD COLUMN pay_basis   ENUM('hourly','flat','pct') NOT NULL DEFAULT 'hourly' AFTER efficiency,
-  ADD COLUMN rate_cents  BIGINT NOT NULL DEFAULT 0 COMMENT 'per hour, or per car when flat' AFTER pay_basis,
-  ADD COLUMN rate_pct    DECIMAL(6,3) NOT NULL DEFAULT 0 COMMENT 'PDR only: a share of the job' AFTER rate_cents;
+--
+-- One ALTER per column on purpose. A multi-column ALTER is a single statement, so
+-- one already-present column makes the runner skip the whole thing and the rest
+-- never land — which is exactly how this migration failed the first time.
+ALTER TABLE staff ADD COLUMN pay_basis ENUM('hourly','flat','pct') NOT NULL DEFAULT 'hourly';
+ALTER TABLE staff ADD COLUMN rate_cents BIGINT NOT NULL DEFAULT 0 COMMENT 'per hour, or per car when flat';
+ALTER TABLE staff ADD COLUMN rate_pct DECIMAL(6,3) NOT NULL DEFAULT 0 COMMENT 'PDR only: a share of the job';
 
 -- ===========================================================================
 -- The file: deductible and rental
@@ -28,20 +31,21 @@ ALTER TABLE staff
 -- The deductible is the shop's own call, never the insurer's — they may write a
 -- $1,000 deductible and the shop collect $500 of it. What is not collected is
 -- given away, and it comes off the profit and off the commission base.
-ALTER TABLE repair_orders
-  ADD COLUMN deductible_cents        BIGINT NOT NULL DEFAULT 0 COMMENT 'what the customer owes' AFTER discount_cents,
-  ADD COLUMN deductible_collect      TINYINT(1) NOT NULL DEFAULT 1 COMMENT 'are we collecting any of it' AFTER deductible_cents,
-  ADD COLUMN deductible_charge_cents BIGINT NOT NULL DEFAULT 0 COMMENT 'what we are actually charging' AFTER deductible_collect,
-  -- Provider and coverage are decided on the file. At close only the price can
-  -- be touched.
-  ADD COLUMN rental_provider VARCHAR(32) NULL COMMENT 'Avis, Budget, Enterprise, Hertz, Loaner' AFTER rental_cost_cents,
-  ADD COLUMN rental_covered  TINYINT(1) NOT NULL DEFAULT 0 COMMENT 'policy covers it, so there is reimbursement to chase' AFTER rental_provider,
-  -- Marked on the sales pay side, per file. Off for a house deal, a re-write
-  -- someone else closed, or a car nobody earns on.
-  ADD COLUMN commission_payable TINYINT(1) NOT NULL DEFAULT 1 AFTER rental_covered,
-  -- Paint materials: hours × the shop rate, or a flat figure when there are no
-  -- paint hours to work from.
-  ADD COLUMN materials_flat_cents BIGINT NOT NULL DEFAULT 0 COMMENT 'used when there are no paint hours' AFTER materials_cost_cents;
+--
+-- One ALTER per column, for the reason given above.
+ALTER TABLE repair_orders ADD COLUMN deductible_cents BIGINT NOT NULL DEFAULT 0 COMMENT 'what the customer owes';
+ALTER TABLE repair_orders ADD COLUMN deductible_collect TINYINT(1) NOT NULL DEFAULT 1 COMMENT 'are we collecting any of it';
+ALTER TABLE repair_orders ADD COLUMN deductible_charge_cents BIGINT NOT NULL DEFAULT 0 COMMENT 'what we are actually charging';
+-- Provider and coverage are decided on the file. At close only the price can be
+-- touched.
+ALTER TABLE repair_orders ADD COLUMN rental_provider VARCHAR(32) NULL COMMENT 'Avis, Budget, Enterprise, Hertz, Loaner';
+ALTER TABLE repair_orders ADD COLUMN rental_covered TINYINT(1) NOT NULL DEFAULT 0 COMMENT 'policy covers it, so there is reimbursement to chase';
+-- Marked on the sales pay side, per file. Off for a house deal, a re-write
+-- someone else closed, or a car nobody earns on.
+ALTER TABLE repair_orders ADD COLUMN commission_payable TINYINT(1) NOT NULL DEFAULT 1;
+-- Paint materials: hours × the shop rate, or a flat figure when there are no
+-- paint hours to work from.
+ALTER TABLE repair_orders ADD COLUMN materials_flat_cents BIGINT NOT NULL DEFAULT 0 COMMENT 'used when there are no paint hours';
 
 -- A deductible that was already recorded as deductible assistance keeps its
 -- meaning: the shop wrote off the whole thing.
