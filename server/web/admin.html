@@ -191,6 +191,8 @@
 (function () {
   var api = Shell.api, esc = Shell.esc;
   var ME = null, CFG = null, PEOPLE = null, GROUPS = null, ROLES = [], CTYPES = null;
+  /* Labour rates, or null when this person may not see pay. */
+  var RATES = null;
   var TAB = 'statuses', RAIL = null, SEL = null;
 
   // Google sends the owner back here after they authorise; land on the tab and
@@ -208,7 +210,11 @@
     { k: 'people', t: 'People' },
     { k: 'vendors', t: 'Vendors' },
     { k: 'settings', t: 'Shop settings' },
-    { k: 'storage', t: 'Storage' }
+    { k: 'storage', t: 'Storage' },
+    /* Their own pages — too big to live in a pane here, but they belong to Admin,
+       so the tab strip is where you reach them. */
+    { k: 'roles', t: 'Roles &amp; permissions', href: '/permissions.html' },
+    { k: 'pay', t: 'Sales pay', href: '/pay.html' }
   ];
 
   var KIND_TONE = {
@@ -238,21 +244,27 @@
       api('/api/config'),
       api('/api/config/people'),
       api('/api/admin/notification-groups'),
-      api('/api/admin/roles')
+      api('/api/admin/roles'),
+      /* Pay, so it is allowed to fail — an admin who is not the owner or
+         accounting simply gets the page without rates. */
+      api('/api/staff/rates').catch(function () { return null; })
     ]);
   }).then(function (r) {
     if (!r) return;
-    CFG = r[0]; PEOPLE = r[1]; GROUPS = r[2]; ROLES = r[3].roles;
+    CFG = r[0]; PEOPLE = r[1]; GROUPS = r[2]; ROLES = r[3].roles; RATES = r[4];
     renderTabs();
     render();
   }).catch(function (e) { if (e.message !== 'signed out') console.error(e); });
 
   function renderTabs() {
     $('tabs').innerHTML = TABS.map(function (t) {
+      if (t.href) {
+        return '<a class="atab" href="' + t.href + '">' + t.t + ' ↗</a>';
+      }
       return '<button class="atab' + (t.k === TAB ? ' sel' : '') + '" data-tab="' + t.k + '">' +
         esc(t.t) + '</button>';
     }).join('');
-    Array.prototype.forEach.call($('tabs').children, function (b) {
+    Array.prototype.forEach.call($('tabs').querySelectorAll('button.atab'), function (b) {
       b.addEventListener('click', function () {
         TAB = b.dataset.tab;
         RAIL = null;
@@ -737,7 +749,8 @@
 
     h.push('<div class="prow2" style="border-top:1px solid var(--line);min-height:32px">' +
       '<div></div><div class="dk">Name</div><div class="dk">Roles</div>' +
-      '<div class="dk hide-sm">Trades</div><div class="dk hide-sm">Last in</div>' +
+      '<div class="dk hide-sm">Trades</div><div class="dk hide-sm">' +
+      (RATES ? 'Labour rate' : 'Last in') + '</div>' +
       '<div class="dk">Access</div></div>');
 
     list.forEach(function (p) {
@@ -768,7 +781,7 @@
           return '<button type="button" class="setchip' + (works ? ' on' : '') + '" ' +
             'data-trade="' + esc(x.position_key) + '">' + esc(x.label) + '</button>';
         }).join('') + '</div>' +
-        '<div class="ssub hide-sm">' + (p.last_login_at ? Shell.when(p.last_login_at) : 'never') + '</div>' +
+        '<div class="ssub hide-sm">' + rateCell(p) + '</div>' +
         '<div class="row" style="gap:6px">' +
         '<button class="visbtn" data-code="' + p.id + '">Code</button>' +
         '<button class="visbtn" data-reset="' + p.id + '">Password</button>' +
@@ -783,6 +796,24 @@
       '<button class="btn btn-solid" id="savePeople">Save roles and trades</button>' +
       '<span class="sub">' + list.length + ' shown' +
       (RAIL ? ' in this trade' : '') + ' · names and emails save here too</span></div></div>');
+
+    /* Labour rates are pay, so they belong to the owner and accounting. The
+       close-out sheet prices hours from these, and a settled file keeps the rate
+       it was settled on. */
+    if (RATES && RATES.canEdit) {
+      h.push('<div class="pad" style="padding-top:6px"><div class="card2">' +
+        '<div class="card2row" style="grid-template-columns:1fr">' +
+        '<div class="dlbl">Paint materials</div>' +
+        '<div class="row" style="margin-top:6px">' +
+        '<span class="sub">Per paint hour</span>' +
+        '<input class="dinput" id="matRate" style="width:110px;text-align:right" value="' +
+          esc(dollars(RATES.materialsRateCents)) + '">' +
+        '<button class="btn" id="matSave">Save</button>' +
+        '</div>' +
+        '<div class="sub" style="margin-top:8px">Used when paint labour is punched in as hours. ' +
+        'A car with no paint hours takes a flat figure on the close-out sheet instead.</div>' +
+        '</div></div></div>');
+    }
 
     h.push('<div id="removedBox"></div>');
 
@@ -841,8 +872,97 @@
     });
   }
 
+  /**
+   * The labour-rate cell. A tech is paid by the hour, a flat rate per car, or —
+   * PDR only — a share of the job. Nobody else's business, so it falls back to
+   * the sign-in date when this person may not see pay.
+   */
+  function rateCell(p) {
+    if (!RATES) return p.last_login_at ? Shell.when(p.last_login_at) : 'never';
+    var row = RATES.staff.filter(function (s) { return s.userId === p.id; })[0];
+    if (!row) return '<span style="color:var(--dim)">not on the floor</span>';
+    if (!RATES.canEdit) {
+      return row.basis === 'pct'
+        ? row.ratePct + '% share'
+        : money(row.rateCents) + (row.basis === 'flat' ? ' per car' : ' per hour');
+    }
+    var pct = row.basis === 'pct';
+    return '<div class="row" style="gap:6px;flex-wrap:nowrap">' +
+      '<div class="chipset" style="gap:2px">' +
+      '<button type="button" class="setchip' + (row.basis === 'hourly' ? ' on' : '') + '" ' +
+        'data-basis="hourly" data-u="' + p.id + '" title="Per hour">Hr</button>' +
+      '<button type="button" class="setchip' + (row.basis === 'flat' ? ' on' : '') + '" ' +
+        'data-basis="flat" data-u="' + p.id + '" title="Flat per car">Flat</button>' +
+      (row.canPct
+        ? '<button type="button" class="setchip' + (pct ? ' on' : '') + '" ' +
+          'data-basis="pct" data-u="' + p.id + '" title="A share of the job — PDR only">%</button>'
+        : '') +
+      '</div>' +
+      '<input class="dinput" data-rate="' + p.id + '" value="' +
+        esc(pct ? String(row.ratePct) : dollars(row.rateCents)) + '" ' +
+        'style="width:66px;text-align:right;font:500 11.5px var(--font);padding:3px 6px">' +
+      '<span style="color:var(--dim);white-space:nowrap">' +
+        (pct ? '%' : (row.basis === 'flat' ? '/car' : '/hr')) + '</span>' +
+      '</div>';
+  }
+
+  function money(c) {
+    return '$' + ((Number(c) || 0) / 100).toLocaleString('en-US',
+      { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+  /** Cents as a bare editable number. */
+  function dollars(c) { return ((Number(c) || 0) / 100).toFixed(2); }
+  function dollarsToCents(v) {
+    var n = parseFloat(String(v).replace(/[^0-9.\-]/g, ''));
+    return isNaN(n) ? 0 : Math.round(n * 100);
+  }
+
   function wirePeople() {
     wireChips();
+
+    /* A tech's labour rate, saved on its own rather than with the roles button —
+       it is pay, and the person editing it may not be the person editing roles. */
+    Array.prototype.forEach.call($('mid').querySelectorAll('[data-rate]'), function (inp) {
+      inp.addEventListener('change', function () {
+        var uid = Number(inp.dataset.rate);
+        var row = RATES.staff.filter(function (s) { return s.userId === uid; })[0];
+        if (!row) return;
+        var body = row.basis === 'pct'
+          ? { basis: 'pct', ratePct: parseFloat(inp.value) || 0, rateCents: 0 }
+          : { basis: row.basis, rateCents: dollarsToCents(inp.value), ratePct: 0 };
+        api('/api/staff/' + uid + '/rate', { method: 'PATCH', body: JSON.stringify(body) })
+          .then(function (res) {
+            row.rateCents = body.rateCents; row.ratePct = body.ratePct;
+            say(res.note, 'ok');
+          })
+          .catch(function (e) { say(e.message, 'err'); });
+      });
+    });
+
+    Array.prototype.forEach.call($('mid').querySelectorAll('[data-basis]'), function (b) {
+      b.addEventListener('click', function () {
+        var uid = Number(b.dataset.u);
+        var row = RATES.staff.filter(function (s) { return s.userId === uid; })[0];
+        if (!row) return;
+        row.basis = b.dataset.basis;
+        api('/api/staff/' + uid + '/rate', {
+          method: 'PATCH',
+          body: JSON.stringify({ basis: row.basis, rateCents: row.rateCents, ratePct: row.ratePct })
+        }).then(function () { render(); })
+          .catch(function (e) { say(e.message, 'err'); render(); });
+      });
+    });
+
+    var mr = $('matSave');
+    if (mr) mr.addEventListener('click', function () {
+      api('/api/shop/materials-rate', {
+        method: 'PATCH', body: JSON.stringify({ cents: dollarsToCents($('matRate').value) })
+      }).then(function (res) {
+        RATES.materialsRateCents = res.cents;
+        say('Paint materials saved.', 'ok');
+      }).catch(function (e) { say(e.message, 'err'); });
+    });
+
     $('addPerson').addEventListener('click', function () {
       var name = $('nName').value.trim();
       if (!name) return say('A name is required.', 'err');

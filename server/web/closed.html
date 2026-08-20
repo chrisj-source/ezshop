@@ -186,6 +186,7 @@
     <div class="msg" id="dlgMsg"></div>
   </div>
   <div class="dfoot">
+    <button class="ghostbtn" id="dlgReopen" hidden>Reopen this file</button>
     <button class="ghostbtn sp" id="dlgCancel">Cancel</button>
     <button class="btn" id="dlgSave">Save</button>
   </div>
@@ -353,9 +354,17 @@
       '<div class="ccell hide-md">' + esc(r.salesperson || 'Unassigned') + '</div>' +
       '<div class="ccell hide-sm">' + (r.pay_type === 'cash' ? 'Cash-pay' : 'Insurance') + '</div>' +
       '<div class="cnum hide-md">' + short(r.opened_at) + '</div>' +
-      '<div class="cnum">' + (r.days_in_shop === null ? '—' : r.days_in_shop) + '</div>' +
+      '<div class="cnum">' + (r.days_in_shop === null ? '—' : r.days_in_shop) +
+        /* In to picked up, where a rental was on the hook for it. */
+        (r.rental_days != null
+          ? '<div class="csub" style="text-align:right">' + r.rental_days + 'd rental</div>'
+          : '') + '</div>' +
       '<div class="camt">' + usd(r.amount_cents) + '</div>' +
-      '<div><span class="ptag ' + (paid ? 'paid' : 'un') + '">' + (paid ? 'Paid' : 'Unpaid') + '</span></div>' +
+      '<div><span class="ptag ' + (paid ? 'paid' : 'un') + '">' + (paid ? 'Paid' : 'Unpaid') + '</span>' +
+        /* Picked up to paid — A/R, and only for the people who carry it. */
+        (!paid && r.ar_days != null
+          ? '<span class="csub" style="margin-top:2px">' + r.ar_days + 'd owed</span>'
+          : '') + '</div>' +
       '<div class="cdate">' + short(r.close_date) + ' <span class="pen">✎</span></div>' +
     '</div>';
   }
@@ -423,7 +432,10 @@
       kpi('Files closed', t.files + (t.files === 1 ? ' file' : ' files'), REPORT.cutLabel.toLowerCase() + ' cut', '') +
       kpi('On the books', usd0(t.totalCents), 'approval amounts', 'color:var(--acc2)') +
       kpi('Unpaid', usd0(t.unpaidCents), t.unpaidFiles + ' to chase', 'color:#f0bdb2') +
-      kpi('Average cycle', avg + ' days', 'date in to close date', '') +
+      kpi('Average cycle', avg + ' days', 'date in to ready', '') +
+      (t.avgArDays != null
+        ? kpi('Average A/R', t.avgArDays + ' days', 'picked up to paid, unpaid files', 'color:#f0bdb2')
+        : '') +
       '</div>';
 
     var rows = REPORT.rows.map(function (r) {
@@ -485,6 +497,9 @@
     $('dlgMsg').textContent = '';
     $('dlgMsg').className = 'msg';
     paintSeg();
+    /* Reopening is the only way back off the books, and a closed file cannot be
+       reached from the board — so the control belongs here. */
+    $('dlgReopen').hidden = !ME.caps.uncloseRepairOrders;
     $('scrim').hidden = false;
     $('dlg').hidden = false;
   }
@@ -502,6 +517,22 @@
 
   $('dlgPaid').addEventListener('click', function () { EDITPAID = true; paintSeg(); });
   $('dlgUnpaid').addEventListener('click', function () { EDITPAID = false; paintSeg(); });
+
+  $('dlgReopen').addEventListener('click', function () {
+    if (!EDIT) return;
+    if (!confirm('Reopen RO ' + EDIT.ro_number + '? It comes off the books and goes back on ' +
+      'the production schedule. A commission that paid on close comes back as an adjustment.')) return;
+    var btn = this;
+    btn.disabled = true;
+    api('/api/ro/' + EDIT.id + '/close', { method: 'DELETE' })
+      .then(function () { btn.disabled = false; closeEdit(); return load(); })
+      .catch(function (e) {
+        btn.disabled = false;
+        $('dlgMsg').textContent = e.message;
+        $('dlgMsg').className = 'msg err';
+      });
+  });
+
   $('dlgCancel').addEventListener('click', closeEdit);
   $('scrim').addEventListener('click', closeEdit);
   document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && EDIT) closeEdit(); });

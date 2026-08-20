@@ -9,6 +9,8 @@
 <link rel="stylesheet" href="/shell.css?v=7">
 <style>
   .titlerow { display:flex; align-items:flex-end; gap:22px; padding:16px 18px 0; flex:none; flex-wrap:wrap; }
+  /* body is a flex column; the list needs its own scrolling region. */
+  #list { flex:1; min-height:0; overflow-y:auto; }
   .titlerow h1 { font:500 18px var(--font); margin:0; }
   .titlemeta { font:400 11.5px var(--font); color:var(--dim); margin-top:4px; }
   .ctrls { display:flex; align-items:center; gap:9px; padding:14px 18px; flex:none; flex-wrap:wrap; }
@@ -90,7 +92,7 @@
   .caprow .mid { display:grid; place-items:center; }
   .caprow .dash { font:400 11px var(--font); color:var(--line); }
   .savenote { font:400 10.5px var(--font); color:var(--dim); margin-top:4px; }
-  .foot { padding:14px 18px 26px; font:400 11px/1.6 var(--font); color:var(--dim); max-width:820px; }
+  .foot { padding:14px 18px 26px; font:400 11px/1.6 var(--font); color:var(--dim); max-width:820px; flex:none; }
   .msg { font:400 11.5px var(--font); color:var(--stopped); }
   .msg.ok { color:var(--acc2); }
 

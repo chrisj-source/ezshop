@@ -204,6 +204,104 @@
   .foldcue .chev { display:inline-block; transition:transform .12s ease; }
   .sec.fold.shut .foldcue .chev { transform:rotate(-90deg); }
   .foldbody[hidden] { display:none; }
+
+  /* ------------------------------------------------------- close-out sheet */
+  .coscrim { position:fixed; inset:0; background:rgba(9,13,20,.74); z-index:70; }
+  .cosheet {
+    position:fixed; z-index:71; left:50%; top:50%; transform:translate(-50%,-50%);
+    width:min(820px, calc(100vw - 28px)); max-height:calc(100vh - 48px);
+    display:flex; flex-direction:column;
+    background:var(--bg); border:1px solid var(--line); border-radius:8px;
+    box-shadow:0 30px 70px rgba(0,0,0,.55);
+  }
+  .coscrim[hidden], .cosheet[hidden] { display:none; }
+  .cohead {
+    display:flex; align-items:flex-start; gap:14px; padding:15px 18px 14px;
+    background:var(--surf); border-bottom:1px solid var(--line); flex:none;
+  }
+  .cohead .cot { font:500 15px var(--font); }
+  .cohead .cos { font:400 11.5px var(--font); color:var(--dim); margin-top:3px; }
+  .cobody { flex:1; min-height:0; overflow-y:auto; }
+  .cofoot {
+    display:flex; align-items:center; gap:12px; padding:13px 18px; flex:none;
+    background:var(--surf); border-top:1px solid var(--line);
+  }
+  .cofoot .spacer { margin-left:auto; }
+  .cosec {
+    font:600 8.5px var(--font); letter-spacing:.12em; text-transform:uppercase;
+    color:var(--acc2); padding:15px 18px 8px;
+  }
+  .cosub { font:400 10.5px/1.5 var(--font); color:var(--dim); padding:0 18px 8px; max-width:620px; }
+  .labhead, .labrow {
+    display:grid; grid-template-columns:126px 74px 152px 172px 66px 88px;
+    column-gap:12px; align-items:center; padding:0 18px;
+  }
+  .labhead {
+    height:26px; border-top:1px solid var(--line); border-bottom:1px solid var(--line);
+    font:600 8.5px var(--font); letter-spacing:.11em; text-transform:uppercase; color:var(--dim);
+  }
+  .labrow { height:40px; border-bottom:1px solid var(--whisper); }
+  .labrow .who { font:500 12px var(--font); white-space:nowrap; }
+  .labrow .tr { font:400 11px var(--font); color:var(--dim); white-space:nowrap; }
+  .labrow input {
+    width:64px; text-align:right; font-variant-numeric:tabular-nums;
+    font:500 12px var(--font); padding:5px 8px;
+  }
+  .labrow input.wide { width:74px; }
+  .labrow input:disabled { color:var(--muted); border-style:dashed; }
+  .labrow .rt { font:400 11px var(--font); font-variant-numeric:tabular-nums; text-align:right; color:var(--dim); }
+  .labrow .rt.none { color:var(--stopped); }
+  .labrow .ct { font:500 12px var(--font); font-variant-numeric:tabular-nums; text-align:right; }
+  .segsm { display:flex; border:1px solid var(--line); border-radius:4px; overflow:hidden; }
+  .segsm button {
+    font:500 10px var(--font); padding:4px 9px; background:transparent; border:none;
+    color:var(--dim); min-height:0; white-space:nowrap;
+  }
+  .segsm button.on { background:var(--acc); color:var(--bg); }
+  .pdrline {
+    display:flex; align-items:center; gap:12px; padding:8px 18px 9px;
+    background:var(--surf); border-bottom:1px solid var(--whisper);
+    font:400 10.5px/1.45 var(--font); color:var(--dim);
+  }
+  .pdrline .spacer { margin-left:auto; }
+  .onerow {
+    display:grid; grid-template-columns:1fr auto 92px; column-gap:12px; align-items:center;
+    padding:9px 18px; border-top:1px solid var(--whisper); border-bottom:1px solid var(--whisper);
+    font:400 11.5px var(--font); color:var(--muted);
+  }
+  .onerow input { width:76px; text-align:right; font-variant-numeric:tabular-nums; font:500 12px var(--font); padding:5px 8px; }
+  .onerow .ct { font:500 12px var(--font); font-variant-numeric:tabular-nums; text-align:right; color:var(--text); }
+  .plines { padding:2px 18px 6px; }
+  .pline {
+    display:flex; align-items:baseline; justify-content:space-between; gap:14px;
+    padding:6px 0; border-bottom:1px solid var(--whisper);
+  }
+  .pline .l { font:400 11.5px var(--font); color:var(--muted); }
+  .pline .l.top { font:500 12px var(--font); color:var(--text); }
+  .pline .n { font:400 9.5px var(--font); color:var(--dim); margin-top:2px; }
+  .pline .v { font:400 12px var(--font); font-variant-numeric:tabular-nums; color:var(--stopped); }
+  .pline .v.zero { color:var(--dim); }
+  .pline .v.top { font:500 12.5px var(--font); color:var(--text); }
+  .profrow {
+    display:flex; align-items:flex-start; justify-content:space-between; gap:14px;
+    margin-top:10px; padding:12px 0 6px; border-top:1px solid var(--line);
+  }
+  .profrow .big { font:600 19px var(--font); font-variant-numeric:tabular-nums; color:var(--acc); }
+  .profrow .big.bad { color:var(--stopped); }
+  .profrow .pc { font:500 13px var(--font); font-variant-numeric:tabular-nums; color:var(--done); }
+  .profrow .pc.thin { color:var(--stopped); }
+  .colock { padding:34px 30px; }
+  .colock .t { font:500 15px var(--font); }
+  .colock .b { font:400 11.5px/1.6 var(--font); color:var(--dim); margin-top:8px; max-width:460px; }
+  .conote {
+    margin:10px 18px 0; padding:9px 12px; background:var(--chip);
+    border-left:2px solid var(--acc); font:400 10.5px/1.5 var(--font); color:var(--muted);
+  }
+  .conote.warn { border-left-color:var(--stopped); }
+  @media (max-width:760px) {
+    .labhead, .labrow { grid-template-columns:1fr 120px 96px; }
+    .labhead .hide-sm, .labrow .hide-sm { display:none; }
+  }
   .savehint {
     font:400 11px var(--font); color:var(--dim); margin:9px 0 2px;
   }
@@ -495,6 +593,26 @@
   </div>
 </div>
 
+<!-- The close-out sheet. Owner and accounting only; for anyone else the file
+     closes without one, and the figures never leave the server. -->
+<div class="coscrim" id="coScrim" hidden></div>
+<div class="cosheet" id="coSheet" hidden role="dialog" aria-modal="true" aria-label="Close-out">
+  <div class="cohead">
+    <div>
+      <div class="cot" id="coTitle">Closing</div>
+      <div class="cos" id="coSub">—</div>
+    </div>
+    <button class="close" id="coX" aria-label="Cancel">&times;</button>
+  </div>
+  <div class="cobody" id="coBody"></div>
+  <div class="cofoot">
+    <div class="msg" id="coMsg"></div>
+    <div class="spacer"></div>
+    <button class="btn" id="coCancel">Cancel</button>
+    <button class="btn btn-solid" id="coDo">Close the file</button>
+  </div>
+</div>
+
 <script src="/photos.js?v=5"></script>
 <script src="/shell.js?v=7"></script>
 <script>
@@ -503,6 +621,10 @@
   var ME = null, CFG = null, FILES = [], STATUSES = [], GROUPS = [], LANES = [], STAFF = [];
   var DOCTYPES = [], OPEN = null, VIEW = 'table', MEDIA = [], LBAT = 0, LBPAGE = 1;
   var SUBLET_STATES = ['scheduled', 'out', 'returned', 'invoiced'];
+  /* Alphabetical, with the shop's own loaner last — it is not a rental company. */
+  var RENTAL_PROVIDERS = ['Avis', 'Budget', 'Enterprise', 'Hertz', 'Loaner'];
+  /* The close-out sheet's working state while it is open. */
+  var CO = null;
   var SUBLET_SERVICES = ['ADAS calibration', 'Windshield / glass', 'Alignment', 'Mechanical', 'Other'];
   var VENDOR_NAMES = [];
   /* Set while the browser is producing a printout, so the sheet can leave off
@@ -560,8 +682,16 @@
     return '$' + (c / 100).toLocaleString('en-US',
       { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   }
-  /** Today in the browser's own day, for the close-date default. */
-  function isoToday() {
+  /** Dollars in, cents out. The desk types dollars; the server stores cents. */
+  function toCents(v) {
+    var n = parseFloat(String(v).replace(/[^0-9.\-]/g, ''));
+    return isNaN(n) ? 0 : Math.round(n * 100);
+  }
+  /** Cents as a bare number for an input — no symbol, no thousands separator. */
+  function dollars(c) {
+    return ((Number(c) || 0) / 100).toFixed(2);
+  }
+  /** Today in the browser's own day, for the close-date default. */  function isoToday() {
     var d = new Date(), p = function (n) { return String(n).padStart(2, '0'); };
     return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
   }
@@ -817,10 +947,17 @@
     loadSublets();
     var closed = $('fClosed').checked ? '?closed=1' : '';
     return Promise.all([api('/api/board' + closed), api('/api/board/summary')])
-      .then(function (r) { FILES = r[0].files; renderKpis(r[1]); render(); });
+      .then(function (r) {
+        FILES = r[0].files;
+        SERVER_SUMMARY = r[1];
+        render();
+      });
   }
 
   var SUMMARY = null;
+  /* The whole-shop figures. Kept because they carry whether this person may see
+     money at all; the strip itself is drawn from the filtered rows. */
+  var SERVER_SUMMARY = null;
 
   function renderKpis(s) {
     SUMMARY = s;
@@ -1329,6 +1466,9 @@
 
   function render() {
     var rows = filtered();
+    /* The strip describes what is on screen, not what is in the shop — filter to
+       a body tech and every number is that tech's. */
+    renderKpis(summarise(rows));
 
     if (!rows.length) {
       $('gridBody').innerHTML = '';
@@ -1345,6 +1485,38 @@
     syncPrintHead(rows.length);
     if (VIEW === 'table') renderTable(rows);
     else renderCycle(rows);
+  }
+
+  /**
+   * The KPI strip, worked out from the rows actually showing. The server's
+   * whole-shop summary is kept only for the money capability it carries —
+   * severity stays hidden from anyone who may not see money.
+   */
+  function summarise(rows) {
+    var money = SERVER_SUMMARY ? SERVER_SUMMARY.severityCents != null : false;
+    var hold = 0, stalled = 0, past = 0, hours = 0, cents = 0, days = 0, dayed = 0;
+    var today = new Date(); today.setHours(0, 0, 0, 0);
+
+    rows.forEach(function (f) {
+      if (f.onHold) hold++;
+      /* Same definitions the server uses, so a filtered number means the same
+         thing as the unfiltered one: 96 hours in status, promised date past. */
+      if (Number(f.hoursInStatus || 0) >= 96) stalled++;
+      if (f.promisedAt && new Date(f.promisedAt) < today) past++;
+      hours += Number(f.laborHours || 0);
+      cents += Number(f.amount_cents || 0);
+      if (f.daysInShop != null) { days += Number(f.daysInShop); dayed++; }
+    });
+
+    return {
+      inList: rows.length,
+      severityCents: money ? cents : null,
+      laborHours: hours,
+      avgDays: dayed ? (days / dayed).toFixed(1) : '0.0',
+      onHold: hold,
+      stalled: stalled,
+      pastTarget: past
+    };
   }
 
   /**
@@ -2119,6 +2291,66 @@
       }
     }
 
+    /* Deductible and rental are settled here, while the car is in the shop —
+       long before anyone clicks Close. The close-out sheet then has them. */
+    if (ME.caps.editRepairOrders) {
+      LAST.push('<div class="sec">Deductible and rental</div>');
+      LAST.push('<div class="stack">' +
+        '<label class="row" style="gap:7px;align-items:center">' +
+        '<input type="checkbox" id="dedOn"' + (r.deductible_collect ? ' checked' : '') + '>' +
+        '<span class="sub" style="text-transform:none;letter-spacing:0">Collecting a deductible</span>' +
+        '</label>' +
+        '<div class="row">' +
+          '<label class="row" style="gap:7px;align-items:center">' +
+          '<span class="sub" style="text-transform:none;letter-spacing:0">Their deductible</span>' +
+          '<input id="dedOwed" style="width:100px;text-align:right" value="' +
+            esc(dollars(r.deductible_cents)) + '"></label>' +
+          '<label class="row" style="gap:7px;align-items:center">' +
+          '<span class="sub" style="text-transform:none;letter-spacing:0">We are charging</span>' +
+          '<input id="dedCharge" style="width:100px;text-align:right" value="' +
+            esc(dollars(r.deductible_charge_cents)) + '"></label>' +
+          '<button class="btn" id="dedSave">Save</button>' +
+        '</div>' +
+        '<span class="sub" style="text-transform:none;letter-spacing:0">' +
+          'Anything not collected is given away — it comes off the profit and off the commission base.' +
+        '</span>' +
+        '<div class="row" style="margin-top:4px">' +
+          '<label class="row" style="gap:7px;align-items:center">' +
+          '<span class="sub" style="text-transform:none;letter-spacing:0">Rental</span>' +
+          '<select id="rentProv"><option value="">None</option>' +
+          RENTAL_PROVIDERS.map(function (p) {
+            return '<option value="' + esc(p) + '"' +
+              (r.rental_provider === p ? ' selected' : '') + '>' + esc(p) + '</option>';
+          }).join('') + '</select></label>' +
+          '<label class="row" style="gap:7px;align-items:center">' +
+          '<input type="checkbox" id="rentCov"' + (r.rental_covered ? ' checked' : '') + '>' +
+          '<span class="sub" style="text-transform:none;letter-spacing:0">Coverage</span></label>' +
+          '<label class="row" style="gap:7px;align-items:center">' +
+          '<span class="sub" style="text-transform:none;letter-spacing:0">Cost</span>' +
+          '<input id="rentCost" style="width:100px;text-align:right" value="' +
+            esc(dollars(r.rental_cost_cents)) + '"></label>' +
+          '<button class="btn" id="rentSave">Save</button>' +
+        '</div>' +
+        '<span class="sub" style="text-transform:none;letter-spacing:0">' +
+          'A covered rental is reimbursed, so the shop carries none of it — the coverage tick is what says there is money to chase. A loaner is the shop’s own cost.' +
+        '</span>' +
+      '</div>');
+    }
+
+    /* Whether the commission is owed on this car. Not a close-time question. */
+    if (ME.caps.editPayPlans && (d.assigned || {}).sales) {
+      LAST.push('<div class="sec">Sales pay</div>');
+      LAST.push('<div class="stack">' +
+        '<label class="row" style="gap:7px;align-items:center">' +
+        '<input type="checkbox" id="commPay"' + (r.commission_payable ? ' checked' : '') + '>' +
+        '<span class="sub" style="text-transform:none;letter-spacing:0">Commission payable on this file</span>' +
+        '</label>' +
+        '<span class="sub" style="text-transform:none;letter-spacing:0">' +
+          'Off for a house deal, a re-write someone else closed, or a car nobody earns on. ' +
+          'The close-out sheet leaves the sales pay line out entirely when this is off.' +
+        '</span></div>');
+    }
+
     if (r.voided_at && d.canVoid) {
       LAST.push('<div class="sec">Bring it back</div>');
       LAST.push('<div class="stack">' +
@@ -2261,6 +2493,9 @@
       var paid = $('clPaid').value === '1';
       var date = $('clDate').value;
       if (!date) return say('Pick a close date.', 'err');
+      /* Owner and accounting get the sheet; everyone else closes straight through,
+         because for them there is no sheet to show. */
+      if (ME.caps.viewPayPlans) return openCloseout(OPEN, date, paid);
       dc.disabled = true;
       api('/api/ro/' + OPEN + '/close', {
         method: 'POST', body: JSON.stringify({ paid: paid, closeDate: date })
@@ -2273,6 +2508,49 @@
         dc.disabled = false;
         say(e.message, 'err');
       });
+    });
+
+    var ds = $('dedSave');
+    if (ds) ds.addEventListener('click', function () {
+      api('/api/ro/' + OPEN + '/deductible', {
+        method: 'PATCH',
+        body: JSON.stringify({
+          cents: toCents($('dedOwed').value),
+          collect: $('dedOn').checked,
+          chargeCents: toCents($('dedCharge').value)
+        })
+      }).then(function (res) {
+        say(res.givenCents
+          ? dollars(res.givenCents) + ' of the deductible is not being collected.'
+          : 'Deductible saved.', 'ok');
+        return reopen();
+      }).catch(function (e) { say(e.message, 'err'); });
+    });
+
+    var rs = $('rentSave');
+    if (rs) rs.addEventListener('click', function () {
+      api('/api/ro/' + OPEN + '/rental', {
+        method: 'PATCH',
+        body: JSON.stringify({
+          provider: $('rentProv').value || null,
+          covered: $('rentCov').checked,
+          costCents: toCents($('rentCost').value)
+        })
+      }).then(function (res) {
+        say(res.carriedCents
+          ? 'Saved. The shop carries ' + dollars(res.carriedCents) + '.'
+          : 'Saved. Covered, so there is reimbursement to chase.', 'ok');
+        return reopen();
+      }).catch(function (e) { say(e.message, 'err'); });
+    });
+
+    var cp = $('commPay');
+    if (cp) cp.addEventListener('change', function () {
+      api('/api/ro/' + OPEN + '/commission-payable', {
+        method: 'PATCH', body: JSON.stringify({ payable: cp.checked })
+      }).then(function (res) {
+        say(res.payable ? 'Commission payable on this file.' : 'No commission on this file.', 'ok');
+      }).catch(function (e) { say(e.message, 'err'); });
     });
 
     var sc = $('saveClose');
@@ -2697,6 +2975,276 @@
     }
     $('dLeft').scrollTop = drop.offsetTop - 60;
   });
+  /* ------------------------------------------------------- close-out sheet
+   *
+   * What the shop made on the car, shown as the file is closed. Owner and
+   * accounting only. The arithmetic is the server's — the sheet posts what the
+   * desk punched in and renders the answer it gets back, so a browser that
+   * should not have these figures never receives the pieces they are made of.
+   */
+
+  function coSay(text, kind) {
+    var m = $('coMsg');
+    m.className = 'msg ' + (kind || '');
+    m.textContent = text || '';
+  }
+
+  function coClose() {
+    $('coScrim').hidden = true;
+    $('coSheet').hidden = true;
+    CO = null;
+  }
+
+  function openCloseout(roId, date, paid) {
+    api('/api/ro/' + roId + '/closeout').then(function (d) {
+      CO = {
+        roId: roId, date: date, paid: paid,
+        labour: (d.labour || []).map(function (e) { return Object.assign({}, e); }),
+        data: d, profit: d.profit
+      };
+      $('coTitle').textContent = 'Closing RO ' + d.roNumber;
+      $('coSub').textContent = 'Booked to ' + date + ' · marked ' + (paid ? 'paid' : 'not paid');
+      $('coScrim').hidden = false;
+      $('coSheet').hidden = false;
+      coSay('');
+      coRender();
+    }).catch(function (e) {
+      /* No sheet for this person. Closing still works — it is the figures that
+         are withheld, not the ability to do the job. */
+      if (/owner|permitted/i.test(e.message)) {
+        api('/api/ro/' + roId + '/close', {
+          method: 'POST', body: JSON.stringify({ paid: paid, closeDate: date })
+        }).then(function () { say('Closed and booked to ' + date + '.', 'ok'); closeRo(); load(); })
+          .catch(function (err) { say(err.message, 'err'); });
+        return;
+      }
+      say(e.message, 'err');
+    });
+  }
+
+  /** Ask the server what this adds up to. Debounced; typing is not a decision. */
+  var coTimer = null;
+  function coPreview() {
+    if (coTimer) clearTimeout(coTimer);
+    coTimer = setTimeout(function () {
+      if (!CO) return;
+      api('/api/ro/' + CO.roId + '/closeout/preview', {
+        method: 'POST',
+        body: JSON.stringify({
+          labour: CO.labour,
+          materialsFlatCents: CO.materialsFlatCents,
+          rentalCostCents: CO.rentalCostCents
+        })
+      }).then(function (res) {
+        if (!CO) return;
+        CO.profit = res.profit;
+        CO.labour = res.labour.map(function (e, i) {
+          /* Keep the display fields the sheet renders from; the server only
+             returns the figures it needs. */
+          return Object.assign({}, CO.labour[i], e);
+        });
+        coRender();
+      }).catch(function (e) { coSay(e.message, 'err'); });
+    }, 260);
+  }
+
+  function coRender() {
+    if (!CO) return;
+    var d = CO.data, p = CO.profit || { lines: [] };
+    var out = [];
+
+    out.push('<div class="cosec">Labour</div>');
+    if (!CO.labour.length) {
+      out.push('<div class="conote warn">Nobody is assigned to this car, so there is no labour on it. ' +
+        'Assign a tech on the file if that is wrong.</div>');
+    } else {
+      out.push('<div class="cosub">Hours at their rate, a flat dollar, or the estimate’s own hours. ' +
+        'PDR can take a share of the job instead.</div>');
+      out.push('<div class="labhead">' +
+        '<div>Tech</div><div class="hide-sm">Trade</div><div>Basis</div>' +
+        '<div style="text-align:right">Figure</div>' +
+        '<div class="hide-sm" style="text-align:right">Rate</div>' +
+        '<div style="text-align:right">Cost</div></div>');
+
+      CO.labour.forEach(function (e, i) {
+        var pct = e.basis === 'pct';
+        var ems = e.basis === 'ems';
+        var flat = e.basis === 'flat';
+        var noRate = !pct && !flat && !e.rateCents;
+        var shown = flat ? dollars(e.hours) : (pct ? e.ratePct : e.hours);
+
+        out.push('<div class="labrow">' +
+          '<div class="who">' + esc(e.displayName || 'Unassigned') + '</div>' +
+          '<div class="tr hide-sm">' + esc(e.label) + '</div>' +
+          '<div><div class="segsm">' +
+            (e.canPct
+              ? '<button class="' + (flat ? 'on' : '') + '" data-b="flat" data-i="' + i + '">$</button>' +
+                '<button class="' + (pct ? 'on' : '') + '" data-b="pct" data-i="' + i + '">%</button>'
+              : '<button class="' + (e.basis === 'hours' ? 'on' : '') + '" data-b="hours" data-i="' + i + '">Hours</button>' +
+                '<button class="' + (flat ? 'on' : '') + '" data-b="flat" data-i="' + i + '">$</button>' +
+                '<button class="' + (ems ? 'on' : '') + '" data-b="ems" data-i="' + i + '">EMS</button>') +
+          '</div></div>' +
+          '<div style="display:flex;justify-content:flex-end;align-items:center;gap:6px">' +
+            (flat ? '<span class="tr">$</span>' : '') +
+            '<input class="' + (flat ? 'wide' : '') + '" data-v="' + i + '" value="' + esc(String(shown)) +
+              '"' + (ems ? ' disabled' : '') + '>' +
+            (pct ? '<span class="tr">%</span>' : '') +
+            (ems ? '<span class="tr">' + (e.emsHours > 0 ? 'pulled' : 'nothing to pull') + '</span>' : '') +
+          '</div>' +
+          '<div class="rt hide-sm' + (noRate ? ' none' : '') + '">' +
+            (pct || flat ? '—' : (e.rateCents ? money(e.rateCents) + '/hr' : 'none set')) + '</div>' +
+          '<div class="ct">' + money(coCostOf(e)) + '</div>' +
+        '</div>');
+
+        if (pct) {
+          out.push('<div class="pdrline"><span>' +
+            (e.pctAfterCosts
+              ? 'A share of what is left once parts, sublet, rental, materials and the other techs are paid.'
+              : 'A share of the approval amount, before any cost comes out.') +
+            '</span><div class="spacer"></div><div class="segsm">' +
+            '<button class="' + (e.pctAfterCosts ? '' : 'on') + '" data-pdr="before" data-i="' + i + '">Before costs</button>' +
+            '<button class="' + (e.pctAfterCosts ? 'on' : '') + '" data-pdr="after" data-i="' + i + '">After costs</button>' +
+            '</div></div>');
+        }
+      });
+    }
+
+    /* Paint materials: hours × the shop rate, or a figure by hand when the
+       painter is on a flat dollar and there are no hours to work from. */
+    var paint = CO.labour.filter(function (e) { return e.positionKey === 'paint'; })[0];
+    if (paint) {
+      var ph = paint.basis === 'flat' ? 0 : Number(paint.hours) || 0;
+      var mline = (p.lines || []).filter(function (l) { return l.key === 'materials'; })[0];
+      out.push('<div class="cosec">Paint materials</div>');
+      out.push('<div class="onerow"><div>' +
+        (ph > 0 ? ph + ' paint hours at the shop rate' : 'No paint hours — enter a figure') + '</div>' +
+        '<div>' + (ph > 0 ? '' :
+          '<span class="tr">$</span> <input id="coMat" value="' +
+          esc(dollars(CO.materialsFlatCents == null ? d.materialsFlatCents : CO.materialsFlatCents)) + '">') +
+        '</div><div class="ct">' + money(mline ? mline.cents : 0) + '</div></div>');
+    }
+
+    /* Rental: the price is the only thing this screen may touch. */
+    var rline = (p.lines || []).filter(function (l) { return l.key === 'rental'; })[0];
+    out.push('<div class="cosec">Rental</div>');
+    out.push('<div class="onerow"><div>' +
+      (d.rental.provider
+        ? esc(d.rental.provider) + (d.rental.covered ? ' — covered' : ' — not covered') +
+          '. Provider and coverage are set on the file.'
+        : 'No rental on this file.') + '</div>' +
+      '<div><span class="tr">$</span> <input id="coRent" value="' +
+        esc(dollars(CO.rentalCostCents == null ? d.rental.costCents : CO.rentalCostCents)) + '"></div>' +
+      '<div class="ct">' + money(rline ? rline.cents : 0) + '</div></div>');
+
+    out.push('<div class="cosec">What we made</div><div class="plines">');
+    out.push('<div class="pline"><div><div class="l top">Approval</div>' +
+      '<div class="n">What the insurer approved</div></div>' +
+      '<div class="v top">' + money(p.approvalCents) + '</div></div>');
+    (p.lines || []).forEach(function (l) {
+      out.push('<div class="pline"><div><div class="l">' + esc(l.label) + '</div>' +
+        '<div class="n">' + esc(l.note) + '</div></div>' +
+        '<div class="v' + (l.cents ? '' : ' zero') + '">− ' + money(l.cents) + '</div></div>');
+    });
+    out.push('<div class="profrow"><div>' +
+      '<div style="font:500 13px var(--font)">Profit</div>' +
+      '<div class="n" style="font:400 10px var(--font);color:var(--dim);margin-top:3px">' +
+        'Percentage is of the approval amount' + (p.thin ? ' — thin for this shop' : '') + '</div></div>' +
+      '<div style="display:flex;align-items:baseline;gap:12px">' +
+      '<div class="pc' + (p.thin ? ' thin' : '') + '">' + (p.profitPct || 0).toFixed(1) + '%</div>' +
+      '<div class="big' + (p.profitCents < 0 ? ' bad' : '') + '">' + money(p.profitCents) + '</div>' +
+      '</div></div></div>');
+
+    $('coBody').innerHTML = out.join('');
+    coWire();
+  }
+
+  /** What a row costs, for the row's own display. The total is the server's. */
+  function coCostOf(e) {
+    if (e.basis === 'pct') {
+      var l = ((CO.profit || {}).lines || []).filter(function (x) { return x.key === 'pdr'; })[0];
+      return l ? l.cents : 0;
+    }
+    if (e.basis === 'flat') return Math.round(Number(e.hours) || 0);
+    return Math.round((Number(e.hours) || 0) * (Number(e.rateCents) || 0));
+  }
+
+  function coWire() {
+    Array.prototype.forEach.call($('coBody').querySelectorAll('.segsm button[data-b]'), function (b) {
+      b.addEventListener('click', function () {
+        var e = CO.labour[Number(b.dataset.i)];
+        var was = e.basis;
+        e.basis = b.dataset.b;
+        /* Switching to hours or EMS means the figure was a dollar amount and is
+           now hours — carry across what makes sense rather than a wrong number. */
+        if (e.basis === 'ems') e.hours = e.emsHours || 0;
+        else if (e.basis === 'flat' && was !== 'flat') e.hours = coCostOf({ basis: was, hours: e.hours, rateCents: e.rateCents });
+        else if (was === 'flat' && e.basis === 'hours') e.hours = 0;
+        if (e.basis === 'pct' && !e.ratePct) e.ratePct = e.ratePctOnFile || 0;
+        if (e.basis !== 'flat' && !e.rateCents) e.rateCents = e.rateOnFile || 0;
+        coRender();
+        coPreview();
+      });
+    });
+
+    Array.prototype.forEach.call($('coBody').querySelectorAll('.segsm button[data-pdr]'), function (b) {
+      b.addEventListener('click', function () {
+        CO.labour[Number(b.dataset.i)].pctAfterCosts = b.dataset.pdr === 'after';
+        coRender();
+        coPreview();
+      });
+    });
+
+    Array.prototype.forEach.call($('coBody').querySelectorAll('input[data-v]'), function (inp) {
+      inp.addEventListener('change', function () {
+        var e = CO.labour[Number(inp.dataset.v)];
+        if (e.basis === 'pct') e.ratePct = parseFloat(inp.value) || 0;
+        else if (e.basis === 'flat') e.hours = toCents(inp.value);
+        else e.hours = parseFloat(inp.value) || 0;
+        coPreview();
+      });
+    });
+
+    var m = $('coMat');
+    if (m) m.addEventListener('change', function () {
+      CO.materialsFlatCents = toCents(m.value);
+      coPreview();
+    });
+    var rn = $('coRent');
+    if (rn) rn.addEventListener('change', function () {
+      CO.rentalCostCents = toCents(rn.value);
+      coPreview();
+    });
+  }
+
+  $('coX').addEventListener('click', coClose);
+  $('coCancel').addEventListener('click', coClose);
+  $('coScrim').addEventListener('click', coClose);
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && CO) coClose(); });
+
+  $('coDo').addEventListener('click', function () {
+    if (!CO) return;
+    var btn = this;
+    btn.disabled = true;
+    api('/api/ro/' + CO.roId + '/close', {
+      method: 'POST',
+      body: JSON.stringify({
+        paid: CO.paid, closeDate: CO.date, labour: CO.labour
+      })
+    }).then(function (res) {
+      btn.disabled = false;
+      var when = CO.date;
+      var made = res.profit ? ' Made ' + money(res.profit.profitCents) +
+        ' at ' + res.profit.profitPct.toFixed(1) + '%.' : '';
+      coClose();
+      say('Closed and booked to ' + when + '.' + made, 'ok');
+      closeRo();
+      load();
+    }).catch(function (e) {
+      btn.disabled = false;
+      coSay(e.message, 'err');
+    });
+  });
+
 })();
 </script>
 </body>

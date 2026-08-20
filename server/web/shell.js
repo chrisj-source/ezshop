@@ -17,11 +17,11 @@ window.Shell = (function () {
     { key: 'import',   href: '/import.html',   label: 'Import',   feature: 'ems',     cap: 'acceptImports' },
     { key: 'closed',   href: '/closed.html',   label: 'Closed',   feature: 'board',   cap: 'closeRepairOrders' },
     { key: 'reports',  href: '/reports.html',  label: 'Reports',  feature: 'reports', cap: 'viewReports' },
-    { key: 'pay',      href: '/pay.html',      label: 'Sales pay', feature: 'board',  cap: 'viewPayPlans' },
     { key: 'sales',    href: '/sales.html',    label: 'Sales',    feature: 'msales',  cap: 'manageLeads' },
     { key: 'checkin',  href: '/checkin.html',  label: 'Check-in', feature: 'mcheck' },
-    { key: 'admin',    href: '/admin.html',    label: 'Admin',    feature: 'board',   cap: 'admin' },
-    { key: 'roles',    href: '/permissions.html', label: 'Roles', feature: 'board',   cap: 'managePermissions' }
+    /* Roles and Sales pay are Admin's, reached from its tab strip — they are not
+       daily work and do not earn a slot in the main nav. */
+    { key: 'admin',    href: '/admin.html',    label: 'Admin',    feature: 'board',   cap: 'admin' }
   ];
 
   function esc(s) {

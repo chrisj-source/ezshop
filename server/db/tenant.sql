@@ -53,6 +53,9 @@ CREATE TABLE staff (
   position_key    VARCHAR(24)   NULL,
   employee_code   VARCHAR(24)   NULL,
   efficiency      DECIMAL(4,2)  NULL COMMENT 'flagged hours produced per clocked hour',
+  pay_basis       ENUM('hourly','flat','pct') NOT NULL DEFAULT 'hourly',
+  rate_cents      BIGINT        NOT NULL DEFAULT 0 COMMENT 'per hour, or per car when flat',
+  rate_pct        DECIMAL(6,3)  NOT NULL DEFAULT 0 COMMENT 'PDR only: a share of the job',
   commission_rate DECIMAL(5,2)  NULL,
   active          TINYINT(1)    NOT NULL DEFAULT 1,
   created_at      DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -180,6 +183,13 @@ CREATE TABLE repair_orders (
   materials_cost_cents BIGINT     NOT NULL DEFAULT 0,
   discount_cents    BIGINT        NOT NULL DEFAULT 0,
   shortpay_cents    BIGINT        NOT NULL DEFAULT 0,
+  deductible_cents  BIGINT        NOT NULL DEFAULT 0 COMMENT 'what the customer owes',
+  deductible_collect TINYINT(1)   NOT NULL DEFAULT 1,
+  deductible_charge_cents BIGINT  NOT NULL DEFAULT 0 COMMENT 'what we are actually charging',
+  rental_provider   VARCHAR(32)   NULL COMMENT 'Avis, Budget, Enterprise, Hertz, Loaner',
+  rental_covered    TINYINT(1)    NOT NULL DEFAULT 0 COMMENT 'policy covers it, so there is reimbursement to chase',
+  commission_payable TINYINT(1)   NOT NULL DEFAULT 1 COMMENT 'marked on the sales pay side, per file',
+  materials_flat_cents BIGINT     NOT NULL DEFAULT 0 COMMENT 'used when there are no paint hours',
   labor_hours       DECIMAL(7,2)  NOT NULL DEFAULT 0,
   target_days       INT           NULL,
   promised_at       DATE          NULL,
@@ -777,4 +787,50 @@ CREATE TABLE commission_runs (
 INSERT INTO shop_settings (setting_key, setting_value) VALUES
   ('pay_period_end', 'tuesday'),
   ('sales_tax_rate', '8.25')
+ON DUPLICATE KEY UPDATE setting_value = setting_value;
+
+-- ===========================================================================
+-- The close-out sheet
+-- ===========================================================================
+CREATE TABLE ro_labour (
+  ro_id         BIGINT UNSIGNED NOT NULL,
+  position_key  VARCHAR(24)   NOT NULL COMMENT 'pdr, body, paint, ri, detail',
+  basis         ENUM('hours','flat','ems','pct') NOT NULL,
+  hours         DECIMAL(7,2)  NOT NULL DEFAULT 0,
+  rate_cents    BIGINT        NOT NULL DEFAULT 0 COMMENT 'the rate used, so history survives a rate change',
+  rate_pct      DECIMAL(6,3)  NOT NULL DEFAULT 0,
+  pct_after_costs TINYINT(1)  NOT NULL DEFAULT 0 COMMENT 'PDR: a share of what is left, not of the approval',
+  cost_cents    BIGINT        NOT NULL DEFAULT 0,
+  user_id       BIGINT UNSIGNED NULL COMMENT 'who it is owed to',
+  display_name  VARCHAR(120)  NULL,
+  entered_by    BIGINT UNSIGNED NULL,
+  entered_at    DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (ro_id, position_key),
+  KEY ix_labour_user (user_id),
+  CONSTRAINT fk_labour_ro FOREIGN KEY (ro_id) REFERENCES repair_orders(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Kept rather than recomputed, so a rate change next month does not rewrite what
+-- last month made.
+CREATE TABLE ro_profit (
+  ro_id             BIGINT UNSIGNED NOT NULL PRIMARY KEY,
+  approval_cents    BIGINT NOT NULL DEFAULT 0,
+  deductible_given_cents BIGINT NOT NULL DEFAULT 0,
+  promises_cents    BIGINT NOT NULL DEFAULT 0,
+  rental_cents      BIGINT NOT NULL DEFAULT 0 COMMENT 'what the shop carried, so nil on a covered rental',
+  parts_cents       BIGINT NOT NULL DEFAULT 0,
+  labour_cents      BIGINT NOT NULL DEFAULT 0,
+  materials_cents   BIGINT NOT NULL DEFAULT 0,
+  sublet_cents      BIGINT NOT NULL DEFAULT 0,
+  sales_pay_cents   BIGINT NOT NULL DEFAULT 0,
+  profit_cents      BIGINT NOT NULL DEFAULT 0,
+  profit_pct        DECIMAL(6,2) NOT NULL DEFAULT 0 COMMENT 'of the approval amount',
+  settled_at        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  settled_by        BIGINT UNSIGNED NULL,
+  CONSTRAINT fk_profit_ro FOREIGN KEY (ro_id) REFERENCES repair_orders(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+INSERT INTO shop_settings (setting_key, setting_value) VALUES
+  ('materials_rate_cents', '4200'),
+  ('thin_profit_pct', '25')
 ON DUPLICATE KEY UPDATE setting_value = setting_value;

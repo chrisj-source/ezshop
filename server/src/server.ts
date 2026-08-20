@@ -28,6 +28,7 @@ import { registerSales } from './routes/sales';
 import { registerRoles } from './routes/roles';
 import { registerPay } from './routes/pay';
 import { registerTotalLoss } from './routes/totalloss';
+import { registerCloseout } from './routes/closeout';
 import { registerCalendar } from './routes/gcal';
 import { purgeExpiredSessions } from './auth/session';
 import { closeQueue, startWorker } from './queue';
@@ -75,6 +76,7 @@ async function main(): Promise<void> {
   await registerRoles(app);
   await registerPay(app);
   await registerTotalLoss(app);
+  await registerCloseout(app);
   await registerCalendar(app);
 
   app.get('/api/health', async () => {

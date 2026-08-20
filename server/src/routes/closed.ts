@@ -4,6 +4,7 @@ import { tq, tqOne, texec, withTenantTx } from '../db/tenant';
 import { requireCompany, requireFeature } from '../middleware/context';
 import { scrubMoney } from '../permissions';
 import { correctTrigger, fireTrigger } from '../lib/pay';
+import { Basis, LABOUR_TRADES, LabourEntry, Trade, priceEntry, saveCloseout } from '../lib/profit';
 
 /**
  * Closing a file.
@@ -35,6 +36,10 @@ interface ClosedRow extends RowDataPacket {
   close_date: string;
   opened_at: string;
   days_in_shop: number;
+  /** In to picked up, only where the file carried a rental. */
+  rental_days: number | null;
+  /** Picked up to paid, or to today while it is still owed. */
+  ar_days?: number;
   customer: string | null;
   vehicle: string | null;
   colour: string | null;
@@ -163,7 +168,16 @@ export async function registerClosed(app: FastifyInstance): Promise<void> {
       userId: ctx.user.id, userName: ctx.user.name, source: 'auto', note: 'file closed'
     }).catch(e => req.log.error(e));
 
-    return { ok: true, closeDate: result.closeDate, paid: result.paid };
+    /* What the car made, settled once and kept. Only the people who may see the
+       figures can send them — for anyone else the file closes without a sheet,
+       which is exactly what the close-out screen shows them. */
+    let profit = null;
+    if (ctx.caps.viewPayPlans) {
+      profit = await saveCloseout(cid, id, closeoutEntries(req.body), ctx.user.id)
+        .catch(e => { req.log.error(e); return null; });
+    }
+
+    return { ok: true, closeDate: result.closeDate, paid: result.paid, profit };
   });
 
   /**
@@ -297,8 +311,16 @@ export async function registerClosed(app: FastifyInstance): Promise<void> {
 
     const rows = await tq<ClosedRow[]>(ctx.company!.id, `
       SELECT r.id, r.ro_number, r.amount_cents, r.paid, r.paid_at, r.close_date,
-             r.opened_at, ${PAY_TYPE} AS pay_type,
-             GREATEST(DATEDIFF(COALESCE(r.delivered_at, r.close_date), DATE(r.opened_at)) - r.voided_days, 0) AS days_in_shop,
+             r.opened_at, r.delivered_at, r.closed_at, ${PAY_TYPE} AS pay_type,
+             /* Cycle is in-to-ready. Retroactive by definition: it reads the
+                ready date the file already carries, not the close date. */
+             GREATEST(DATEDIFF(COALESCE(r.delivered_at, r.closed_at, r.close_date), DATE(r.opened_at)) - r.voided_days, 0) AS days_in_shop,
+             /* In to picked up — what a rental was on the hook for. */
+             IF(r.rental_cost_cents > 0,
+                GREATEST(DATEDIFF(COALESCE(r.closed_at, r.close_date), DATE(r.opened_at)), 0),
+                NULL) AS rental_days,
+             /* Picked up to paid. A/R, and it keeps running while unpaid. */
+             GREATEST(DATEDIFF(COALESCE(r.paid_at, NOW()), COALESCE(r.closed_at, r.close_date)), 0) AS ar_days,
              c.name AS customer,
              TRIM(CONCAT(COALESCE(v.year,''), ' ', COALESCE(v.make,''), ' ', COALESCE(v.model,''))) AS vehicle,
              v.color AS colour,
@@ -316,16 +338,28 @@ export async function registerClosed(app: FastifyInstance): Promise<void> {
 
     const total = rows.reduce((n, r) => n + Number(r.amount_cents), 0);
     const unpaid = rows.filter(r => r.paid === 0);
+    /* A/R is the owner's and accounting's business. Nobody else gets the column,
+       and the figure never leaves the server for them. */
+    const seesAr = ctx.caps.viewPayPlans;
 
     return {
       from, to,
-      rows: rows.map(r => scrubMoney({ ...r, paid: r.paid === 1 }, ctx.caps)),
+      seesAr,
+      rows: rows.map(r => scrubMoney({
+        ...r,
+        paid: r.paid === 1,
+        ar_days: seesAr ? r.ar_days : undefined
+      }, ctx.caps)),
       totals: ctx.caps.money ? {
         files: rows.length,
         totalCents: total,
         unpaidFiles: unpaid.length,
         unpaidCents: unpaid.reduce((n, r) => n + Number(r.amount_cents), 0),
-        paidCents: total - unpaid.reduce((n, r) => n + Number(r.amount_cents), 0)
+        paidCents: total - unpaid.reduce((n, r) => n + Number(r.amount_cents), 0),
+        /* Average days an unpaid file has been sitting — the A/R read. */
+        avgArDays: seesAr && unpaid.length
+          ? Math.round(unpaid.reduce((n, r) => n + Number(r.ar_days ?? 0), 0) / unpaid.length)
+          : null
       } : { files: rows.length }
     };
   });
@@ -364,7 +398,9 @@ export async function registerClosed(app: FastifyInstance): Promise<void> {
              SUM(IF(r.insurer_client_id IS NULL, r.amount_cents, 0)) AS cash_cents,
              SUM(IF(r.paid = 0, r.amount_cents, 0)) AS unpaid_cents,
              SUM(IF(r.paid = 0, 1, 0)) AS unpaid_files,
-             ROUND(AVG(GREATEST(DATEDIFF(COALESCE(r.delivered_at, r.close_date), DATE(r.opened_at)) - r.voided_days, 0))) AS avg_days
+             ROUND(AVG(GREATEST(DATEDIFF(COALESCE(r.delivered_at, r.closed_at, r.close_date), DATE(r.opened_at)) - r.voided_days, 0))) AS avg_days,
+             ROUND(AVG(IF(r.paid = 0,
+               GREATEST(DATEDIFF(NOW(), COALESCE(r.closed_at, r.close_date)), 0), NULL))) AS avg_ar_days
       FROM repair_orders r
       WHERE r.close_date IS NOT NULL AND r.voided_at IS NULL
         AND r.close_date >= ? AND r.close_date <= ?
@@ -453,8 +489,37 @@ function blockersFor(ro: RowDataPacket): Array<{ what: string; where: string }> 
   return out;
 }
 
-/** Default the modal to the delivery date if there is one, otherwise today. */
-function suggestDate(ro: RowDataPacket): string {
+/**
+ * The labour the close-out sheet sent with the close. Same shape the close-out
+ * endpoints take; kept here so closing is one request rather than two.
+ */
+function closeoutEntries(body: unknown): LabourEntry[] {
+  const raw = (body as { labour?: unknown[] }).labour;
+  if (!Array.isArray(raw)) return [];
+  const out: LabourEntry[] = [];
+  for (const r of raw as Array<Record<string, unknown>>) {
+    const trade = String(r.positionKey ?? '') as Trade;
+    if (!(LABOUR_TRADES as readonly string[]).includes(trade)) continue;
+    const basis = String(r.basis ?? 'hours') as Basis;
+    if (!['hours', 'flat', 'ems', 'pct'].includes(basis)) continue;
+    const e: LabourEntry = {
+      positionKey: trade,
+      basis,
+      hours: Math.max(0, Number(r.hours) || 0),
+      rateCents: Math.max(0, Math.round(Number(r.rateCents) || 0)),
+      ratePct: Math.max(0, Math.min(100, Number(r.ratePct) || 0)),
+      pctAfterCosts: r.pctAfterCosts === true,
+      costCents: 0,
+      userId: r.userId == null ? null : Number(r.userId),
+      displayName: r.displayName == null ? null : String(r.displayName)
+    };
+    e.costCents = basis === 'pct' ? 0 : priceEntry(e);
+    out.push(e);
+  }
+  return out;
+}
+
+/** Default the modal to the delivery date if there is one, otherwise today. */function suggestDate(ro: RowDataPacket): string {
   if (ro.delivered_at) return String(ro.delivered_at).slice(0, 10);
   return new Date().toISOString().slice(0, 10);
 }

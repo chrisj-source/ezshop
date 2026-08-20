@@ -9,6 +9,8 @@ interface BoardRow extends RowDataPacket {
   on_hold: number; hold_reason: string | null; hold_owner: string | null; claim_number: string | null;
   repair_path: string; ro_type: string; opened_at: Date; promised_at: Date | null; target_days: number | null;
   amount_cents: number; labor_hours: string;
+  delivered_at: Date | null; closed_at: Date | null; paid_at: Date | null;
+  rental_cost_cents: number; voided_days: number;
   total_loss_at: Date | null; total_loss_note: string | null;
   customer_name: string | null; customer_phone: string | null; insurer_name: string | null;
   vin: string | null; year: number | null; make: string | null; model: string | null;
@@ -61,6 +63,7 @@ export async function registerBoard(app: FastifyInstance): Promise<void> {
         s.label AS status_label, s.customer_label, s.group_id, s.lane_key, s.kind,
         s.age_yellow_hours, s.age_red_hours,
         r.close_date, r.paid, r.total_loss_at, r.total_loss_note,
+        r.delivered_at, r.closed_at, r.paid_at, r.rental_cost_cents,
         g.label AS group_label,
         (SELECT COUNT(*) FROM parts_lines p
           WHERE p.ro_id = r.id AND p.gating = 1
@@ -105,7 +108,18 @@ export async function registerBoard(app: FastifyInstance): Promise<void> {
     const files = rows.map(r => {
       const sinceMs = r.status_since ? now - new Date(r.status_since).getTime() : 0;
       const hoursInStatus = Math.floor(sinceMs / 3_600_000);
-      const daysInShop = Math.floor((now - new Date(r.opened_at).getTime()) / 86_400_000);
+      /* Cycle time is in-to-ready. Once the car is ready the clock stops — it is
+         not the shop's number any more, it is the customer's. Days spent voided
+         never counted and still do not. */
+      const cycleEnd = r.delivered_at ? new Date(r.delivered_at).getTime() : now;
+      const daysInShop = Math.max(0,
+        Math.floor((cycleEnd - new Date(r.opened_at).getTime()) / 86_400_000) - Number(r.voided_days ?? 0));
+      /* Ready to picked up is what a rental actually costs, so it runs on its own
+         and only where there is a rental. */
+      const rentalEnd = r.closed_at ? new Date(r.closed_at).getTime() : now;
+      const rentalDays = Number(r.rental_cost_cents ?? 0) > 0
+        ? Math.max(0, Math.floor((rentalEnd - new Date(r.opened_at).getTime()) / 86_400_000))
+        : null;
 
       let age: 'ok' | 'yellow' | 'red' = 'ok';
       if (r.age_red_hours && hoursInStatus >= r.age_red_hours) age = 'red';
@@ -148,6 +162,10 @@ export async function registerBoard(app: FastifyInstance): Promise<void> {
         promisedAt: r.promised_at,
         targetDays: r.target_days,
         daysInShop,
+        /* True once the car is ready: the board should show a final figure, not a
+           number that keeps climbing while it sits waiting for collection. */
+        cycleStopped: !!r.delivered_at,
+        rentalDays,
         hoursInStatus,
         age,
         partsWaiting: r.parts_waiting,
@@ -187,7 +205,7 @@ export async function registerBoard(app: FastifyInstance): Promise<void> {
         COUNT(*) AS in_list,
         SUM(r.on_hold = 1) AS on_hold,
         SUM(r.labor_hours) AS labor_hours,
-        AVG(DATEDIFF(NOW(), r.opened_at)) AS avg_days,
+        AVG(GREATEST(DATEDIFF(COALESCE(r.delivered_at, NOW()), r.opened_at) - r.voided_days, 0)) AS avg_days,
         SUM(r.promised_at IS NOT NULL AND r.promised_at < CURDATE()) AS past_target,
         SUM(TIMESTAMPDIFF(HOUR, r.status_since, NOW()) >= 96) AS stalled,
         COALESCE(SUM(r.amount_cents), 0) AS severity_cents
