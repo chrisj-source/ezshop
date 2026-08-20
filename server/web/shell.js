@@ -17,9 +17,11 @@ window.Shell = (function () {
     { key: 'import',   href: '/import.html',   label: 'Import',   feature: 'ems',     cap: 'acceptImports' },
     { key: 'closed',   href: '/closed.html',   label: 'Closed',   feature: 'board',   cap: 'closeRepairOrders' },
     { key: 'reports',  href: '/reports.html',  label: 'Reports',  feature: 'reports', cap: 'viewReports' },
+    { key: 'pay',      href: '/pay.html',      label: 'Sales pay', feature: 'board',  cap: 'viewPayPlans' },
     { key: 'sales',    href: '/sales.html',    label: 'Sales',    feature: 'msales',  cap: 'manageLeads' },
     { key: 'checkin',  href: '/checkin.html',  label: 'Check-in', feature: 'mcheck' },
-    { key: 'admin',    href: '/admin.html',    label: 'Admin',    feature: 'board',   cap: 'admin' }
+    { key: 'admin',    href: '/admin.html',    label: 'Admin',    feature: 'board',   cap: 'admin' },
+    { key: 'roles',    href: '/permissions.html', label: 'Roles', feature: 'board',   cap: 'managePermissions' }
   ];
 
   function esc(s) {

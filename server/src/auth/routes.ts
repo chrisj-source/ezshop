@@ -6,7 +6,7 @@ import { hashPassword, passwordProblem, verifyPassword } from './password';
 import { createSession, revokeAllForUser, revokeSession, switchSessionCompany } from './session';
 import { companyFeatures, requireUser } from '../middleware/context';
 import { texec } from '../db/tenant';
-import { ROLE_LABEL, Role, capsFor } from '../permissions';
+import { ROLE_LABEL, Role } from '../permissions';
 
 interface LoginUser extends RowDataPacket {
   id: number; email: string | null; password_hash: string | null; login_code: string | null;
@@ -88,7 +88,7 @@ export async function registerAuth(app: FastifyInstance): Promise<void> {
     return {
       user: { id: user.id, name: user.name, email: user.email, mustChangePassword: user.must_change_pw === 1 },
       isPlatformOwner: user.is_platform_owner === 1,
-      companies: usable.map(m => ({ id: m.company_id, name: m.name, role: m.role, roleLabel: ROLE_LABEL[m.role] })),
+      companies: usable.map(m => ({ id: m.company_id, name: m.name, role: m.role, roleLabel: ROLE_LABEL[m.role] ?? m.role })),
       companyId,
       suspended: memberships.filter(m => m.company_status === 'suspended').map(m => m.name)
     };
@@ -124,9 +124,12 @@ export async function registerAuth(app: FastifyInstance): Promise<void> {
         shopType: ctx.company.shop_type, timezone: ctx.company.timezone
       } : null,
       role: ctx.role,
-      roleLabel: ctx.role ? ROLE_LABEL[ctx.role] : null,
+      /* Labels are the shop's own \u2014 a shop that calls the owner "Boss" says Boss
+         everywhere, and a custom role has no shipped label to fall back on. */
+      roleLabel: ctx.roleLabel ?? (ctx.role ? ROLE_LABEL[ctx.role] ?? ctx.role : null),
       roles: ctx.roles,
-      roleLabels: ctx.roles.map(r => ROLE_LABEL[r]),
+      roleLabels: ctx.roles.map(r =>
+        ctx.roleRows.find(x => x.role_key === r)?.label ?? ROLE_LABEL[r] ?? r),
       positionKey: ctx.positionKey,
       positionKeys: ctx.positionKeys,
       caps: ctx.caps,
@@ -135,7 +138,7 @@ export async function registerAuth(app: FastifyInstance): Promise<void> {
         .filter(m => m.company_status !== 'closed')
         .map(m => ({
           id: m.company_id, name: m.name, role: m.role,
-          roleLabel: ROLE_LABEL[m.role], suspended: m.company_status === 'suspended'
+          roleLabel: ROLE_LABEL[m.role] ?? m.role, suspended: m.company_status === 'suspended'
         }))
     };
   });

@@ -4,11 +4,42 @@ import { texec, tq, tqOne, withTenantTx } from '../db/tenant';
 import { mexec, mq, mqOne } from '../db/master';
 import { requireCompany } from '../middleware/context';
 import { hashPassword } from '../auth/password';
-import { Role, ROLE_LABEL, primaryRole, sortRoles } from '../permissions';
+import { Role, ROLE_LABEL, sortRoles } from '../permissions';
 import crypto from 'node:crypto';
 
 const ROLES: Role[] = ['owner', 'accounting', 'estimator', 'production_manager',
   'parts_manager', 'front_office', 'salesperson', 'technician'];
+
+/**
+ * The roles this shop actually has. Roles are the shop's own now, so the list is
+ * a query, not a constant — but a tenant that has not run migration 011 has no
+ * table, and then the eight we ship are the answer.
+ */
+async function shopRoles(companyId: number): Promise<Array<{ key: string; rank: number }>> {
+  const rows = await tq<Array<RowDataPacket & { role_key: string; rank_order: number }>>(companyId,
+    'SELECT role_key, rank_order FROM roles').catch(() => []);
+  if (rows.length) return rows.map(r => ({ key: r.role_key, rank: Number(r.rank_order) }));
+  return ROLES.map((r, i) => ({ key: r, rank: (i + 1) * 10 }));
+}
+
+/**
+ * `memberships.role` predates shop-owned roles and is still an eight-value ENUM.
+ * The truth is `membership_roles`; this picks the closest legal value so the old
+ * column stays sane when someone holds only custom roles.
+ */
+function enumSafePrimary(roles: string[], primary: string): Role {
+  if (ROLES.includes(primary)) return primary;
+  const fallback = ROLES.find(r => roles.includes(r));
+  return fallback ?? 'technician';
+}
+
+/** Primary role by the shop's own rank order, ties broken by key. */
+function rankedPrimary(roles: string[], defs: Array<{ key: string; rank: number }>): string {
+  const held = roles
+    .map(r => defs.find(d => d.key === r) ?? { key: r, rank: 100 })
+    .sort((a, b) => a.rank - b.rank || a.key.localeCompare(b.key));
+  return held[0]?.key ?? roles[0];
+}
 
 /** Replace the set of roles a person holds at this shop. */
 async function setRoles(userId: number, companyId: number, roles: Role[]): Promise<void> {
@@ -48,8 +79,11 @@ export async function registerAdmin(app: FastifyInstance): Promise<void> {
     };
     const wanted = sortRoles((b.roles && b.roles.length ? b.roles : (b.role ? [b.role] : [])) as Role[]);
     if (!b.name || !wanted.length) return reply.code(400).send({ error: 'Name and at least one role are required.' });
-    if (wanted.some(r => !ROLES.includes(r))) return reply.code(400).send({ error: 'Unknown role.' });
-    const primary = primaryRole(wanted)!;
+    const defs = await shopRoles(ctx.company!.id);
+    if (wanted.some(r => !defs.some(d => d.key === r))) {
+      return reply.code(400).send({ error: 'Unknown role.' });
+    }
+    const primary = enumSafePrimary(wanted, rankedPrimary(wanted, defs));
     const trades = (b.positionKeys && b.positionKeys.length)
       ? b.positionKeys
       : (b.positionKey ? [b.positionKey] : []);
@@ -132,7 +166,10 @@ export async function registerAdmin(app: FastifyInstance): Promise<void> {
       ? sortRoles(b.roles as Role[])
       : (b.role !== undefined ? sortRoles([b.role]) : null);
     if (wanted && !wanted.length) return reply.code(400).send({ error: 'Everyone needs at least one role.' });
-    if (wanted && wanted.some(r => !ROLES.includes(r))) return reply.code(400).send({ error: 'Unknown role.' });
+    const defs = await shopRoles(ctx.company!.id);
+    if (wanted && wanted.some(r => !defs.some(d => d.key === r))) {
+      return reply.code(400).send({ error: 'Unknown role.' });
+    }
 
     /* Trades: the set given, or the single key for an older client. */
     const trades = b.positionKeys !== undefined
@@ -143,7 +180,7 @@ export async function registerAdmin(app: FastifyInstance): Promise<void> {
     if (wanted || listedTrade !== undefined || b.active !== undefined) {
       const sets: string[] = [];
       const vals: unknown[] = [];
-      if (wanted) { sets.push('role = ?'); vals.push(primaryRole(wanted)!); }
+      if (wanted) { sets.push('role = ?'); vals.push(enumSafePrimary(wanted, rankedPrimary(wanted, defs))); }
       if (listedTrade !== undefined) { sets.push('position_key = ?'); vals.push(listedTrade); }
       if (b.active !== undefined) { sets.push('status = ?'); vals.push(b.active ? 'active' : 'inactive'); }
       vals.push(userId, ctx.company!.id);
@@ -379,7 +416,10 @@ export async function registerAdmin(app: FastifyInstance): Promise<void> {
     const b = req.body as { role?: Role; roles?: Role[]; positionKey?: string; positionKeys?: string[] };
     const wanted = sortRoles((b.roles && b.roles.length ? b.roles : (b.role ? [b.role] : [])) as Role[]);
     if (!wanted.length) return reply.code(400).send({ error: 'Give at least one role.' });
-    if (wanted.some(r => !ROLES.includes(r))) return reply.code(400).send({ error: 'Unknown role.' });
+    const defs = await shopRoles(ctx.company!.id);
+    if (wanted.some(r => !defs.some(d => d.key === r))) {
+      return reply.code(400).send({ error: 'Unknown role.' });
+    }
     const trades = (b.positionKeys && b.positionKeys.length)
       ? b.positionKeys
       : (b.positionKey ? [b.positionKey] : []);
@@ -387,7 +427,7 @@ export async function registerAdmin(app: FastifyInstance): Promise<void> {
     await mexec(
       `INSERT INTO memberships (user_id, company_id, role, position_key) VALUES (?, ?, ?, ?)
        ON DUPLICATE KEY UPDATE role = VALUES(role), position_key = VALUES(position_key), status = 'active'`,
-      [userId, ctx.company!.id, primaryRole(wanted)!, trades[0] ?? null]
+      [userId, ctx.company!.id, enumSafePrimary(wanted, rankedPrimary(wanted, defs)), trades[0] ?? null]
     );
     await setRoles(userId, ctx.company!.id, wanted);
     await mexec(`UPDATE users SET status = 'active' WHERE id = ?`, [userId]);
@@ -427,10 +467,20 @@ export async function registerAdmin(app: FastifyInstance): Promise<void> {
     };
   });
 
+  /** The roles a person can be given here — the shop's own list, in rank order. */
   app.get('/api/admin/roles', async (req, reply) => {
     const ctx = requireCompany(req, reply);
     if (!ctx) return;
-    return { roles: ROLES.map(r => ({ key: r, label: ROLE_LABEL[r] })) };
+    const rows = await tq<Array<RowDataPacket & { role_key: string; label: string; rank_order: number; locked: string }>>(
+      ctx.company!.id, 'SELECT role_key, label, rank_order, locked FROM roles').catch(() => []);
+    if (rows.length) {
+      return {
+        roles: rows
+          .sort((a, b) => a.rank_order - b.rank_order || a.label.localeCompare(b.label))
+          .map(r => ({ key: r.role_key, label: r.label, locked: r.locked }))
+      };
+    }
+    return { roles: ROLES.map(r => ({ key: r, label: ROLE_LABEL[r], locked: 'none' })) };
   });
 
   /* ------------------------------------------------ notification groups */

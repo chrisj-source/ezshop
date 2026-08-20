@@ -4,7 +4,10 @@ import { COOKIE_NAME } from '../config';
 import { mq, mqOne } from '../db/master';
 import { tq, tqOne } from '../db/tenant';
 import { loadSession } from '../auth/session';
-import { Caps, capsFor, capsForRoles, primaryRole, Role, sortRoles } from '../permissions';
+import {
+  CapRow, Caps, capsFromRows, emptyCaps,
+  legacyCapRows, legacyRoleRows, primaryRoleOf, Role, RoleRow, sortRoles
+} from '../permissions';
 
 export interface UserRow extends RowDataPacket {
   id: number; email: string | null; name: string;
@@ -26,6 +29,10 @@ export interface Ctx {
   role: Role | null;
   /** Every role held. Permissions are the union of these. */
   roles: Role[];
+  /** The shop's own role rows, in no particular order. */
+  roleRows: RoleRow[];
+  /** What the primary role is called at this shop. */
+  roleLabel: string | null;
   /** The trade this person is listed under. */
   positionKey: string | null;
   /** Every trade they work. */
@@ -38,7 +45,31 @@ declare module 'fastify' {
   interface FastifyRequest { ctx?: Ctx; }
 }
 
-const NO_CAPS: Caps = capsFor('technician', { techSeesOwnOnly: true });
+const NO_CAPS: Caps = emptyCaps();
+
+/**
+ * The shop's roles and their capability rows. A tenant database that has not run
+ * migration 011 has neither table, so the shipped defaults stand in — the app
+ * runs on either side of the migration.
+ */
+async function roleDefs(companyId: number, techSeesOwnOnly: boolean): Promise<{ roles: RoleRow[]; caps: CapRow[] }> {
+  const rows = await tq<Array<RowDataPacket & RoleRow>>(companyId,
+    `SELECT role_key, label, rank_order, locked, own_only, is_custom FROM roles`
+  ).catch(() => null);
+
+  if (!rows || !rows.length) {
+    return { roles: legacyRoleRows({ techSeesOwnOnly }), caps: legacyCapRows() };
+  }
+
+  const caps = await tq<Array<RowDataPacket & CapRow>>(companyId,
+    `SELECT role_key, cap_key, can_see, can_change FROM role_caps`
+  ).catch(() => []);
+
+  return {
+    roles: rows.map(r => ({ ...r, own_only: !!r.own_only, is_custom: !!r.is_custom })),
+    caps: caps.map(c => ({ ...c, can_see: !!c.can_see, can_change: !!c.can_change }))
+  };
+}
 
 /**
  * Resolves the cookie into a user, their company and that company's feature
@@ -64,6 +95,8 @@ export async function attachContext(req: FastifyRequest): Promise<void> {
   let roles: Role[] = [];
   let positionKey: string | null = null;
   let positionKeys: string[] = [];
+  let roleRows: RoleRow[] = [];
+  let roleLabel: string | null = null;
   let caps = NO_CAPS;
   const features = new Set<string>();
 
@@ -87,7 +120,7 @@ export async function attachContext(req: FastifyRequest): Promise<void> {
           [user.id, company.id]
         ).catch(() => []);
         roles = sortRoles(held.length ? held.map(r => r.role_key) : [mem.role]);
-        role = primaryRole(roles);
+        role = roles[0] ?? null;
         positionKey = mem.position_key;
       } else if (user.is_platform_owner && sess.impersonating) {
         roles = ['owner'];
@@ -98,7 +131,11 @@ export async function attachContext(req: FastifyRequest): Promise<void> {
         const setting = await tqOne<RowDataPacket & { setting_value: string }>(
           company.id, `SELECT setting_value FROM shop_settings WHERE setting_key = 'tech_sees_own_only'`
         ).catch(() => null);
-        caps = capsForRoles(roles, { techSeesOwnOnly: setting?.setting_value !== '0' });
+        const defs = await roleDefs(company.id, setting?.setting_value !== '0');
+        roleRows = defs.roles;
+        caps = capsFromRows(roles, defs.roles, defs.caps);
+        const primary = primaryRoleOf(roles, defs.roles);
+        if (primary) { role = primary.role_key; roleLabel = primary.label; }
 
         /* Trades are a set: staff_positions is the truth, staff.position_key the
            seed and the trade they are listed under. */
@@ -127,6 +164,8 @@ export async function attachContext(req: FastifyRequest): Promise<void> {
     company,
     role,
     roles,
+    roleRows,
+    roleLabel,
     positionKey,
     positionKeys,
     caps,

@@ -175,6 +175,11 @@ CREATE TABLE repair_orders (
   deductible_waived TINYINT(1)    NOT NULL DEFAULT 0,
   parts_cost_cents  BIGINT        NOT NULL DEFAULT 0,
   sublet_cost_cents BIGINT        NOT NULL DEFAULT 0,
+  rental_cost_cents BIGINT        NOT NULL DEFAULT 0,
+  towing_cost_cents BIGINT        NOT NULL DEFAULT 0,
+  materials_cost_cents BIGINT     NOT NULL DEFAULT 0,
+  discount_cents    BIGINT        NOT NULL DEFAULT 0,
+  shortpay_cents    BIGINT        NOT NULL DEFAULT 0,
   labor_hours       DECIMAL(7,2)  NOT NULL DEFAULT 0,
   target_days       INT           NULL,
   promised_at       DATE          NULL,
@@ -186,6 +191,9 @@ CREATE TABLE repair_orders (
   closed_by         BIGINT UNSIGNED NULL,
   paid              TINYINT(1)    NOT NULL DEFAULT 0,
   paid_at           DATETIME      NULL,
+  total_loss_at     DATETIME      NULL COMMENT 'own flag, like void. the board draws lane 00 from it',
+  total_loss_by     BIGINT UNSIGNED NULL,
+  total_loss_note   VARCHAR(255)  NULL,
   voided_at         DATETIME      NULL COMMENT 'own flag, not a status and not a hold',
   voided_days       INT           NOT NULL DEFAULT 0 COMMENT 'days spent voided, subtracted from days in shop',
   reopen_count      INT           NOT NULL DEFAULT 0,
@@ -194,6 +202,7 @@ CREATE TABLE repair_orders (
   UNIQUE KEY uq_ro_number (ro_number),
   KEY ix_ro_open (closed_at, status_slot),
   KEY ix_ro_close_date (close_date, paid),
+  KEY ix_ro_total_loss (total_loss_at),
   KEY ix_ro_voided (voided_at),
   KEY ix_ro_client (client_id),
   KEY ix_ro_vehicle (vehicle_id),
@@ -618,3 +627,154 @@ CREATE TABLE audit_log (
   created_at      DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
   KEY ix_audit_entity (entity, entity_id, created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ===========================================================================
+-- Roles the shop owns
+-- ===========================================================================
+CREATE TABLE roles (
+  role_key      VARCHAR(32)   NOT NULL PRIMARY KEY,
+  label         VARCHAR(64)   NOT NULL,
+  rank_order    INT           NOT NULL DEFAULT 100 COMMENT 'lower ranks higher; picks the primary role',
+  locked        ENUM('none','owner','tech') NOT NULL DEFAULT 'none',
+  own_only      TINYINT(1)    NOT NULL DEFAULT 0 COMMENT 'only sees work assigned to them',
+  is_custom     TINYINT(1)    NOT NULL DEFAULT 0,
+  note          VARCHAR(255)  NULL,
+  created_at    DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  KEY ix_roles_rank (rank_order)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE role_caps (
+  role_key      VARCHAR(32)   NOT NULL,
+  cap_key       VARCHAR(32)   NOT NULL,
+  can_see       TINYINT(1)    NOT NULL DEFAULT 0,
+  can_change    TINYINT(1)    NOT NULL DEFAULT 0,
+  PRIMARY KEY (role_key, cap_key),
+  CONSTRAINT fk_role_caps_role FOREIGN KEY (role_key) REFERENCES roles(role_key) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+INSERT INTO roles (role_key, label, rank_order, locked, own_only, is_custom, note) VALUES
+  ('owner','Owner',10,'owner',0,0,'Holds everything and cannot be reduced.'),
+  ('accounting','Accounting',20,'none',0,0,NULL),
+  ('estimator','Estimator',30,'none',0,0,NULL),
+  ('production_manager','Production manager',40,'none',0,0,NULL),
+  ('parts_manager','Parts manager',50,'none',0,0,NULL),
+  ('front_office','Front office',60,'none',0,0,NULL),
+  ('salesperson','Salesperson',70,'none',1,0,'Sees their own leads and their own files.'),
+  ('technician','Technician',80,'tech',1,0,'Locked because the lane rules hang off trades.');
+
+INSERT INTO role_caps (role_key, cap_key, can_see, can_change) VALUES
+  ('owner','ro_totals',1,1),('owner','parts_money',1,1),('owner','labour_money',1,1),
+  ('owner','commission',1,1),('owner','sees_all',1,1),('owner','edit_ro',1,1),
+  ('owner','any_status',1,1),('owner','total_loss',1,1),('owner','void_ro',1,1),
+  ('owner','close_ro',1,1),('owner','unclose',1,1),('owner','leads',1,1),
+  ('owner','del_lead',1,1),('owner','paperwork',1,1),('owner','del_doc',1,1),
+  ('owner','imports',1,1),('owner','assign',1,1),('owner','parts',1,1),
+  ('owner','sublet',1,1),('owner','reports',1,1),('owner','money_reports',1,1),
+  ('owner','pay_plans',1,1),('owner','admin',1,1),('owner','perms',1,1),
+  ('accounting','ro_totals',1,1),('accounting','parts_money',1,0),('accounting','labour_money',1,0),
+  ('accounting','commission',1,1),('accounting','sees_all',1,0),('accounting','close_ro',1,1),
+  ('accounting','unclose',1,1),('accounting','leads',1,0),('accounting','paperwork',1,1),
+  ('accounting','reports',1,1),('accounting','money_reports',1,0),('accounting','pay_plans',1,1),
+  ('estimator','ro_totals',1,1),('estimator','parts_money',1,1),('estimator','labour_money',1,1),
+  ('estimator','commission',1,0),('estimator','sees_all',1,0),('estimator','edit_ro',1,1),
+  ('estimator','any_status',1,1),('estimator','total_loss',1,1),('estimator','close_ro',1,0),
+  ('estimator','leads',1,1),('estimator','del_lead',1,1),('estimator','paperwork',1,1),
+  ('estimator','del_doc',1,1),('estimator','imports',1,1),('estimator','assign',1,1),
+  ('estimator','parts',1,1),('estimator','sublet',1,1),('estimator','reports',1,0),
+  ('estimator','money_reports',1,0),
+  ('production_manager','labour_money',1,0),('production_manager','sees_all',1,0),
+  ('production_manager','edit_ro',1,1),('production_manager','any_status',1,1),
+  ('production_manager','total_loss',1,0),('production_manager','paperwork',1,1),
+  ('production_manager','imports',1,1),('production_manager','assign',1,1),
+  ('production_manager','parts',1,1),('production_manager','sublet',1,1),
+  ('production_manager','reports',1,0),
+  ('parts_manager','parts_money',1,1),('parts_manager','sees_all',1,0),
+  ('parts_manager','paperwork',1,0),('parts_manager','parts',1,1),('parts_manager','sublet',1,1),
+  ('front_office','ro_totals',1,0),('front_office','sees_all',1,0),('front_office','edit_ro',1,1),
+  ('front_office','any_status',1,1),('front_office','close_ro',1,1),('front_office','leads',1,1),
+  ('front_office','del_lead',1,0),('front_office','paperwork',1,1),
+  ('salesperson','sees_all',1,0),('salesperson','leads',1,1),('salesperson','paperwork',1,0),
+  ('technician','sees_all',1,0),('technician','labour_money',1,0);
+
+-- ===========================================================================
+-- Pay: the stamps, the plans, the ledger
+-- ===========================================================================
+CREATE TABLE ro_triggers (
+  ro_id          BIGINT UNSIGNED NOT NULL,
+  trigger_key    ENUM('arrived','approval','car_gone','file_closed') NOT NULL,
+  fired_at       DATETIME      NOT NULL COMMENT 'when the event happened, not when the row was written',
+  fired_by       BIGINT UNSIGNED NULL,
+  fired_by_name  VARCHAR(120)  NULL,
+  source         ENUM('auto','manual') NOT NULL DEFAULT 'auto',
+  corrected_at   DATETIME      NULL,
+  note           VARCHAR(255)  NULL,
+  PRIMARY KEY (ro_id, trigger_key),
+  KEY ix_trig_fired (trigger_key, fired_at),
+  CONSTRAINT fk_trig_ro FOREIGN KEY (ro_id) REFERENCES repair_orders(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE pay_plans (
+  user_id           BIGINT UNSIGNED NOT NULL PRIMARY KEY COMMENT 'master users.id',
+  mode              ENUM('net','flat') NOT NULL DEFAULT 'net',
+  rate_pct          DECIMAL(6,3)  NOT NULL DEFAULT 0,
+  pay_when          ENUM('approval','car_gone','file_closed') NOT NULL DEFAULT 'file_closed',
+  drop_on           TINYINT(1)    NOT NULL DEFAULT 0,
+  drop_fee_cents    BIGINT        NOT NULL DEFAULT 0 COMMENT 'paid out when the car arrives',
+  drop_recover      TINYINT(1)    NOT NULL DEFAULT 1,
+  tl_amount_cents   BIGINT        NOT NULL DEFAULT 0 COMMENT 'what a total loss pays instead of a commission',
+  tl_pay_drop       TINYINT(1)    NOT NULL DEFAULT 0,
+  active            TINYINT(1)    NOT NULL DEFAULT 1,
+  updated_at        DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  updated_by        BIGINT UNSIGNED NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE pay_plan_deductions (
+  user_id       BIGINT UNSIGNED NOT NULL,
+  deduct_key    VARCHAR(24)   NOT NULL,
+  PRIMARY KEY (user_id, deduct_key),
+  CONSTRAINT fk_ppd_plan FOREIGN KEY (user_id) REFERENCES pay_plans(user_id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- A paid line is never rewritten; what changes after payment lands as an
+-- 'adjustment' against the next period.
+CREATE TABLE commission_lines (
+  id              BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  ro_id           BIGINT UNSIGNED NOT NULL,
+  user_id         BIGINT UNSIGNED NOT NULL COMMENT 'the salesperson',
+  kind            ENUM('drop','commission','total_loss','recovery','adjustment') NOT NULL,
+  amount_cents    BIGINT        NOT NULL COMMENT 'signed',
+  basis_cents     BIGINT        NOT NULL DEFAULT 0,
+  rate_pct        DECIMAL(6,3)  NOT NULL DEFAULT 0,
+  trigger_key     ENUM('arrived','approval','car_gone','file_closed') NULL,
+  earned_at       DATETIME      NOT NULL,
+  period_end      DATE          NOT NULL,
+  run_id          BIGINT UNSIGNED NULL,
+  paid_at         DATETIME      NULL,
+  paid_cents      BIGINT        NULL,
+  supersedes_id   BIGINT UNSIGNED NULL,
+  note            VARCHAR(255)  NULL,
+  created_at      DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at      DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  KEY ix_cl_person (user_id, period_end),
+  KEY ix_cl_ro (ro_id, kind),
+  KEY ix_cl_unpaid (paid_at, period_end),
+  CONSTRAINT fk_cl_ro FOREIGN KEY (ro_id) REFERENCES repair_orders(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE commission_runs (
+  id            BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  period_end    DATE          NOT NULL,
+  run_at        DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  run_by        BIGINT UNSIGNED NULL,
+  run_by_name   VARCHAR(120)  NULL,
+  paid_at       DATETIME      NULL,
+  total_cents   BIGINT        NOT NULL DEFAULT 0,
+  people        INT           NOT NULL DEFAULT 0,
+  note          VARCHAR(255)  NULL,
+  KEY ix_run_period (period_end)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+INSERT INTO shop_settings (setting_key, setting_value) VALUES
+  ('pay_period_end', 'tuesday'),
+  ('sales_tax_rate', '8.25')
+ON DUPLICATE KEY UPDATE setting_value = setting_value;

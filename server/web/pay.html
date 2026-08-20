@@ -1,0 +1,572 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1c2740">
+<title>Sales pay — Easy Shop</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/shell.css?v=7">
+<style>
+  .titlerow { display:flex; align-items:flex-end; gap:22px; padding:16px 18px 0; flex:none; flex-wrap:wrap; }
+  .titlerow h1 { font:500 18px var(--font); margin:0; }
+  .titlemeta { font:400 11.5px var(--font); color:var(--dim); margin-top:4px; }
+  .viewrow { display:flex; align-items:center; gap:3px; padding:14px 18px 0; flex:none; }
+  .viewtab {
+    font:400 12px var(--font); color:var(--dim); background:transparent; border:none;
+    border-bottom:2px solid transparent; padding:8px 13px; margin-bottom:-1px;
+  }
+  .viewtab.sel { color:var(--acc); font-weight:500; border-bottom-color:var(--acc); }
+  .ctrls { display:flex; align-items:flex-end; gap:12px; padding:13px 18px; flex:none; flex-wrap:wrap; }
+  .ctrls .sp { margin-left:auto; }
+  .lbl { font:600 8.5px var(--font); letter-spacing:.12em; text-transform:uppercase; color:var(--dim); margin-bottom:5px; }
+  .pick {
+    background:var(--chip); border:1px solid var(--line); border-radius:4px; color:var(--text);
+    font:500 11.5px var(--font); padding:6px 10px;
+  }
+  .hint { font:400 10.5px var(--font); color:var(--dim); padding-bottom:6px; }
+
+  .cols { display:grid; grid-template-columns:246px minmax(0,1fr) 372px; min-height:0; flex:1; border-top:1px solid var(--line); }
+  .rail { border-right:1px solid var(--whisper); overflow-y:auto; }
+  .railhead {
+    font:600 8.5px var(--font); letter-spacing:.12em; text-transform:uppercase; color:var(--acc2);
+    padding:12px 16px 9px; border-bottom:1px solid var(--whisper);
+  }
+  .person { padding:11px 14px; cursor:pointer; border-bottom:1px solid var(--whisper); border-left:2px solid transparent; }
+  .person:hover { background:var(--whisper); }
+  .person.sel { background:var(--whisper); border-left-color:var(--acc); }
+  .person .n { font:500 12px var(--font); }
+  .person .s { font:400 10.5px var(--font); color:var(--dim); margin-top:3px; }
+  .warn {
+    font:600 8px var(--font); letter-spacing:.07em; text-transform:uppercase; padding:2px 5px;
+    border-radius:3px; color:var(--stopped); border:1px solid var(--stopped); margin-left:6px;
+  }
+
+  .editor { overflow-y:auto; padding:16px 20px 28px; }
+  .sechead { font:600 8.5px var(--font); letter-spacing:.12em; text-transform:uppercase; color:var(--acc2); margin:0 0 9px; }
+  .sechead.gap { margin-top:22px; }
+  .cards { display:flex; gap:10px; }
+  .card {
+    flex:1; padding:11px 13px; border-radius:6px; cursor:pointer; border:1px solid var(--line);
+    background:transparent; color:var(--muted); text-align:left;
+  }
+  .card.on { border-color:var(--acc); background:var(--chip); color:var(--text); }
+  .card .t { font:500 12.5px var(--font); }
+  .card .s { font:400 10.5px/1.45 var(--font); color:var(--dim); margin-top:4px; }
+
+  .deds { display:grid; grid-template-columns:repeat(2,1fr); gap:0 26px; }
+  .ded {
+    display:grid; grid-template-columns:18px 1fr auto; gap:9px; align-items:center; height:31px;
+    border-bottom:1px solid var(--whisper); cursor:pointer;
+  }
+  .ded.off { opacity:.4; cursor:not-allowed; }
+  .ded .l { font:400 11.5px var(--font); color:var(--dim); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .ded.on .l { color:var(--text); }
+  .ded .h { font:400 10px var(--font); color:var(--dim); white-space:nowrap; }
+  .tick {
+    width:18px; height:18px; border-radius:4px; border:1px solid var(--line); background:transparent;
+    display:grid; place-items:center; font:600 10.5px var(--font); color:transparent; padding:0; cursor:pointer;
+  }
+  .tick.on { background:var(--acc); border-color:var(--acc); color:var(--bg); }
+  .tick:disabled { opacity:.55; cursor:default; }
+
+  .fields { display:flex; align-items:flex-end; gap:26px; flex-wrap:wrap; }
+  .field input {
+    background:transparent; border:1px solid var(--line); border-radius:4px; color:var(--text);
+    font:500 12.5px var(--font); font-variant-numeric:tabular-nums; padding:6px 9px; width:78px;
+  }
+  .field .unit { font:400 12px var(--font); color:var(--muted); }
+  .inline { display:flex; align-items:center; gap:7px; }
+  .togrow { display:flex; align-items:center; gap:9px; cursor:pointer; margin:12px 0; }
+  .togrow .t { font:500 11.5px var(--font); }
+  .togrow .s { font:400 10px var(--font); color:var(--dim); margin-top:2px; }
+  .callout {
+    margin-top:10px; padding:8px 11px; border-left:2px solid var(--acc); background:var(--chip);
+    font:400 10.5px/1.5 var(--font); color:var(--muted);
+  }
+  .callout.bad { border-left-color:var(--stopped); }
+
+  .side { border-left:1px solid var(--whisper); background:var(--surf); overflow-y:auto; }
+  .side .body { padding:14px 16px 22px; }
+  .mrow { display:flex; align-items:baseline; justify-content:space-between; gap:12px; padding:5px 0; }
+  .ml { font:400 11px var(--font); color:var(--muted); }
+  .ml.dim { color:var(--dim); }
+  .mv { font:400 11.5px var(--font); font-variant-numeric:tabular-nums; }
+  .mv.neg { color:var(--stopped); }
+  .mv.pos { color:var(--done); }
+  .mv.strong { font-weight:500; }
+  .msum { border-top:1px solid var(--whisper); margin-top:4px; padding-top:8px; }
+  .mtotal { border-top:1px solid var(--line); margin-top:6px; padding-top:9px; }
+  .payout { font:600 15px var(--font); font-variant-numeric:tabular-nums; color:var(--acc); }
+  .hr { height:1px; background:var(--whisper); margin:16px 0 12px; }
+  .trig { display:grid; grid-template-columns:6px 1fr auto auto; gap:9px; align-items:center; padding:5px 0; border-bottom:1px solid var(--whisper); }
+  .dot { width:6px; height:6px; border-radius:50%; background:var(--line); }
+  .dot.on { background:var(--acc); }
+  .tl { font:400 11px var(--font); color:var(--dim); }
+  .tl.on { color:var(--text); }
+  .td { font:400 10.5px var(--font); font-variant-numeric:tabular-nums; color:var(--dim); }
+  .tc { font:600 8px var(--font); letter-spacing:.07em; text-transform:uppercase; padding:2px 5px; border-radius:3px; color:var(--acc); border:1px solid var(--acc); white-space:nowrap; }
+
+  /* report */
+  .scroll { flex:1; min-height:0; overflow-y:auto; padding-bottom:30px; }
+  .pblock { border-bottom:1px solid var(--line); }
+  .phead { display:flex; align-items:center; gap:14px; padding:12px 18px; background:var(--chip); }
+  .phead .n { font:500 13px var(--font); }
+  .phead .c { font:400 11px var(--font); color:var(--dim); }
+  .phead .a { margin-left:auto; font:600 14px var(--font); font-variant-numeric:tabular-nums; color:var(--acc); }
+  .lgrid { display:grid; grid-template-columns:92px minmax(160px,1fr) 128px 92px 96px 108px; column-gap:14px; align-items:center; padding:0 18px; }
+  .lhead { height:26px; }
+  .lhead > div { font:600 8.5px var(--font); letter-spacing:.12em; text-transform:uppercase; color:var(--dim); }
+  .lrow { height:38px; border-bottom:1px solid var(--whisper); }
+  .lro { font:500 11.5px var(--font); font-variant-numeric:tabular-nums; color:var(--acc2); }
+  .lcell { font:400 11px var(--font); color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .lamt { font:400 11.5px var(--font); font-variant-numeric:tabular-nums; text-align:right; }
+  .kind { font:600 8px var(--font); letter-spacing:.07em; text-transform:uppercase; padding:2px 6px; border-radius:3px; border:1px solid currentColor; justify-self:start; }
+  .kind.drop { color:var(--acc2); }
+  .kind.commission { color:var(--done); }
+  .kind.total_loss { color:var(--blocked); }
+  .kind.recovery, .kind.adjustment { color:var(--stopped); }
+  .adjhead { padding:8px 18px 4px; font:600 8.5px var(--font); letter-spacing:.12em; text-transform:uppercase; color:var(--stopped); }
+  .empty { padding:30px 18px; font:400 12px var(--font); color:var(--dim); }
+  .msg { font:400 11.5px var(--font); color:var(--stopped); }
+  .msg.ok { color:var(--acc2); }
+  .note { padding:12px 18px 0; font:400 10.5px/1.6 var(--font); color:var(--dim); max-width:820px; }
+
+  @media (max-width:1200px) {
+    .cols { grid-template-columns:210px minmax(0,1fr); }
+    .side { display:none; }
+  }
+  @media (max-width:760px) {
+    .cols { grid-template-columns:1fr; }
+    .rail { display:none; }
+    .deds { grid-template-columns:1fr; }
+    .lgrid { grid-template-columns:1fr 96px 100px; }
+    .lgrid .hide-sm { display:none; }
+  }
+</style>
+</head>
+<body>
+
+<div class="bar">
+  <div class="brand"><div class="mark">ES</div><div class="word">Easy Shop</div></div>
+  <div class="vr"></div>
+  <div class="co" id="coName">—</div>
+  <div id="nav"></div>
+  <div class="spacer"></div>
+  <div id="bell"></div>
+  <div class="who" id="who">—</div>
+  <button class="ghostbtn" id="signout">Sign out</button>
+</div>
+<div class="hairline"></div>
+
+<div class="titlerow">
+  <div>
+    <h1>Sales pay</h1>
+    <div class="titlemeta" id="headmeta">Loading…</div>
+  </div>
+</div>
+
+<div class="viewrow" id="views"></div>
+<div class="ctrls" id="ctrls"></div>
+<div id="main"></div>
+
+<script src="/shell.js?v=7"></script>
+<script>
+(function () {
+  var api = Shell.api, esc = Shell.esc;
+  var ME = null, VIEW = 'plans';
+  var DATA = null, SEL = null, REPORT = null, PERIOD = null, FILTER = '';
+
+  function $(id) { return document.getElementById(id); }
+  function usd(cents) {
+    if (cents === null || cents === undefined) return '—';
+    var n = Number(cents) / 100;
+    return (n < 0 ? '− $' : '$') + Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+  var MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  function short(v) {
+    if (!v) return '—';
+    var s = String(v).slice(0, 10).split('-');
+    return Number(s[2]) + ' ' + MON[Number(s[1]) - 1];
+  }
+  function cap1(s) { return String(s).charAt(0).toUpperCase() + String(s).slice(1); }
+  function say(text, ok) {
+    var m = $('ctrlMsg');
+    if (!m) return;
+    m.className = 'msg' + (ok ? ' ok' : '');
+    m.textContent = text || '';
+    if (text) setTimeout(function () { if (m.textContent === text) m.textContent = ''; }, 7000);
+  }
+
+  function renderViews() {
+    var tabs = [['plans', 'Pay plans'], ['report', 'Commission report']];
+    $('views').innerHTML = tabs.map(function (t) {
+      return '<button class="viewtab' + (VIEW === t[0] ? ' sel' : '') + '" data-v="' + t[0] + '">' + esc(t[1]) + '</button>';
+    }).join('');
+    Array.prototype.forEach.call($('views').querySelectorAll('.viewtab'), function (b) {
+      b.addEventListener('click', function () {
+        VIEW = b.dataset.v;
+        renderViews();
+        VIEW === 'plans' ? renderPlans() : loadReport();
+      });
+    });
+  }
+
+  /* --------------------------------------------------------------- plans */
+
+  function selected() {
+    return DATA.people.filter(function (p) { return p.userId === SEL; })[0] || null;
+  }
+
+  function planOf(p) {
+    return p.plan || {
+      mode: null, rate: 0, payWhen: 'file_closed', dropOn: false, dropCents: 0,
+      dropRecover: true, tlCents: 0, tlPayDrop: false, active: true, deductions: []
+    };
+  }
+
+  function save(patch) {
+    var p = selected();
+    if (!p) return;
+    var plan = Object.assign({}, planOf(p), patch);
+    if (!plan.mode) plan.mode = 'net';
+    p.plan = plan;
+    renderPlans();
+    api('/api/pay/plans/' + p.userId, { method: 'PUT', body: JSON.stringify(plan) })
+      .then(function (r) {
+        say('Saved. ' + r.filesReconciled + ' of their files re-checked; paid periods left alone.', true);
+      })
+      .catch(function (e) { say(e.message); load(); });
+  }
+
+  function renderCtrls() {
+    if (VIEW !== 'plans') return;
+    $('ctrls').innerHTML =
+      '<div><div class="lbl">Pay period ends · whole shop</div>' +
+        '<select class="pick" id="periodEnd"' + (DATA.canEdit ? '' : ' disabled') + '>' +
+        DATA.days.map(function (d) {
+          return '<option value="' + d + '"' + (d === DATA.periodEnd ? ' selected' : '') + '>' + cap1(d) + '</option>';
+        }).join('') + '</select></div>' +
+      '<div class="hint">Books close that evening. The report runs after, and can be re-run until it is paid.</div>' +
+      '<div class="msg sp" id="ctrlMsg"></div>';
+
+    if (!DATA.canEdit) return;
+    $('periodEnd').addEventListener('change', function () {
+      api('/api/pay/period', { method: 'PATCH', body: JSON.stringify({ day: $('periodEnd').value }) })
+        .then(function (r) { say(r.note, true); return load(); })
+        .catch(function (e) { say(e.message); });
+    });
+  }
+
+  function renderPlans() {
+    renderCtrls();
+    var withPlan = DATA.people.filter(function (p) { return p.plan && p.plan.mode; }).length;
+    $('headmeta').textContent = DATA.people.length + ' salespeople · ' + withPlan + ' on a plan · ' +
+      'period ends ' + cap1(DATA.periodEnd) + ' · reports break down by person';
+
+    if (!DATA.people.length) {
+      $('main').innerHTML = '<div class="empty">Nobody here can carry a file’s sales assignment yet. ' +
+        'Give someone a role that works leads first.</div>';
+      return;
+    }
+    if (SEL === null) SEL = DATA.people[0].userId;
+
+    $('main').innerHTML =
+      '<div class="cols">' +
+        '<div class="rail"><div class="railhead">Salespeople</div>' + DATA.people.map(function (p) {
+          var pl = p.plan;
+          var sub = !pl || !pl.mode ? 'Not set up'
+            : (pl.rate + '% ' + (pl.mode === 'flat' ? 'of approval' : 'net of costs') +
+               (pl.dropOn ? ' · ' + usd(pl.dropCents) + ' drop' + (pl.dropRecover ? '' : ' on top') : ''));
+          return '<div class="person' + (p.userId === SEL ? ' sel' : '') + '" data-u="' + p.userId + '">' +
+            '<div class="n">' + esc(p.name) + (!pl || !pl.mode ? '<span class="warn">No plan</span>' : '') + '</div>' +
+            '<div class="s">' + esc(sub) + '</div></div>';
+        }).join('') + '</div>' +
+        '<div class="editor" id="editor"></div>' +
+        '<div class="side" id="side"></div>' +
+      '</div>';
+
+    Array.prototype.forEach.call($('main').querySelectorAll('.person'), function (el) {
+      el.addEventListener('click', function () { SEL = Number(el.dataset.u); renderPlans(); });
+    });
+
+    renderEditor();
+  }
+
+  function renderEditor() {
+    var p = selected();
+    if (!p) return;
+    var pl = planOf(p);
+    var flat = pl.mode === 'flat';
+    var unset = !pl.mode;
+    var ro = DATA.canEdit ? '' : ' disabled';
+
+    var tlLine = unset ? 'No plan on this person yet.'
+      : 'No commission is paid on a totalled car. ' + (pl.tlPayDrop
+        ? 'It pays ' + usd(pl.tlCents) + ', and the ' + usd(pl.dropOn ? pl.dropCents : 0) + ' drop fee stays paid.'
+        : (pl.tlCents - (pl.dropOn ? pl.dropCents : 0) < 0
+          ? 'It pays ' + usd(pl.tlCents) + ' against a ' + usd(pl.dropCents) + ' drop already paid — ' +
+            usd((pl.dropCents - pl.tlCents)) + ' is deducted from the pay report.'
+          : 'It pays ' + usd(pl.tlCents) + ' less the ' + usd(pl.dropOn ? pl.dropCents : 0) +
+            ' drop already paid — ' + usd(pl.tlCents - (pl.dropOn ? pl.dropCents : 0)) + ' still owed.'));
+    var tlBad = !pl.tlPayDrop && pl.dropOn && (pl.tlCents - pl.dropCents) < 0;
+
+    $('editor').innerHTML =
+      '<div class="sechead">Pay basis</div>' +
+      '<div class="cards">' +
+        '<button class="card' + (pl.mode === 'net' ? ' on' : '') + '" data-mode="net"' + ro + '>' +
+          '<div class="t">Net of costs</div>' +
+          '<div class="s">A percentage of the approval amount after the shop’s costs come out.</div></button>' +
+        '<button class="card' + (flat ? ' on' : '') + '" data-mode="flat"' + ro + '>' +
+          '<div class="t">Flat off approval</div>' +
+          '<div class="s">A percentage of the approval amount. Nothing deducted.</div></button>' +
+      '</div>' +
+
+      '<div class="sechead gap">What comes out of commission</div>' +
+      '<div class="hint" style="padding:0 0 8px">' + (flat
+        ? 'Flat plans deduct nothing — the percentage is off the approval amount as written.'
+        : 'Ticked costs come off the approval amount before the percentage is worked out.') + '</div>' +
+      '<div class="deds">' + DATA.deductions.map(function (d) {
+        var on = !flat && pl.deductions.indexOf(d.key) >= 0;
+        return '<div class="ded' + (on ? ' on' : '') + (flat ? ' off' : '') + '" data-ded="' + esc(d.key) + '">' +
+          '<button class="tick' + (on ? ' on' : '') + '"' + (flat || !DATA.canEdit ? ' disabled' : '') + '>✓</button>' +
+          '<div class="l">' + esc(d.label) + '</div><div class="h">' + esc(d.hint) + '</div></div>';
+      }).join('') + '</div>' +
+
+      '<div class="sechead gap">Rate</div>' +
+      '<div class="fields">' +
+        '<div class="field"><div class="lbl">Commission</div><div class="inline">' +
+          '<input id="fRate" value="' + pl.rate + '"' + ro + '>' +
+          '<div class="unit">% of ' + (flat ? 'approval' : 'what is left') + '</div></div></div>' +
+        '<div class="field"><div class="lbl">Paid when</div>' +
+          '<select class="pick" id="fWhen"' + ro + '>' + DATA.payWhen.map(function (w) {
+            return '<option value="' + w.key + '"' + (w.key === pl.payWhen ? ' selected' : '') + '>' + esc(w.label) + '</option>';
+          }).join('') + '</select></div>' +
+      '</div>' +
+
+      '<div class="sechead gap">Drop fee</div>' +
+      '<div class="togrow" id="fDrop">' +
+        '<button class="tick' + (pl.dropOn ? ' on' : '') + '"' + ro + '>✓</button>' +
+        '<div><div class="t">This person is paid a drop fee</div>' +
+        '<div class="s">Paid out when the vehicle drops off, ahead of any commission.</div></div></div>' +
+      (pl.dropOn ?
+        '<div class="fields" style="padding-left:28px">' +
+          '<div class="field"><div class="lbl">Amount</div><div class="inline"><div class="unit">$</div>' +
+            '<input id="fDropAmt" value="' + (pl.dropCents / 100) + '"' + ro + '>' +
+            '<div class="unit">per vehicle</div></div></div>' +
+          '<div class="field" style="flex:1;min-width:280px"><div class="lbl">Against the commission</div>' +
+            '<div class="cards">' +
+              '<button class="card' + (pl.dropRecover ? ' on' : '') + '" data-rec="1"' + ro + '>' +
+                '<div class="t">Recover it</div><div class="s">Comes out of the commission when that pays, so nobody is paid twice.</div></button>' +
+              '<button class="card' + (!pl.dropRecover ? ' on' : '') + '" data-rec="0"' + ro + '>' +
+                '<div class="t">On top</div><div class="s">They keep the drop fee and take the full commission as well.</div></button>' +
+            '</div></div>' +
+        '</div>' : '') +
+
+      '<div class="sechead gap">Total loss</div>' +
+      '<div class="fields">' +
+        '<div class="field"><div class="lbl">Pays</div><div class="inline"><div class="unit">$</div>' +
+          '<input id="fTl" value="' + (pl.tlCents / 100) + '"' + ro + '>' +
+          '<div class="unit">and no commission</div></div></div>' +
+        '<div class="togrow" id="fTlDrop" style="margin:0">' +
+          '<button class="tick' + (pl.tlPayDrop ? ' on' : '') + '"' + ro + '>✓</button>' +
+          '<div><div class="t">Pay the drop regardless</div>' +
+          '<div class="s">The drop fee stays paid and the total loss amount pays on top of it.</div></div></div>' +
+      '</div>' +
+      '<div class="callout' + (tlBad ? ' bad' : '') + '">' + esc(tlLine) + '</div>';
+
+    Array.prototype.forEach.call($('editor').querySelectorAll('.card[data-mode]'), function (b) {
+      b.addEventListener('click', function () { save({ mode: b.dataset.mode }); });
+    });
+    Array.prototype.forEach.call($('editor').querySelectorAll('.card[data-rec]'), function (b) {
+      b.addEventListener('click', function () { save({ dropRecover: b.dataset.rec === '1' }); });
+    });
+    Array.prototype.forEach.call($('editor').querySelectorAll('.ded'), function (el) {
+      el.addEventListener('click', function () {
+        if (flat || !DATA.canEdit) return;
+        var key = el.dataset.ded;
+        var list = pl.deductions.slice();
+        var at = list.indexOf(key);
+        at >= 0 ? list.splice(at, 1) : list.push(key);
+        save({ deductions: list });
+      });
+    });
+    var rate = $('fRate');
+    if (rate) rate.addEventListener('change', function () { save({ rate: Number(rate.value) || 0 }); });
+    var when = $('fWhen');
+    if (when) when.addEventListener('change', function () { save({ payWhen: when.value }); });
+    $('fDrop').addEventListener('click', function () { if (DATA.canEdit) save({ dropOn: !pl.dropOn }); });
+    var da = $('fDropAmt');
+    if (da) da.addEventListener('change', function () { save({ dropCents: Math.round(Number(da.value) * 100) || 0 }); });
+    var tl = $('fTl');
+    if (tl) tl.addEventListener('change', function () { save({ tlCents: Math.round(Number(tl.value) * 100) || 0 }); });
+    $('fTlDrop').addEventListener('click', function (e) {
+      e.stopPropagation();
+      if (DATA.canEdit) save({ tlPayDrop: !pl.tlPayDrop });
+    });
+
+    renderSide();
+  }
+
+  /** The person's own period, read off the ledger rather than guessed. */
+  function renderSide() {
+    var p = selected();
+    if (!p) return;
+    api('/api/reports/commission?period=' + encodeURIComponent(DATA.thisPeriod) + '&userId=' + p.userId)
+      .then(function (d) {
+        var me = d.people[0];
+        var side = $('side');
+        if (!side) return;
+        if (!me) {
+          side.innerHTML = '<div class="railhead">This period</div><div class="body">' +
+            '<div class="ml dim">Nothing on the ledger for ' + esc(p.name) + ' in the period to ' +
+            short(d.period) + '. A file lands here when its trigger fires.</div></div>';
+          return;
+        }
+        var lines = me.lines.slice(0, 12), adj = me.adjustments.slice(0, 8);
+        side.innerHTML = '<div class="railhead">Period to ' + short(d.period) + '</div><div class="body">' +
+          '<div class="mrow"><div class="ml">Files</div><div class="mv">' + me.files + '</div></div>' +
+          '<div class="mrow"><div class="ml">Earned this period</div><div class="mv">' + usd(me.earnedCents) + '</div></div>' +
+          '<div class="mrow"><div class="ml">Carried adjustments</div><div class="mv' +
+            (me.adjustmentCents < 0 ? ' neg' : me.adjustmentCents > 0 ? ' pos' : '') + '">' +
+            (me.adjustmentCents ? usd(me.adjustmentCents) : '—') + '</div></div>' +
+          '<div class="mrow mtotal"><div class="ml" style="font-weight:500;color:var(--text)">Owed</div>' +
+            '<div class="payout">' + usd(me.payoutCents) + '</div></div>' +
+          '<div class="hr"></div>' +
+          '<div class="railhead" style="padding:0 0 6px;border:none">Lines</div>' +
+          (lines.length ? lines.map(function (l) {
+            return '<div class="mrow"><div><div class="ml">' + esc(l.ro_number) + ' · ' + esc(l.kind.replace('_', ' ')) + '</div>' +
+              '<div class="ml dim" style="font-size:9.5px">' + short(l.earned_at) +
+              (l.paid_at ? ' · paid' : '') + '</div></div>' +
+              '<div class="mv' + (Number(l.amount_cents) < 0 ? ' neg' : '') + '">' + usd(l.amount_cents) + '</div></div>';
+          }).join('') : '<div class="ml dim">Nothing yet.</div>') +
+          (adj.length ? '<div class="hr"></div>' +
+            '<div class="railhead" style="padding:0 0 6px;border:none;color:var(--stopped)">Carried from a period already paid</div>' +
+            adj.map(function (l) {
+              return '<div class="mrow"><div><div class="ml">' + esc(l.ro_number) + '</div>' +
+                '<div class="ml dim" style="font-size:9.5px">' + esc(l.note || '') + '</div></div>' +
+                '<div class="mv' + (Number(l.amount_cents) < 0 ? ' neg' : ' pos') + '">' + usd(l.amount_cents) + '</div></div>';
+            }).join('') : '') +
+          '</div>';
+      }).catch(function () {});
+  }
+
+  /* -------------------------------------------------------------- report */
+
+  function loadReport() {
+    $('ctrls').innerHTML = '';
+    $('main').innerHTML = '<div class="empty">Loading…</div>';
+    var q = PERIOD ? '?period=' + encodeURIComponent(PERIOD) : '';
+    return api('/api/reports/commission' + q).then(function (d) {
+      REPORT = d;
+      PERIOD = d.period;
+      renderReport();
+    }).catch(function (e) {
+      $('main').innerHTML = '<div class="empty">' + esc(e.message) + '</div>';
+    });
+  }
+
+  function shiftPeriod(weeks) {
+    var d = new Date(PERIOD + 'T12:00');
+    d.setDate(d.getDate() + weeks * 7);
+    PERIOD = d.toISOString().slice(0, 10);
+    loadReport();
+  }
+
+  function renderReport() {
+    var d = REPORT;
+    $('headmeta').textContent = 'Period to ' + short(d.period) + ' · books close ' + cap1(d.periodEndDay) +
+      ' · ' + d.people.length + (d.people.length === 1 ? ' person' : ' people') + ' · ' + usd(d.totalCents) + ' owed';
+
+    $('ctrls').innerHTML =
+      '<div><div class="lbl">Pay period ending</div>' +
+        '<div class="inline"><button class="ghostbtn" id="prev">‹</button>' +
+        '<div class="pick" style="min-width:120px;text-align:center">' + short(d.period) + '</div>' +
+        '<button class="ghostbtn" id="next">›</button></div></div>' +
+      '<div class="hint">' + (d.paid
+        ? 'This period has been paid. Anything that moves now lands on the next report.'
+        : 'Not paid yet — re-run it as often as you like.') + '</div>' +
+      '<div class="msg sp" id="ctrlMsg"></div>' +
+      (d.canPay ? '<button class="ghostbtn" id="runIt">Record a run</button>' +
+        '<button class="btn" id="payIt"' + (d.people.length ? '' : ' disabled') + '>Mark paid</button>' : '');
+
+    $('prev').addEventListener('click', function () { shiftPeriod(-1); });
+    $('next').addEventListener('click', function () { shiftPeriod(1); });
+    if (d.canPay) {
+      $('runIt').addEventListener('click', function () { run(false); });
+      $('payIt').addEventListener('click', function () {
+        if (!confirm('Mark the period to ' + short(d.period) + ' paid? ' +
+          'From here these lines stand, and corrections come through as adjustments.')) return;
+        run(true);
+      });
+    }
+
+    if (!d.people.length) {
+      $('main').innerHTML = '<div class="empty">Nothing on the ledger for this period. ' +
+        'A file appears here when its trigger fires — arrival, approval, car gone or file closed.</div>';
+      return;
+    }
+
+    $('main').innerHTML = '<div class="scroll">' + d.people.map(function (p) {
+      return '<div class="pblock">' +
+        '<div class="phead"><div class="n">' + esc(p.name) + '</div>' +
+          '<div class="c">' + p.files + (p.files === 1 ? ' file' : ' files') + '</div>' +
+          (p.adjustmentCents ? '<div class="c" style="color:var(--stopped)">' +
+            usd(p.adjustmentCents) + ' carried</div>' : '') +
+          (p.paidCents ? '<div class="c">' + usd(p.paidCents) + ' already paid</div>' : '') +
+          '<div class="a">' + usd(p.payoutCents) + '</div></div>' +
+        '<div class="lgrid lhead"><div>RO</div><div>Vehicle</div><div>Line</div>' +
+          '<div class="hide-sm">Earned</div><div class="hide-sm">Basis</div><div style="text-align:right">Amount</div></div>' +
+        p.lines.map(row).join('') +
+        (p.adjustments.length
+          ? '<div class="adjhead">Carried from a period already paid</div>' + p.adjustments.map(row).join('')
+          : '') +
+      '</div>';
+    }).join('') +
+    '<div class="note">A period that has been paid is never restated. What changes afterwards — a re-cut approval, ' +
+    'a car totalled after its drop fee, a trigger fired by mistake and corrected — lands on the next report as its ' +
+    'own line, positive or negative.</div></div>';
+  }
+
+  function row(l) {
+    return '<div class="lgrid lrow">' +
+      '<div class="lro">' + esc(l.ro_number) + '</div>' +
+      '<div class="lcell">' + esc(l.vehicle || '—') + (l.total_loss_at ? ' · total loss' : '') + '</div>' +
+      '<div><span class="kind ' + esc(l.kind) + '">' + esc(l.kind.replace('_', ' ')) + '</span></div>' +
+      '<div class="lcell hide-sm">' + short(l.earned_at) + (l.paid_at ? ' · paid' : '') + '</div>' +
+      '<div class="lcell hide-sm">' + (Number(l.basis_cents) ? usd(l.basis_cents) + ' @ ' + Number(l.rate_pct) + '%' : '—') + '</div>' +
+      '<div class="lamt' + (Number(l.amount_cents) < 0 ? ' neg' : '') + '">' + usd(l.amount_cents) + '</div>' +
+    '</div>';
+  }
+
+  function run(pay) {
+    api('/api/pay/runs', { method: 'POST', body: JSON.stringify({ period: PERIOD, pay: pay }) })
+      .then(function (r) { say(r.note, true); return loadReport(); })
+      .catch(function (e) { say(e.message); });
+  }
+
+  /* ---------------------------------------------------------------- boot */
+
+  function load() {
+    return api('/api/pay/plans').then(function (d) {
+      DATA = d;
+      if (!PERIOD) PERIOD = d.thisPeriod;
+      if (VIEW === 'plans') renderPlans();
+    });
+  }
+
+  api('/api/me').then(function (me) {
+    ME = me;
+    Shell.mount({ me: me, active: 'pay' });
+    if (!ME.caps.viewPayPlans && !ME.caps.commissionMoney) {
+      $('main').innerHTML = '<div class="empty">Sales pay is the owner’s and accounting’s.</div>';
+      return;
+    }
+    renderViews();
+    if (!ME.caps.viewPayPlans) { VIEW = 'report'; renderViews(); return loadReport(); }
+    load();
+  }).catch(function (e) { if (e.message !== 'signed out') console.error(e); });
+})();
+</script>
+</body>
+</html>

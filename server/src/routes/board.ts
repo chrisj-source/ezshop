@@ -9,6 +9,7 @@ interface BoardRow extends RowDataPacket {
   on_hold: number; hold_reason: string | null; hold_owner: string | null; claim_number: string | null;
   repair_path: string; ro_type: string; opened_at: Date; promised_at: Date | null; target_days: number | null;
   amount_cents: number; labor_hours: string;
+  total_loss_at: Date | null; total_loss_note: string | null;
   customer_name: string | null; customer_phone: string | null; insurer_name: string | null;
   vin: string | null; year: number | null; make: string | null; model: string | null;
   color: string | null; plate: string | null; plate_state: string | null; status_by: string | null;
@@ -39,6 +40,10 @@ export async function registerBoard(app: FastifyInstance): Promise<void> {
     if (!ctx.caps.seesAllRepairOrders) {
       scope = ` AND EXISTS (SELECT 1 FROM ro_assignments a WHERE a.ro_id = r.id AND a.user_id = ?)`;
       params.push(ctx.user.id);
+      /* A totalled car leaves the technicians' lists but keeps its assignments:
+         nobody is unassigned, the work simply is not theirs any more. Anyone who
+         sees the whole board still sees it, at the head of the board. */
+      scope += ' AND r.total_loss_at IS NULL';
     }
 
     const closedClause = wantClosed
@@ -55,7 +60,7 @@ export async function registerBoard(app: FastifyInstance): Promise<void> {
         v.vin, v.year, v.make, v.model, v.color, v.plate, v.plate_state,
         s.label AS status_label, s.customer_label, s.group_id, s.lane_key, s.kind,
         s.age_yellow_hours, s.age_red_hours,
-        r.close_date, r.paid,
+        r.close_date, r.paid, r.total_loss_at, r.total_loss_note,
         g.label AS group_label,
         (SELECT COUNT(*) FROM parts_lines p
           WHERE p.ro_id = r.id AND p.gating = 1
@@ -112,9 +117,16 @@ export async function registerBoard(app: FastifyInstance): Promise<void> {
         statusSlot: r.status_slot,
         status: r.status_label,
         customerStatus: r.customer_label,
-        group: r.group_id,
-        groupLabel: r.group_label,
-        lane: r.lane_key,
+        group: r.total_loss_at ? 'lane_total_loss' : r.group_id,
+        groupLabel: r.total_loss_at ? 'Total loss' : r.group_label,
+        /* The 00 lane is synthesised from the flag, never a status slot: a shop
+           reconfiguring its board cannot break it, and the file keeps the slot
+           it was sitting in. */
+        lane: r.total_loss_at ? 'total_loss' : r.lane_key,
+        laneNumber: r.total_loss_at ? '00' : null,
+        totalLoss: !!r.total_loss_at,
+        totalLossAt: r.total_loss_at,
+        totalLossNote: r.total_loss_note,
         kind: r.kind,
         onHold: r.on_hold === 1,
         holdReason: r.hold_reason,
@@ -156,7 +168,13 @@ export async function registerBoard(app: FastifyInstance): Promise<void> {
       ORDER BY g.sort_order, s.sort_order
     `);
 
-    return { files, statuses, caps: ctx.caps, count: files.length };
+    return {
+      files, statuses, caps: ctx.caps, count: files.length,
+      /* Drawn above every real lane. It is not in the statuses table, so the
+         board is told about it here. */
+      totalLossLane: { key: 'total_loss', label: 'Total loss', number: '00', group: 'lane_total_loss' },
+      totalLosses: files.filter(f => (f as { totalLoss?: boolean }).totalLoss).length
+    };
   });
 
   /** KPI strip. Computed server-side so every role sees the same numbers. */

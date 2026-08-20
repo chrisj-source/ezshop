@@ -2,8 +2,9 @@ import { FastifyInstance } from 'fastify';
 import { PoolConnection, RowDataPacket, ResultSetHeader } from 'mysql2/promise';
 import { texec, tq, tqOne, withTenantTx } from '../db/tenant';
 import { requireCompany, requireFeature, Ctx } from '../middleware/context';
-import { canMoveTo, scrubMoney } from '../permissions';
+import { mayMoveTo, scrubMoney } from '../permissions';
 import { notify } from '../notify';
+import { fireTrigger, correctTrigger } from '../lib/pay';
 
 /** Anything that stops this file being closed. Empty means it can be. */
 function closeBlockers(
@@ -110,9 +111,10 @@ export async function registerRepairOrders(app: FastifyInstance): Promise<void> 
       insurers,
       canVoid: ctx.caps.voidRepairOrders,
       canClose: ctx.caps.closeRepairOrders,
+      canTotalLoss: ctx.caps.markTotalLoss,
       /* Un-closing takes money back off the books and puts the car back on the
-         schedule, so it is owner only — narrower than closing. */
-      canUnclose: ctx.roles.includes('owner'),
+         schedule, so it is narrower than closing. */
+      canUnclose: ctx.caps.uncloseRepairOrders,
       /* What would stop a close, worked out here so the file shows it rather than
          the close finding out on submit. The approval amount is the hard check;
          parts on order and an unreturned sublet are the two that catch a file
@@ -149,7 +151,7 @@ export async function registerRepairOrders(app: FastifyInstance): Promise<void> 
         `SELECT slot_id, label, lane_key, is_terminal, owner_role FROM statuses WHERE slot_id = ?`, [slot]);
       if (!target) return reply.code(400).send({ error: 'Unknown status' });
 
-      if (!canMoveTo(ctx.roles, ctx.positionKeys, target.lane_key)) {
+      if (!mayMoveTo(ctx.caps, ctx.positionKeys, target.lane_key)) {
         return reply.code(403).send({ error: 'You cannot move a file into that status.' });
       }
     }
@@ -206,6 +208,22 @@ export async function registerRepairOrders(app: FastifyInstance): Promise<void> 
         actorUserId: ctx.user.id,
         dedupeKey: `status:${id}:${target.slot_id}:${Date.now()}`
       }).catch(e => req.log.error(e));
+
+      /* The pay stamps. Slot ids are canonical — automations bind here, not to
+         labels — so a shop renaming its statuses does not move the money.
+         Approval fires on leaving Awaiting Approval, which is the real event:
+         the file is released to parts. */
+      const fired: string[] = [];
+      if (target.slot_id === 'intake.arrived') fired.push('arrived');
+      if (target.slot_id === 'est.approved' || current.status_slot === 'est.awaiting') fired.push('approval');
+      if (target.slot_id === 'deliver.pickup') fired.push('car_gone');
+
+      for (const key of fired) {
+        await fireTrigger(cid, id, key as 'arrived' | 'approval' | 'car_gone', {
+          userId: ctx.user.id, userName: ctx.user.name, source: 'auto',
+          note: `on move to ${target.label}`
+        }).catch(e => req.log.error(e));
+      }
     }
 
     return { ok: true };
@@ -298,6 +316,12 @@ export async function registerRepairOrders(app: FastifyInstance): Promise<void> 
 
       return r.insertId;
     });
+
+    /* A new file starts at Vehicle Arrived, so the arrival stamp is true the
+       moment it exists — that is what releases a drop fee. */
+    await fireTrigger(cid, id, 'arrived', {
+      userId: ctx.user.id, userName: ctx.user.name, source: 'auto', note: 'file opened'
+    }).catch(e => req.log.error(e));
 
     return { ok: true, id };
   });
@@ -477,6 +501,17 @@ export async function registerRepairOrders(app: FastifyInstance): Promise<void> 
       `INSERT INTO ro_notes (ro_id, kind, body, user_id, user_name) VALUES (?, 'auto', ?, ?, ?)`,
       [id, changes.join('. ') + '.', ctx.user.id, ctx.user.name]
     );
+
+    /* Typing a date by hand is the correction path for a stamp fired wrongly on
+       the board: the pay ledger follows the date the desk says is true. */
+    for (const [key, trig] of [['approvedAt', 'approval'], ['deliveredAt', 'car_gone']] as const) {
+      if (b[key] === undefined) continue;
+      const raw = b[key];
+      await correctTrigger(cid, id, trig,
+        raw === null || raw === '' ? null : new Date(raw.length === 10 ? raw + 'T12:00' : raw),
+        { userId: ctx.user.id, userName: ctx.user.name }
+      ).catch(e => req.log.error(e));
+    }
 
     return { ok: true };
   });

@@ -122,6 +122,15 @@
   }
   .lanen { font:500 9.5px var(--font); font-variant-numeric:tabular-nums; color:var(--acc); }
   .lanename { font:500 12px var(--font); letter-spacing:.06em; text-transform:uppercase; }
+  /* Total loss: lane 00, above everything, and red on the row. The car is still
+     in the shop, so it stays on the board — it is just not work any more. */
+  .lanehead.tlhead { background:rgba(208,126,111,.16); border-color:rgba(208,126,111,.4); }
+  .lanehead.tlhead .lanen, .lanehead.tlhead .lanename { color:#f0bdb2; }
+  .gridrow.tlrow, .cyclerow.tlrow { background:rgba(208,126,111,.11); }
+  .gridrow.tlrow:hover, .cyclerow.tlrow:hover { background:rgba(208,126,111,.17); }
+  .flag.tlflag {
+    color:#f0bdb2; background:rgba(208,126,111,.2); border:1px solid rgba(208,126,111,.55);
+  }
   .cyclerow {
     display:grid; grid-template-columns:250px 286px 1fr 96px 88px; gap:14px; align-items:center;
     padding:7px 18px; min-height:52px; border-bottom:1px solid var(--whisper); cursor:pointer;
@@ -1002,6 +1011,10 @@
 
   function flagsFor(f) {
     var out = '';
+    /* A totalled car is not a repair any more. It says so first, before hold or
+       parts — nothing else on the row matters as much. */
+    if (f.totalLoss) out += '<span class="flag tlflag" title="' +
+      esc(f.totalLossNote || 'Marked a total loss') + '">Total loss</span>';
     if (f.onHold) out += '<span class="flag" style="color:var(--stopped);border:1px solid var(--stopped)" ' +
       'title="' + esc(f.holdReason || 'On hold') + '">Hold</span>';
     if (f.partsWaiting) out += '<span class="flag" style="color:var(--blocked);border:1px solid var(--blocked)" ' +
@@ -1009,12 +1022,12 @@
     if (f.supplementsOpen) out += '<span class="flag" style="color:var(--move);border:1px solid var(--move)" ' +
       'title="Supplement open">Supp</span>';
     if (f.roType === 'wholesale') out += '<span class="flag" style="color:var(--dim);border:1px solid var(--line)">WS</span>';
-    if (needsTech(f)) out += '<span class="flag" style="color:var(--acc);border:1px solid var(--acc)" ' +
+    if (needsTech(f) && !f.totalLoss) out += '<span class="flag" style="color:var(--acc);border:1px solid var(--acc)" ' +
       'title="Nobody is on this file, or it has body or paint work with the other trade missing">Needs tech</span>';
 
     // A file that has not moved in days says so, in its own right.
     var days = Math.floor(Number(f.hoursInStatus || 0) / 24);
-    if (days > 4 && !f.partsWaiting) {
+    if (days > 4 && !f.partsWaiting && !f.totalLoss) {
       var tone = days > 9 ? 'var(--stopped)' : 'var(--blocked)';
       out += '<span class="flag" style="color:' + tone + ';border:1px solid ' + tone +
         '" title="No status change in ' + days + ' days">' + days + 'd in status</span>';
@@ -1116,7 +1129,7 @@
 
     $('gridBody').innerHTML = rows.map(function (f) {
       var edge = tone(f);
-      return '<div class="gridrow" data-id="' + f.id + '" style="grid-template-columns:' + t +
+      return '<div class="gridrow' + (f.totalLoss ? ' tlrow' : '') + '" data-id="' + f.id + '" style="grid-template-columns:' + t +
         ';--printcols:' + t + ' 1.7in">' +
         '<div><div class="edge" style="background:' + edge + '"></div></div>' +
         cols.map(function (c) { return cellFor(c, f); }).join('') +
@@ -1195,6 +1208,9 @@
       });
     }
     if (buckets.__none) order.push('__none');
+    /* Total loss is lane 00 and always first — it is not in the statuses table, so
+       it never comes through LANES, and a technician filter never reorders it. */
+    if (buckets.total_loss) order.unshift('total_loss');
 
     if (!order.length) {
       $('cycleBody').innerHTML = '<div class="empty">Nothing to show.</div>';
@@ -1205,20 +1221,22 @@
     var n = 0;
     $('cycleBody').innerHTML = order.map(function (key) {
       var list = buckets[key];
-      var label = key === '__none' ? 'Not in a production lane' : laneLabel(key);
+      var tl = key === 'total_loss';
+      var label = key === '__none' ? 'Not in a production lane' : (tl ? 'Total loss' : laneLabel(key));
       var late = list.filter(function (f) { return variance(f) > 0; }).length;
       /* A lane this tech does not own — their car has moved on. Said once on the
          heading rather than by merging the lanes together. */
-      var moved = tech && key !== '__none' && tech.lanes.indexOf(key) < 0;
-      n++;
+      var moved = tech && key !== '__none' && !tl && tech.lanes.indexOf(key) < 0;
+      if (!tl) n++;
 
-      return '<div><div class="lanehead">' +
-        '<div class="lanen">' + String(n).padStart(2, '0') + '</div>' +
+      return '<div><div class="lanehead' + (tl ? ' tlhead' : '') + '">' +
+        '<div class="lanen">' + (tl ? '00' : String(n).padStart(2, '0')) + '</div>' +
         '<div class="lanename">' + esc(label) + '</div>' +
         '<div class="sub">' + list.length + '</div>' +
         (moved ? '<div class="sub">moved on</div>' : '') +
         '<div class="sub" style="margin-left:auto">' +
-        (late ? late + ' past target' : 'all inside target') + '</div></div>' +
+        (tl ? 'off the technicians’ lists' : (late ? late + ' past target' : 'all inside target')) +
+        '</div></div>' +
         list.map(cycleRow).join('') +
         /* A phone cannot read a six-column row, so each lane also carries cards.
            `.cards` is hidden above the mobile breakpoint, so only one of the two
@@ -1271,7 +1289,7 @@
     var pct = f.targetDays ? Math.min(100, Math.round((f.daysInShop / f.targetDays) * 100)) : 0;
     var over = v != null && v > 0;
 
-    return '<div class="cyclerow" data-id="' + f.id + '">' +
+    return '<div class="cyclerow' + (f.totalLoss ? ' tlrow' : '') + '" data-id="' + f.id + '">' +
       '<div style="min-width:0">' +
       '<div class="cell" title="' + esc(f.vehicle || '') + '">' + esc(f.vehicle || '—') +
       (f.color ? ' <span style="color:var(--dim)">· ' + esc(f.color) + '</span>' : '') + '</div>' +
@@ -2074,6 +2092,33 @@
       }
     }
 
+    /* Total loss sits with the other end-of-road actions, above void: the car is
+       still here and still has to be handled, so it is not void \u2014 it just stops
+       being work. */
+    if (d.canTotalLoss && !r.voided_at) {
+      if (r.total_loss_at) {
+        LAST.push('<div class="sec">Total loss</div>');
+        LAST.push('<div class="stack">' +
+          '<span class="sub" style="text-transform:none;letter-spacing:0">Marked a total loss ' +
+          when(r.total_loss_at) + '. At the head of the board in lane 00, off the technicians\u2019 ' +
+          'lists, assignments untouched. No commission is paid on it \u2014 the shop\u2019s total-loss ' +
+          'amount pays instead.' +
+          (r.total_loss_note ? ' \u201c' + esc(r.total_loss_note) + '\u201d' : '') + '</span>' +
+          '<div class="row" style="justify-content:flex-end">' +
+          '<button class="btn" id="doTlUndo">Lift the total loss</button></div></div>');
+      } else {
+        LAST.push('<div class="sec">Total loss</div>');
+        LAST.push('<div class="stack">' +
+          '<span class="sub" style="text-transform:none;letter-spacing:0">Sends it to the head of ' +
+          'the board and off the technicians\u2019 lists. Assignments stay as they are, and the pay ' +
+          'ledger swaps the commission for the total-loss amount.</span>' +
+          '<input type="text" id="tlNote" placeholder="Anything worth recording" style="width:100%">' +
+          '<div class="row" style="justify-content:flex-end">' +
+          '<button class="btn btn-danger" id="doTl">Mark RO ' + esc(r.ro_number) +
+          ' a total loss</button></div></div>');
+      }
+    }
+
     if (r.voided_at && d.canVoid) {
       LAST.push('<div class="sec">Bring it back</div>');
       LAST.push('<div class="stack">' +
@@ -2259,6 +2304,30 @@
           return reopen();
         })
         .catch(function (e) { uc.disabled = false; say(e.message, 'err'); });
+    });
+
+    var dtl = $('doTl');
+    if (dtl) dtl.addEventListener('click', function () {
+      if (!confirm('Mark this a total loss? It goes to the head of the board and off the ' +
+        'technicians’ lists. No commission is paid on it.')) return;
+      api('/api/ro/' + OPEN + '/total-loss', {
+        method: 'POST', body: JSON.stringify({ note: $('tlNote').value.trim() || undefined })
+      }).then(function (res) {
+        closeRo();
+        return load().then(function () {
+          if (res.partsOnOrder) {
+            alert(res.partsOnOrder + ' part line' + (res.partsOnOrder === 1 ? '' : 's') +
+              ' are still on order on this file. Nothing was cancelled — the parts desk decides.');
+          }
+        });
+      }).catch(function (e) { say(e.message, 'err'); });
+    });
+
+    var dtu = $('doTlUndo');
+    if (dtu) dtu.addEventListener('click', function () {
+      api('/api/ro/' + OPEN + '/total-loss', { method: 'DELETE' })
+        .then(function () { closeRo(); return load(); })
+        .catch(function (e) { say(e.message, 'err'); });
     });
 
     var dv = $('doVoid');

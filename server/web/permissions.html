@@ -1,0 +1,455 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1c2740">
+<title>Roles &amp; permissions — Easy Shop</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/shell.css?v=7">
+<style>
+  .titlerow { display:flex; align-items:flex-end; gap:22px; padding:16px 18px 0; flex:none; flex-wrap:wrap; }
+  .titlerow h1 { font:500 18px var(--font); margin:0; }
+  .titlemeta { font:400 11.5px var(--font); color:var(--dim); margin-top:4px; }
+  .ctrls { display:flex; align-items:center; gap:9px; padding:14px 18px; flex:none; flex-wrap:wrap; }
+  .ctrls .sp { margin-left:auto; }
+  .lbl { font:600 8.5px var(--font); letter-spacing:.12em; text-transform:uppercase; color:var(--acc2); white-space:nowrap; }
+  .pick {
+    background:var(--chip); border:1px solid var(--line); border-radius:4px; color:var(--text);
+    font:500 11.5px var(--font); padding:6px 10px;
+  }
+
+  .rgrid {
+    display:grid; grid-template-columns:52px minmax(180px,1fr) 78px minmax(150px,210px) 150px 60px 26px;
+    column-gap:14px; align-items:center; padding:0 18px;
+  }
+  .rhead { height:28px; border-top:1px solid var(--line); border-bottom:1px solid var(--line); }
+  .rhead > div { font:600 8.5px var(--font); letter-spacing:.12em; text-transform:uppercase; color:var(--dim); }
+  .rrow { height:46px; border-bottom:1px solid var(--whisper); cursor:pointer; }
+  .rrow:hover { background:var(--whisper); }
+  .rrow.open { background:var(--whisper); }
+  .rrank { font:400 11.5px var(--font); font-variant-numeric:tabular-nums; color:var(--dim); }
+  .rname { font:500 12.5px var(--font); white-space:nowrap; }
+  .rnamecell { display:flex; align-items:center; gap:8px; min-width:0; }
+  .chip {
+    font:600 8.5px var(--font); letter-spacing:.07em; text-transform:uppercase;
+    padding:2px 6px; border-radius:3px; white-space:nowrap; border:1px solid currentColor;
+  }
+  .chip.lock { color:var(--dim); }
+  .chip.custom { color:var(--acc2); }
+  .rcell { font:400 11px var(--font); color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .rmoney { color:var(--acc2); }
+  .rmoney.none { color:var(--dim); }
+  .rown { color:var(--stopped); }
+  .rcount { font:400 11px var(--font); font-variant-numeric:tabular-nums; color:var(--dim); text-align:right; }
+  .rcaret { font:400 13px var(--font); color:var(--dim); text-align:center; }
+
+  .panel { background:var(--surf); border-bottom:1px solid var(--line); padding:16px 18px 18px; }
+  .prow { display:flex; align-items:flex-end; gap:26px; padding-bottom:14px; border-bottom:1px solid var(--whisper); flex-wrap:wrap; }
+  .field .flabel { font:600 8.5px var(--font); letter-spacing:.12em; text-transform:uppercase; color:var(--dim); margin-bottom:5px; }
+  .field input {
+    background:transparent; border:1px solid var(--line); border-radius:4px; color:var(--text);
+    font:500 12px var(--font); padding:6px 9px;
+  }
+  .field input.name { width:200px; }
+  .field input.rank { width:60px; font-variant-numeric:tabular-nums; }
+  .field input:disabled { color:var(--dim); }
+  .tick {
+    width:19px; height:19px; border-radius:4px; border:1px solid var(--line); background:transparent;
+    display:grid; place-items:center; font:600 11px var(--font); color:transparent; padding:0; cursor:pointer;
+  }
+  .tick.on { background:var(--acc); border-color:var(--acc); color:var(--bg); }
+  .tick:disabled { opacity:.62; cursor:default; }
+  .ownrow { display:flex; align-items:center; gap:9px; cursor:pointer; padding-bottom:5px; }
+  .ownrow .t { font:500 11.5px var(--font); }
+  .ownrow .s { font:400 10px var(--font); color:var(--dim); margin-top:2px; }
+  .danger {
+    font:500 11px var(--font); color:var(--stopped); background:transparent;
+    border:1px solid var(--stopped); border-radius:4px; padding:5px 11px; white-space:nowrap;
+  }
+  .danger:disabled { color:var(--line); border-color:var(--line); }
+
+  .locknote {
+    margin-top:12px; padding:9px 12px; border-left:2px solid var(--acc); background:var(--chip);
+    font:400 11px/1.5 var(--font); color:var(--muted);
+  }
+  .caps { display:grid; grid-template-columns:repeat(2,1fr); gap:0 34px; margin-top:14px; }
+  .sec { margin-bottom:16px; }
+  .sechead {
+    display:grid; grid-template-columns:1fr 52px 62px; align-items:end; gap:10px;
+    padding-bottom:6px; border-bottom:1px solid var(--whisper);
+  }
+  .sechead .n { font:600 8.5px var(--font); letter-spacing:.12em; text-transform:uppercase; color:var(--acc2); }
+  .sechead .c { font:600 8.5px var(--font); letter-spacing:.09em; text-transform:uppercase; color:var(--dim); text-align:center; }
+  .caprow {
+    display:grid; grid-template-columns:1fr 52px 62px; align-items:center; gap:10px;
+    height:30px; border-bottom:1px solid var(--whisper);
+  }
+  .caprow .cl { font:400 11.5px var(--font); color:var(--dim); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .caprow.on .cl { color:var(--text); }
+  .caprow .mid { display:grid; place-items:center; }
+  .caprow .dash { font:400 11px var(--font); color:var(--line); }
+  .savenote { font:400 10.5px var(--font); color:var(--dim); margin-top:4px; }
+  .foot { padding:14px 18px 26px; font:400 11px/1.6 var(--font); color:var(--dim); max-width:820px; }
+  .msg { font:400 11.5px var(--font); color:var(--stopped); }
+  .msg.ok { color:var(--acc2); }
+
+  .scrim { position:fixed; inset:0; background:rgba(9,13,20,.72); z-index:60; }
+  .dlg {
+    position:fixed; z-index:61; left:50%; top:50%; transform:translate(-50%,-50%);
+    width:min(440px, calc(100vw - 28px)); background:var(--surf);
+    border:1px solid var(--line); border-radius:8px; box-shadow:0 24px 60px rgba(0,0,0,.5);
+  }
+  .dlg[hidden], .scrim[hidden] { display:none; }
+  .dhead { padding:15px 18px 13px; border-bottom:1px solid var(--line); }
+  .dhead .t { font:500 14px var(--font); }
+  .dhead .s { font:400 11.5px var(--font); color:var(--dim); margin-top:3px; }
+  .dbody { padding:15px 18px; display:flex; flex-direction:column; gap:13px; }
+  .dinput {
+    width:100%; box-sizing:border-box; background:var(--bg); border:1px solid var(--line);
+    border-radius:4px; color:var(--text); font:400 13px var(--font); padding:9px 11px; min-height:42px;
+  }
+  .dfoot { display:flex; align-items:center; gap:9px; padding:14px 18px; border-top:1px solid var(--line); }
+  .dfoot .sp { margin-left:auto; }
+  .empty { padding:30px 18px; font:400 12px var(--font); color:var(--dim); }
+
+  @media (max-width:1100px) {
+    .rgrid { grid-template-columns:46px minmax(150px,1fr) 70px 150px 60px 26px; }
+    .rgrid .hide-md { display:none; }
+    .caps { grid-template-columns:1fr; }
+  }
+</style>
+</head>
+<body>
+
+<div class="bar">
+  <div class="brand"><div class="mark">ES</div><div class="word">Easy Shop</div></div>
+  <div class="vr"></div>
+  <div class="co" id="coName">—</div>
+  <div id="nav"></div>
+  <div class="spacer"></div>
+  <div id="bell"></div>
+  <div class="who" id="who">—</div>
+  <button class="ghostbtn" id="signout">Sign out</button>
+</div>
+<div class="hairline"></div>
+
+<div class="titlerow">
+  <div>
+    <h1>Roles &amp; permissions</h1>
+    <div class="titlemeta" id="headmeta">Loading…</div>
+  </div>
+</div>
+
+<div class="ctrls" id="ctrls"></div>
+<div class="rgrid rhead" id="rhead" hidden>
+  <div>Rank</div><div>Role</div><div class="hide-md">People</div>
+  <div class="hide-md">Money</div><div>Scope</div>
+  <div style="text-align:right">Ticks</div><div></div>
+</div>
+<div id="list"></div>
+<div class="foot" id="foot" hidden>
+  Every change is logged — who, when, what. Anything the shop’s plan does not include never appears here.
+  People holding a role pick a change up on their next page load.
+</div>
+
+<div class="scrim" id="scrim" hidden></div>
+<div class="dlg" id="dlg" hidden>
+  <div class="dhead"><div class="t" id="dlgTitle">Add a role</div><div class="s" id="dlgSub"></div></div>
+  <div class="dbody" id="dlgBody"></div>
+  <div class="dfoot">
+    <div class="msg" id="dlgMsg"></div>
+    <button class="ghostbtn sp" id="dlgCancel">Cancel</button>
+    <button class="btn" id="dlgSave">Save</button>
+  </div>
+</div>
+
+<script src="/shell.js?v=7"></script>
+<script>
+(function () {
+  var api = Shell.api, esc = Shell.esc;
+  var ME = null, DATA = null, OPEN = null, DLG = null;
+
+  function $(id) { return document.getElementById(id); }
+
+  var MONEY_CAPS = [['ro_totals', 'RO totals'], ['parts_money', 'Parts'],
+    ['labour_money', 'Labour'], ['commission', 'Commission']];
+
+  function load() {
+    return api('/api/roles').then(function (d) {
+      DATA = d;
+      render();
+    });
+  }
+
+  function sections() {
+    var out = [];
+    DATA.caps.forEach(function (c) {
+      var s = out.filter(function (x) { return x.name === c.section; })[0];
+      if (!s) { s = { name: c.section, caps: [] }; out.push(s); }
+      s.caps.push(c);
+    });
+    return out;
+  }
+
+  function renderCtrls() {
+    var canEdit = DATA.canEdit;
+    $('ctrls').innerHTML =
+      '<div class="lbl">Preset</div>' +
+      '<select class="pick" id="preset">' +
+        DATA.presets.map(function (p) {
+          return '<option value="' + esc(p) + '">' + esc(p.charAt(0).toUpperCase() + p.slice(1)) + '</option>';
+        }).join('') +
+      '</select>' +
+      '<button class="ghostbtn" id="applyPreset"' + (canEdit ? '' : ' disabled') + '>Re-apply preset</button>' +
+      '<div class="msg" id="ctrlMsg"></div>' +
+      '<button class="btn sp" id="addRole"' + (canEdit ? '' : ' disabled') + '>Add role</button>';
+
+    if (!canEdit) return;
+    $('applyPreset').addEventListener('click', function () {
+      api('/api/roles/preset', { method: 'POST', body: JSON.stringify({ preset: $('preset').value }) })
+        .then(function (r) { say(r.note, true); return load(); })
+        .catch(function (e) { say(e.message); });
+    });
+    $('addRole').addEventListener('click', openAdd);
+  }
+
+  function say(text, ok) {
+    var m = $('ctrlMsg');
+    if (!m) return;
+    m.className = 'msg' + (ok ? ' ok' : '');
+    m.textContent = text || '';
+    if (text) setTimeout(function () { if (m.textContent === text) m.textContent = ''; }, 6000);
+  }
+
+  function moneyOf(r) {
+    if (r.locked === 'owner') return 'Everything';
+    var on = MONEY_CAPS.filter(function (m) { return r.caps[m[0]] && r.caps[m[0]].see; })
+      .map(function (m) { return m[1]; });
+    return on.length ? on.join(' · ') : 'None';
+  }
+
+  function tickCount(r) {
+    var n = 0;
+    DATA.caps.forEach(function (c) {
+      var v = r.caps[c.key];
+      if (v && (v.see || v.change)) n++;
+    });
+    return n + '/' + DATA.caps.length;
+  }
+
+  function render() {
+    var total = DATA.roles.reduce(function (a, r) { return a + r.people; }, 0);
+    $('headmeta').textContent = DATA.roles.length + ' roles · ' + total + ' people · ' +
+      'what someone may do is the union of every role they hold · rank sets the title shown';
+    $('rhead').hidden = false;
+    $('foot').hidden = false;
+    renderCtrls();
+
+    $('list').innerHTML = DATA.roles.map(function (r) {
+      var money = moneyOf(r);
+      return '<div data-role="' + esc(r.key) + '">' +
+        '<div class="rgrid rrow' + (OPEN === r.key ? ' open' : '') + '" data-open="' + esc(r.key) + '">' +
+          '<div class="rrank">' + r.rank + '</div>' +
+          '<div class="rnamecell">' +
+            '<div class="rname">' + esc(r.label) + '</div>' +
+            (r.locked !== 'none' ? '<div class="chip lock">Locked</div>' : '') +
+            (r.custom ? '<div class="chip custom">Added by shop</div>' : '') +
+          '</div>' +
+          '<div class="rcell hide-md">' + r.people + (r.people === 1 ? ' person' : ' people') + '</div>' +
+          '<div class="rcell rmoney hide-md' + (money === 'None' ? ' none' : '') + '">' + esc(money) + '</div>' +
+          '<div class="rcell' + (r.ownOnly ? ' rown' : '') + '">' +
+            (r.ownOnly ? 'Own work only' : 'Whole shop') + '</div>' +
+          '<div class="rcount">' + tickCount(r) + '</div>' +
+          '<div class="rcaret">' + (OPEN === r.key ? '–' : '+') + '</div>' +
+        '</div>' +
+        (OPEN === r.key ? panel(r) : '') +
+      '</div>';
+    }).join('');
+
+    Array.prototype.forEach.call($('list').querySelectorAll('[data-open]'), function (row) {
+      row.addEventListener('click', function () {
+        OPEN = OPEN === row.dataset.open ? null : row.dataset.open;
+        render();
+      });
+    });
+    if (OPEN) wirePanel(DATA.roles.filter(function (r) { return r.key === OPEN; })[0]);
+  }
+
+  function panel(r) {
+    var owner = r.locked === 'owner';
+    var canEdit = DATA.canEdit && (!owner || DATA.isOriginalOwner);
+
+    var lockText = r.locked === 'owner'
+      ? 'Owner holds everything and cannot be reduced. Only the shop’s original owner adds or removes owners. The name is yours to change.'
+      : r.locked === 'tech'
+        ? 'Technician is locked because the lane rules hang off it — trades decide which statuses a tech may move a car into. It can still be renamed, and given anything on this list.'
+        : '';
+
+    return '<div class="panel">' +
+      '<div class="prow">' +
+        '<div class="field"><div class="flabel">Name</div>' +
+          '<input class="name" id="pName" value="' + esc(r.label) + '"' + (canEdit ? '' : ' disabled') + '></div>' +
+        '<div class="field"><div class="flabel">Rank</div>' +
+          '<input class="rank" id="pRank" value="' + r.rank + '"' + (canEdit ? '' : ' disabled') + '></div>' +
+        '<div class="ownrow" id="pOwn">' +
+          '<button class="tick' + (r.ownOnly ? ' on' : '') + '"' + (canEdit && !owner ? '' : ' disabled') + '>✓</button>' +
+          '<div><div class="t">Only sees work assigned to them</div>' +
+          '<div class="s">Leads, files and the schedule alike. Reports narrow to their own work.</div></div>' +
+        '</div>' +
+        '<div style="margin-left:auto;display:flex;gap:9px;align-items:center">' +
+          '<button class="ghostbtn" id="pCopy"' + (DATA.canEdit ? '' : ' disabled') + '>Duplicate</button>' +
+          '<button class="danger" id="pDel"' + (DATA.canEdit && r.locked === 'none' ? '' : ' disabled') + '>Delete role</button>' +
+        '</div>' +
+      '</div>' +
+      (lockText ? '<div class="locknote">' + esc(lockText) + '</div>' : '') +
+      '<div class="caps">' + sections().map(function (s) {
+        return '<div class="sec"><div class="sechead">' +
+          '<div class="n">' + esc(s.name) + '</div><div class="c">See</div><div class="c">Change</div></div>' +
+          s.caps.map(function (c) {
+            var v = r.caps[c.key] || { see: false, change: null };
+            return '<div class="caprow' + (v.see ? ' on' : '') + '">' +
+              '<div class="cl">' + esc(c.label) + '</div>' +
+              '<div class="mid"><button class="tick' + (v.see ? ' on' : '') + '" data-cap="' + esc(c.key) +
+                '" data-which="see"' + (canEdit && !owner ? '' : ' disabled') + '>✓</button></div>' +
+              '<div class="mid">' + (c.splits
+                ? '<button class="tick' + (v.change ? ' on' : '') + '" data-cap="' + esc(c.key) +
+                  '" data-which="change"' + (canEdit && !owner ? '' : ' disabled') + '>✓</button>'
+                : '<span class="dash">—</span>') + '</div>' +
+            '</div>';
+          }).join('') +
+        '</div>';
+      }).join('') + '</div>' +
+      '<div class="savenote" id="pNote">' + esc(owner
+        ? 'Frozen. Owner capabilities cannot be reduced.'
+        : 'Saved as you tick. ' + r.people + (r.people === 1 ? ' person picks' : ' people pick') +
+          ' this up on their next page load.') + '</div>' +
+    '</div>';
+  }
+
+  function wirePanel(r) {
+    if (!r) return;
+    var panelEl = $('list').querySelector('.panel');
+    if (!panelEl) return;
+    panelEl.addEventListener('click', function (e) { e.stopPropagation(); });
+
+    Array.prototype.forEach.call(panelEl.querySelectorAll('.tick[data-cap]'), function (b) {
+      b.addEventListener('click', function () {
+        var cap = b.dataset.cap, which = b.dataset.which;
+        var v = r.caps[cap] || { see: false, change: false };
+        var body = { cap: cap, see: v.see, change: !!v.change };
+        body[which] = !(which === 'see' ? v.see : v.change);
+        /* Change without See is not a state anyone means; the server agrees. */
+        if (which === 'change' && body.change) body.see = true;
+        api('/api/roles/' + encodeURIComponent(r.key) + '/caps', {
+          method: 'POST', body: JSON.stringify(body)
+        }).then(function (res) {
+          $('pNote').textContent = res.affected
+            ? 'Saved. ' + res.affected + (res.affected === 1 ? ' person picks' : ' people pick') +
+              ' this up on their next page load.'
+            : 'Saved. Nobody holds this role yet.';
+          return load();
+        }).catch(function (e) { say(e.message); });
+      });
+    });
+
+    function saveRole(patch) {
+      api('/api/roles/' + encodeURIComponent(r.key), { method: 'PATCH', body: JSON.stringify(patch) })
+        .then(function () { return load(); })
+        .catch(function (e) { say(e.message); load(); });
+    }
+    var nm = $('pName'), rk = $('pRank');
+    if (nm) nm.addEventListener('change', function () { saveRole({ label: nm.value }); });
+    if (rk) rk.addEventListener('change', function () { saveRole({ rank: Number(rk.value) }); });
+
+    var own = $('pOwn');
+    if (own) own.addEventListener('click', function () {
+      if (own.querySelector('.tick').disabled) return;
+      saveRole({ ownOnly: !r.ownOnly });
+    });
+
+    $('pCopy').addEventListener('click', function () { openAdd(r.key); });
+    $('pDel').addEventListener('click', function () { openDelete(r); });
+  }
+
+  /* ------------------------------------------------------------ dialogs */
+
+  function showDlg(title, sub, body, onSave) {
+    DLG = onSave;
+    $('dlgTitle').textContent = title;
+    $('dlgSub').textContent = sub;
+    $('dlgBody').innerHTML = body;
+    $('dlgMsg').textContent = '';
+    $('scrim').hidden = false;
+    $('dlg').hidden = false;
+  }
+  function closeDlg() { $('scrim').hidden = true; $('dlg').hidden = true; DLG = null; }
+
+  function openAdd(copyFrom) {
+    var others = DATA.roles.map(function (r) {
+      return '<option value="' + esc(r.key) + '"' + (r.key === copyFrom ? ' selected' : '') + '>' +
+        esc(r.label) + '</option>';
+    }).join('');
+    showDlg(copyFrom ? 'Duplicate a role' : 'Add a role',
+      'Start blank, or copy the ticks from a role that already works.',
+      '<div><div class="flabel" style="font:600 9.5px var(--font);letter-spacing:.07em;text-transform:uppercase;color:var(--dim);margin-bottom:6px">Name</div>' +
+        '<input class="dinput" id="nName" placeholder="Hail adjuster"></div>' +
+      '<div><div class="flabel" style="font:600 9.5px var(--font);letter-spacing:.07em;text-transform:uppercase;color:var(--dim);margin-bottom:6px">Rank</div>' +
+        '<input class="dinput" id="nRank" value="100"></div>' +
+      '<div><div class="flabel" style="font:600 9.5px var(--font);letter-spacing:.07em;text-transform:uppercase;color:var(--dim);margin-bottom:6px">Start from</div>' +
+        '<select class="dinput" id="nCopy"><option value="">Blank — tick it up myself</option>' + others + '</select></div>',
+      function () {
+        var body = { label: $('nName').value, rank: Number($('nRank').value) };
+        if ($('nCopy').value) body.copyFrom = $('nCopy').value;
+        return api('/api/roles', { method: 'POST', body: JSON.stringify(body) })
+          .then(function (r) { OPEN = r.key; closeDlg(); return load(); });
+      });
+    setTimeout(function () { $('nName').focus(); }, 30);
+  }
+
+  function openDelete(r) {
+    var others = DATA.roles.filter(function (x) { return x.key !== r.key; }).map(function (x) {
+      return '<option value="' + esc(x.key) + '">' + esc(x.label) + '</option>';
+    }).join('');
+    showDlg('Delete ' + r.label,
+      r.people
+        ? r.people + (r.people === 1 ? ' person holds' : ' people hold') + ' this role. Move them to another one first.'
+        : 'Nobody holds this role.',
+      (r.people
+        ? '<div><div style="font:600 9.5px var(--font);letter-spacing:.07em;text-transform:uppercase;color:var(--dim);margin-bottom:6px">Move them to</div>' +
+          '<select class="dinput" id="dMove">' + others + '</select></div>'
+        : '') +
+      '<div style="font:400 11px/1.5 var(--font);color:var(--dim)">Statuses that name this role as their owner are repointed too, so notifications keep landing somewhere.</div>',
+      function () {
+        var q = r.people ? '?moveTo=' + encodeURIComponent($('dMove').value) : '';
+        return api('/api/roles/' + encodeURIComponent(r.key) + q, { method: 'DELETE' })
+          .then(function (res) {
+            OPEN = null;
+            closeDlg();
+            say(res.moved ? 'Deleted. ' + res.moved + ' moved across.' : 'Deleted.', true);
+            return load();
+          });
+      });
+  }
+
+  $('dlgCancel').addEventListener('click', closeDlg);
+  $('scrim').addEventListener('click', closeDlg);
+  $('dlgSave').addEventListener('click', function () {
+    if (!DLG) return;
+    var p = DLG();
+    if (p && p.catch) p.catch(function (e) { $('dlgMsg').textContent = e.message; });
+  });
+
+  api('/api/me').then(function (me) {
+    ME = me;
+    Shell.mount({ me: me, active: 'roles' });
+    if (!ME.caps.managePermissions && !ME.caps.admin) {
+      $('list').innerHTML = '<div class="empty">Roles and permissions are the owner’s.</div>';
+      return;
+    }
+    load();
+  }).catch(function (e) { if (e.message !== 'signed out') console.error(e); });
+})();
+</script>
+</body>
+</html>

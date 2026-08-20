@@ -3,6 +3,7 @@ import { RowDataPacket } from 'mysql2/promise';
 import { tq, tqOne, texec, withTenantTx } from '../db/tenant';
 import { requireCompany, requireFeature } from '../middleware/context';
 import { scrubMoney } from '../permissions';
+import { correctTrigger, fireTrigger } from '../lib/pay';
 
 /**
  * Closing a file.
@@ -153,6 +154,15 @@ export async function registerClosed(app: FastifyInstance): Promise<void> {
     if (result.code !== 200) {
       return reply.code(result.code).send({ error: result.error, blockers: result.blockers });
     }
+
+    /* The close stamp carries the close date, not the moment of clicking: the
+       close date is what the books are keyed on, so it is what the pay period is
+       worked out from too. */
+    await fireTrigger(cid, id, 'file_closed', {
+      at: new Date(result.closeDate + 'T12:00'),
+      userId: ctx.user.id, userName: ctx.user.name, source: 'auto', note: 'file closed'
+    }).catch(e => req.log.error(e));
+
     return { ok: true, closeDate: result.closeDate, paid: result.paid };
   });
 
@@ -207,6 +217,13 @@ export async function registerClosed(app: FastifyInstance): Promise<void> {
        VALUES (?, ?, 'repair_order', ?, 'close_edit', ?)`,
       [ctx.user.id, ctx.user.name, id, JSON.stringify({ changes: said })]);
 
+    /* Moving the close date moves the file into another month, week — and pay
+       period. Anything already paid on it comes back as an adjustment. */
+    if (b.closeDate !== undefined) {
+      await correctTrigger(cid, id, 'file_closed', new Date(b.closeDate + 'T12:00'),
+        { userId: ctx.user.id, userName: ctx.user.name }).catch(e => req.log.error(e));
+    }
+
     return { ok: true, changed: true };
   });
 
@@ -217,7 +234,7 @@ export async function registerClosed(app: FastifyInstance): Promise<void> {
   app.delete('/api/ro/:id/close', async (req, reply) => {
     const ctx = requireCompany(req, reply);
     if (!ctx) return;
-    if (!ctx.roles.includes('owner')) return reply.code(403).send({ error: 'Owner only' });
+    if (!ctx.caps.uncloseRepairOrders) return reply.code(403).send({ error: 'Not permitted' });
 
     const id = Number((req.params as { id: string }).id);
     const cid = ctx.company!.id;
@@ -238,6 +255,11 @@ export async function registerClosed(app: FastifyInstance): Promise<void> {
       `INSERT INTO audit_log (user_id, user_name, entity, entity_id, action, detail)
        VALUES (?, ?, 'repair_order', ?, 'close_undo', ?)`,
       [ctx.user.id, ctx.user.name, id, JSON.stringify({ was: before.close_date })]);
+
+    /* The close stamp goes with it. A commission that paid on close comes back
+       as an adjustment rather than being quietly deleted. */
+    await correctTrigger(cid, id, 'file_closed', null,
+      { userId: ctx.user.id, userName: ctx.user.name }).catch(e => req.log.error(e));
 
     return { ok: true };
   });

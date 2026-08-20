@@ -25,6 +25,9 @@ import { registerScheduler } from './routes/scheduler';
 import { registerReports } from './routes/reports';
 import { registerClosed } from './routes/closed';
 import { registerSales } from './routes/sales';
+import { registerRoles } from './routes/roles';
+import { registerPay } from './routes/pay';
+import { registerTotalLoss } from './routes/totalloss';
 import { registerCalendar } from './routes/gcal';
 import { purgeExpiredSessions } from './auth/session';
 import { closeQueue, startWorker } from './queue';
@@ -69,6 +72,9 @@ async function main(): Promise<void> {
   await registerReports(app);
   await registerClosed(app);
   await registerSales(app);
+  await registerRoles(app);
+  await registerPay(app);
+  await registerTotalLoss(app);
   await registerCalendar(app);
 
   app.get('/api/health', async () => {
