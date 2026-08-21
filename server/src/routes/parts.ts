@@ -4,6 +4,8 @@ import { tq, texec, tqOne, withTenantTx } from '../db/tenant';
 import { requireCompany, requireFeature } from '../middleware/context';
 import { notify } from '../notify';
 import { scrubMoney } from '../permissions';
+import { audit, diff } from '../lib/audit';
+import { actorFrom } from './audit';
 
 /**
  * Parts profit is margin on list — what the shop keeps of the list price.
@@ -209,6 +211,25 @@ export async function registerParts(app: FastifyInstance): Promise<void> {
       cid, 'SELECT ro_number FROM repair_orders WHERE id = ?', [before.ro_id]
     );
 
+    /* The audit row is written from what actually moved, not from the request:
+       a body that sends a field back unchanged should not read as a change. */
+    const after = await tqOne<RowDataPacket>(cid,
+      `SELECT description, state, qty, qty_received, cost_cents, price_cents, vendor_id, po_number
+         FROM parts_lines WHERE id = ?`, [id]);
+    const moved = diff(
+      { state: before.state, qty: before.qty, qty_received: before.qty_received },
+      { state: after?.state, qty: after?.qty, qty_received: after?.qty_received },
+      { state: 'State', qty: 'Quantity', qty_received: 'Received' }
+    );
+    await audit(cid, actorFrom(req), {
+      entity: 'part', entityId: id, roId: before.ro_id, action: 'part_edit', area: 'Parts',
+      label: `${before.description} — ${b.state && b.state !== before.state
+        ? String(b.state).replace('_', ' ')
+        : 'line edited'}${ro ? ' on ' + ro.ro_number : ''}`,
+      changes: moved,
+      note: typeof b.note === 'string' && b.note.trim() ? b.note.trim() : null
+    });
+
     if (b.state && b.state !== before.state) {
       await texec(cid,
         `INSERT INTO ro_notes (ro_id, kind, body, user_id, user_name) VALUES (?, 'auto', ?, ?, ?)`,
@@ -237,7 +258,22 @@ export async function registerParts(app: FastifyInstance): Promise<void> {
     const ctx = requireCompany(req, reply);
     if (!ctx) return;
     if (!ctx.caps.manageParts) return reply.code(403).send({ error: 'Not permitted' });
-    await texec(ctx.company!.id, 'DELETE FROM parts_lines WHERE id = ?', [Number((req.params as { id: string }).id)]);
+    const id = Number((req.params as { id: string }).id);
+    const cid = ctx.company!.id;
+
+    const line = await tqOne<RowDataPacket & { ro_id: number; description: string; state: string }>(
+      cid, 'SELECT ro_id, description, state FROM parts_lines WHERE id = ?', [id]);
+
+    await texec(cid, 'DELETE FROM parts_lines WHERE id = ?', [id]);
+
+    if (line) {
+      await audit(cid, actorFrom(req), {
+        entity: 'part', entityId: id, roId: line.ro_id, action: 'part_deleted', area: 'Parts',
+        label: `Part line removed — ${line.description}`,
+        changes: [{ field: 'Line', from: line.description + ' (' + line.state + ')', to: null }]
+      });
+      await recomputePartsCost(cid, line.ro_id);
+    }
     return { ok: true };
   });
 

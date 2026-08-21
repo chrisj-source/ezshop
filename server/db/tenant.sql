@@ -53,7 +53,9 @@ CREATE TABLE staff (
   position_key    VARCHAR(24)   NULL,
   employee_code   VARCHAR(24)   NULL,
   efficiency      DECIMAL(4,2)  NULL COMMENT 'flagged hours produced per clocked hour',
-  pay_basis       ENUM('hourly','flat','pct') NOT NULL DEFAULT 'hourly',
+  pay_basis       ENUM('hourly','flat','pct') NOT NULL DEFAULT 'hourly' COMMENT 'how their work is COSTED on a file',
+  pay_mode        ENUM('per_car','salary') NOT NULL DEFAULT 'per_car' COMMENT 'how the person is PAID on the payroll screen',
+  salary_cents    BIGINT        NOT NULL DEFAULT 0 COMMENT 'per period, when pay_mode is salary',
   rate_cents      BIGINT        NOT NULL DEFAULT 0 COMMENT 'per hour, or per car when flat',
   rate_pct        DECIMAL(6,3)  NOT NULL DEFAULT 0 COMMENT 'PDR only: a share of the job',
   commission_rate DECIMAL(5,2)  NULL,
@@ -558,9 +560,30 @@ CREATE TABLE notifications (
   body            VARCHAR(500)  NOT NULL,
   dedupe_key      VARCHAR(190)  NULL COMMENT 'one per person per event per file',
   read_at         DATETIME      NULL,
+  deleted_at      DATETIME      NULL COMMENT 'hidden from this recipient, never removed',
+  dispatch_state  ENUM('app','queued','sent','failed') NOT NULL DEFAULT 'app',
   created_at      DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
   UNIQUE KEY uq_notif_dedupe (user_id, dedupe_key),
-  KEY ix_notif_inbox (user_id, read_at, created_at)
+  KEY ix_notif_inbox (user_id, read_at, created_at),
+  KEY ix_notif_live (user_id, deleted_at, created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Every attempt to put a message in front of somebody, in-app included. SMS and
+-- email are further rows on the same message rather than a parallel system.
+CREATE TABLE notification_deliveries (
+  id              BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  notification_id BIGINT UNSIGNED NOT NULL,
+  user_id         BIGINT UNSIGNED NOT NULL COMMENT 'denormalised, so a purge leaves the trail',
+  channel         ENUM('app','email','sms') NOT NULL,
+  address         VARCHAR(190)  NULL COMMENT 'the email or number as it was at send time',
+  state           ENUM('pending','sent','failed','skipped') NOT NULL DEFAULT 'pending',
+  provider_ref    VARCHAR(120)  NULL,
+  error           VARCHAR(255)  NULL,
+  created_at      DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  sent_at         DATETIME      NULL,
+  KEY ix_deliv_note (notification_id),
+  KEY ix_deliv_user (user_id, created_at),
+  CONSTRAINT fk_deliv_note FOREIGN KEY (notification_id) REFERENCES notifications(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ===========================================================================
@@ -626,16 +649,30 @@ CREATE TABLE ems_import_lines (
 -- ===========================================================================
 -- Shop-level audit
 -- ===========================================================================
+-- Append only. Nothing updates or deletes a row here, and no endpoint can.
 CREATE TABLE audit_log (
   id              BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
   user_id         BIGINT UNSIGNED NULL,
   user_name       VARCHAR(120)  NULL,
+  actor_role      VARCHAR(64)   NULL COMMENT 'primary role label at the time',
   entity          VARCHAR(32)   NOT NULL,
   entity_id       BIGINT UNSIGNED NULL,
+  ro_id           BIGINT UNSIGNED NULL COMMENT 'the file this touched, when there is one',
   action          VARCHAR(48)   NOT NULL,
+  area            VARCHAR(32)   NULL COMMENT 'what the reader filters on',
+  label           VARCHAR(190)  NULL COMMENT 'one line, already written for a human',
+  changes         JSON          NULL COMMENT '[{field, from, to}]',
+  note            VARCHAR(500)  NULL COMMENT 'what the person wrote with it, if anything',
   detail          JSON          NULL,
+  sensitive       TINYINT(1)    NOT NULL DEFAULT 0 COMMENT 'money, deletes, permissions',
+  source          VARCHAR(24)   NOT NULL DEFAULT 'web' COMMENT 'web, mobile, ems, system',
+  client          VARCHAR(190)  NULL,
   created_at      DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  KEY ix_audit_entity (entity, entity_id, created_at)
+  KEY ix_audit_entity (entity, entity_id, created_at),
+  KEY ix_audit_when (created_at),
+  KEY ix_audit_actor (user_id, created_at),
+  KEY ix_audit_ro (ro_id, created_at),
+  KEY ix_audit_sensitive (sensitive, created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ===========================================================================
@@ -830,7 +867,59 @@ CREATE TABLE ro_profit (
   CONSTRAINT fk_profit_ro FOREIGN KEY (ro_id) REFERENCES repair_orders(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- ===========================================================================
+-- Payroll — the non-sales week
+-- ===========================================================================
+--
+-- A run is a period that has been settled. Re-running before it is paid is
+-- free; once paid, the sheets in it are what was paid and a later correction
+-- lands on the next period rather than rewriting this one.
+CREATE TABLE payroll_runs (
+  id            BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  period_end    DATE          NOT NULL,
+  cutoff_at     DATETIME      NOT NULL COMMENT 'the exact moment the period closed',
+  run_at        DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  run_by        BIGINT UNSIGNED NULL,
+  run_by_name   VARCHAR(120)  NULL,
+  paid_at       DATETIME      NULL,
+  total_cents   BIGINT        NOT NULL DEFAULT 0,
+  people        INT           NOT NULL DEFAULT 0,
+  UNIQUE KEY uq_payroll_period (period_end),
+  KEY ix_payroll_paid (paid_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE payroll_run_people (
+  run_id        BIGINT UNSIGNED NOT NULL,
+  user_id       BIGINT UNSIGNED NOT NULL,
+  display_name  VARCHAR(120)  NULL,
+  pay_mode      ENUM('per_car','salary') NOT NULL,
+  salary_cents  BIGINT        NOT NULL DEFAULT 0,
+  cars          INT           NOT NULL DEFAULT 0,
+  hours         DECIMAL(8,2)  NOT NULL DEFAULT 0,
+  total_cents   BIGINT        NOT NULL DEFAULT 0,
+  PRIMARY KEY (run_id, user_id),
+  CONSTRAINT fk_prp_run FOREIGN KEY (run_id) REFERENCES payroll_runs(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE payroll_run_cars (
+  run_id        BIGINT UNSIGNED NOT NULL,
+  user_id       BIGINT UNSIGNED NOT NULL,
+  ro_id         BIGINT UNSIGNED NOT NULL,
+  position_key  VARCHAR(24)   NOT NULL,
+  basis         ENUM('hours','flat','ems','pct') NOT NULL,
+  hours         DECIMAL(7,2)  NOT NULL DEFAULT 0,
+  rate_cents    BIGINT        NOT NULL DEFAULT 0,
+  cost_cents    BIGINT        NOT NULL DEFAULT 0,
+  PRIMARY KEY (run_id, user_id, ro_id, position_key),
+  KEY ix_prc_ro (ro_id),
+  CONSTRAINT fk_prc_run FOREIGN KEY (run_id) REFERENCES payroll_runs(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 INSERT INTO shop_settings (setting_key, setting_value) VALUES
   ('materials_rate_cents', '4200'),
-  ('thin_profit_pct', '25')
+  ('thin_profit_pct', '25'),
+  -- The non-sales week: the day it closes, and the time on that day after which
+  -- a file waits for the next one.
+  ('payroll_close_day', 'wednesday'),
+  ('payroll_cutoff', '16:00')
 ON DUPLICATE KEY UPDATE setting_value = setting_value;

@@ -5,6 +5,8 @@ import { requireCompany, requireFeature, Ctx } from '../middleware/context';
 import { mayMoveTo, scrubMoney } from '../permissions';
 import { notify } from '../notify';
 import { fireTrigger, correctTrigger } from '../lib/pay';
+import { auditIn } from '../lib/audit';
+import { actorFrom } from './audit';
 
 /** Anything that stops this file being closed. Empty means it can be. */
 function closeBlockers(
@@ -690,10 +692,15 @@ export async function registerRepairOrders(app: FastifyInstance): Promise<void> 
         await c.query(
           `INSERT INTO ro_notes (ro_id, kind, body, user_id, user_name) VALUES (?, 'auto', ?, ?, ?)`,
           [id, changes.join('. ') + '.', ctx.user.id, ctx.user.name]);
-        await c.query(
-          `INSERT INTO audit_log (user_id, user_name, entity, entity_id, action, detail)
-           VALUES (?, ?, 'repair_order', ?, 'edit_details', ?)`,
-          [ctx.user.id, ctx.user.name, id, JSON.stringify({ changes })]);
+        /* In the same transaction as the edit: a write that fails leaves no
+           entry, and an entry cannot exist without its write. */
+        await auditIn(c, actorFrom(req), {
+          entity: 'repair_order', entityId: id, roId: id, action: 'edit_details',
+          area: 'Repair order',
+          label: changes.length === 1 ? changes[0] : changes.length + ' fields edited on the file',
+          changes: changes.map(t => ({ field: t, from: null, to: null })),
+          detail: { changes }
+        });
       }
     });
 

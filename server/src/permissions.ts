@@ -93,6 +93,7 @@ export const CAP_DEFS: CapDef[] = [
   { key: 'reports',       label: 'Reports',                    section: 'Reports and setup', see: 'viewReports', change: 'exportReports' },
   { key: 'money_reports', label: 'Money reports',              section: 'Reports and setup', see: 'viewMoneyReports' },
   { key: 'pay_plans',     label: 'Sales pay plans',            section: 'Reports and setup', see: 'viewPayPlans', change: 'editPayPlans' },
+  { key: 'audit',         label: 'Read the audit log',         section: 'Reports and setup', see: 'viewAudit' },
   { key: 'admin',         label: 'Change shop settings',       section: 'Reports and setup', see: 'admin' },
   { key: 'perms',         label: 'Change roles and permissions', section: 'Reports and setup', see: 'managePermissions' }
 ];
@@ -139,6 +140,8 @@ export interface Caps {
   viewMoneyReports: boolean;
   viewPayPlans: boolean;
   editPayPlans: boolean;
+  /** Read the audit log. Its own tick so a manager can have it alone. */
+  viewAudit: boolean;
   admin: boolean;
   managePermissions: boolean;
 }
@@ -150,7 +153,7 @@ const CAPS_FIELDS: Array<keyof Caps> = [
   'uncloseRepairOrders', 'viewLeads', 'manageLeads', 'deleteLeads', 'viewPaperwork',
   'uploadPaperwork', 'deleteDocuments', 'acceptImports', 'editAssignments', 'manageParts',
   'manageSublet', 'viewReports', 'exportReports', 'viewMoneyReports', 'viewPayPlans',
-  'editPayPlans', 'admin', 'managePermissions'
+  'editPayPlans', 'viewAudit', 'admin', 'managePermissions'
 ];
 
 export function emptyCaps(): Caps {

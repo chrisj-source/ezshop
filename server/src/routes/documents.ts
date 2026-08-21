@@ -8,6 +8,8 @@ import {
 import { mediaTools, pdfPageCount, renderPdfPage, EDGES } from '../lib/media';
 import { enqueueDerivative, queueHealthy } from '../queue';
 import { makeDerivatives } from '../jobs/derivatives';
+import { audit } from '../lib/audit';
+import { actorFrom } from './audit';
 
 /**
  * Documents.
@@ -361,6 +363,14 @@ export async function registerDocuments(app: FastifyInstance): Promise<void> {
       `INSERT INTO ro_notes (ro_id, kind, body, user_id, user_name) VALUES (?, 'auto', ?, ?, ?)`,
       [doc.ro_id, `Document deleted: ${doc.label}.`, ctx.user.id, ctx.user.name]
     );
+
+    /* Pulling paperwork off a file is one of the things the audit log exists
+       for: the file no longer shows it, and nothing else would say who did. */
+    await audit(cid, actorFrom(req), {
+      entity: 'document', entityId: id, roId: doc.ro_id, action: 'document_deleted',
+      area: 'Documents', label: `Removed document — ${doc.label}`,
+      changes: [{ field: 'Document', from: doc.label, to: null }]
+    });
 
     return { ok: true };
   });

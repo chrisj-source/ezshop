@@ -121,6 +121,19 @@ export async function notify(input: NotifyInput): Promise<number> {
      VALUES ?`, [rows]
   );
 
+  /* Every message gets its in-app delivery row. Email and SMS become further
+     rows on the same message when a shop switches them on, so the send history
+     of a message lives in one place rather than beside it. */
+  await pool.query(`
+    INSERT INTO notification_deliveries (notification_id, user_id, channel, state, sent_at)
+    SELECT n.id, n.user_id, 'app', 'sent', n.created_at
+    FROM notifications n
+    LEFT JOIN notification_deliveries d
+           ON d.notification_id = n.id AND d.channel = 'app'
+    WHERE n.event_key = ? AND n.user_id IN (?) AND d.id IS NULL`,
+    [input.event, [...recipients]]
+  ).catch(() => undefined);
+
   return recipients.size;
 }
 
@@ -132,6 +145,7 @@ export async function notifyIn(c: PoolConnection, input: NotifyInput): Promise<v
 
 export async function unreadCount(companyId: number, userId: number): Promise<number> {
   const rows = await tq<RowDataPacket[]>(companyId,
-    `SELECT COUNT(*) AS n FROM notifications WHERE user_id = ? AND read_at IS NULL`, [userId]);
+    `SELECT COUNT(*) AS n FROM notifications
+      WHERE user_id = ? AND read_at IS NULL AND deleted_at IS NULL`, [userId]);
   return Number(rows[0]?.n ?? 0);
 }

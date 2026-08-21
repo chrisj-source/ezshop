@@ -5,6 +5,8 @@ import { tq, texec, tqOne, withTenantTx } from '../db/tenant';
 import { requireCompany, requireFeature } from '../middleware/context';
 import { notify } from '../notify';
 import { daysBetweenSql, shopToday, tzOffset } from '../lib/shoptime';
+import { audit } from '../lib/audit';
+import { actorFrom } from './audit';
 
 const SOURCES = ['phone', 'walk-in', 'website', 'referral', 'google', 'scheduler', 'sales app', 'other'];
 const STATES = ['new', 'contacted', 'estimate_sent', 'appraisal_booked', 'won', 'lost'];
@@ -439,6 +441,33 @@ export async function registerLeads(app: FastifyInstance): Promise<void> {
         `INSERT INTO lead_events (lead_id, kind, body, user_id, user_name) VALUES (?, 'auto', ?, ?, ?)`,
         [id, notes.join('. ') + '.', ctx.user.id, ctx.user.name]);
     }
+
+    /* Every field that moved, named. A lead edited quietly — a promise date
+       pushed, an owner swapped — is exactly what nobody writes a note about. */
+    const FIELD_LABEL: Record<string, string> = {
+      firstName: 'First name', lastName: 'Last name', phone: 'Phone', email: 'Email',
+      vehicleText: 'Vehicle', damageNote: 'Damage note', source: 'Source',
+      ownerUserId: 'Owner', lostReason: 'Lost reason', state: 'State'
+    };
+    const changed = Object.keys(FIELD_LABEL)
+      .filter(k => b[k] !== undefined)
+      .map(k => ({
+        field: FIELD_LABEL[k],
+        from: k === 'state' ? before.state : null,
+        to: b[k] == null ? null : String(b[k])
+      }));
+
+    const lead = await tqOne<RowDataPacket & { lead_number: string }>(
+      cid, 'SELECT lead_number FROM leads WHERE id = ?', [id]);
+
+    await audit(cid, actorFrom(req), {
+      entity: 'lead', entityId: id, action: 'lead_edit', area: 'Lead',
+      label: `Lead ${lead?.lead_number ?? id} — ` +
+        (b.state !== undefined
+          ? `moved to ${String(b.state).replace(/_/g, ' ')}`
+          : changed.map(c => c.field.toLowerCase()).join(', ') + ' changed'),
+      changes: changed
+    });
 
     return { ok: true };
   });

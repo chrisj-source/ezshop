@@ -7,6 +7,8 @@
  */
 window.Shell = (function () {
   var ME = null;
+  /* The panel opens on what is new, which is what the bell is counting. */
+  var INBOX_FILTER = 'new';
 
   var NAV = [
     { key: 'board',    href: '/board.html',    label: 'Board',    feature: 'board' },
@@ -93,9 +95,13 @@ window.Shell = (function () {
         '<button class="bellbtn" id="bellBtn" aria-label="Notifications">' +
         '<span class="bellglyph">Inbox</span><span class="badge" id="bellBadge" hidden>0</span></button>' +
         '<div class="inbox" id="inbox" hidden>' +
-        '<div class="inboxhead"><div class="inboxtitle">Notifications</div>' +
+        '<div class="inboxhead"><div class="inboxtitle">Messages</div>' +
         '<button class="markall" id="markAll">Mark all read</button></div>' +
-        '<div class="inboxlist" id="inboxList"></div></div>';
+        '<div id="inboxTabs" style="display:flex;gap:0;padding:0 13px 10px"></div>' +
+        '<div class="inboxlist" id="inboxList"></div>' +
+        '<div style="padding:10px 13px;border-top:1px solid var(--line)">' +
+        '<a href="/messages.html" style="font:400 11.5px var(--font);color:var(--acc);' +
+        'text-decoration:none">See all messages</a></div></div>';
 
       document.getElementById('bellBtn').addEventListener('click', function (e) {
         e.stopPropagation();
@@ -110,10 +116,9 @@ window.Shell = (function () {
       document.getElementById('markAll').addEventListener('click', function (e) {
         e.stopPropagation();
         var unread = Number(document.getElementById('bellBadge').textContent || 0) > 0;
-        api('/api/inbox/mark-all', { method: 'POST', body: JSON.stringify({ read: unread }) })
+        api('/api/inbox/mark-all', { method: 'POST', body: JSON.stringify({ read: unread, filter: INBOX_FILTER }) })
           .then(loadInbox).then(refreshCount);
       });
-
       refreshCount();
       setInterval(refreshCount, 45000);
     }
@@ -211,6 +216,7 @@ window.Shell = (function () {
       rest.map(function (n) {
         return '<a class="sheetrow" href="' + n.href + '">' + esc(n.label) + '</a>';
       }).join('') +
+      '<a class="sheetrow" href="/messages.html">Messages</a>' +
       '<a class="sheetrow" href="/account.html">Your account</a>' +
       (ME.isPlatformOwner ? '<a class="sheetrow" href="/platform.html">Platform</a>' : '') +
       '<button class="sheetrow" id="sheetOut">Sign out</button></div>';
@@ -237,15 +243,42 @@ window.Shell = (function () {
     }).catch(function () {});
   }
 
+  /** New / Old / All, the same three the full screen has. */
+  function renderInboxTabs(d) {
+    var box = document.getElementById('inboxTabs');
+    if (!box) return;
+    var tabs = [['new', 'New', d.unread], ['old', 'Old', d.old], ['all', 'All', d.total]];
+    box.innerHTML = '<div style="display:flex;border:1px solid var(--line);border-radius:5px;' +
+      'overflow:hidden">' + tabs.map(function (t, i) {
+        var on = INBOX_FILTER === t[0];
+        return '<button data-f="' + t[0] + '" style="font:' + (on ? '500' : '400') +
+          ' 11px var(--font);color:' + (on ? 'var(--acc)' : 'var(--dim)') +
+          ';background:' + (on ? 'var(--chip)' : 'transparent') + ';border:none;padding:5px 11px' +
+          (i < 2 ? ';border-right:1px solid var(--line)' : '') + '">' +
+          esc(t[1]) + ' <span style="opacity:.7">' + t[2] + '</span></button>';
+      }).join('') + '</div>';
+
+    Array.prototype.forEach.call(box.querySelectorAll('button'), function (b) {
+      b.addEventListener('click', function (e) {
+        e.stopPropagation();
+        INBOX_FILTER = b.dataset.f;
+        loadInbox();
+      });
+    });
+  }
+
   function loadInbox() {
     var list = document.getElementById('inboxList');
     list.innerHTML = '<div class="inboxempty">Loading…</div>';
-    return api('/api/inbox').then(function (d) {
+    return api('/api/inbox?filter=' + INBOX_FILTER + '&limit=60').then(function (d) {
       var mark = document.getElementById('markAll');
       if (mark) mark.textContent = d.unread ? 'Mark all read' : 'Mark all unread';
+      renderInboxTabs(d);
 
       if (!d.items.length) {
-        list.innerHTML = '<div class="inboxempty">Nothing yet.</div>';
+        list.innerHTML = '<div class="inboxempty">' +
+          (INBOX_FILTER === 'new' ? 'Nothing new. You are caught up.'
+            : INBOX_FILTER === 'old' ? 'Nothing read yet.' : 'Nothing yet.') + '</div>';
         return;
       }
       list.innerHTML = d.items.map(function (n) {
@@ -255,11 +288,24 @@ window.Shell = (function () {
           '<div class="inboxbody"><div class="inboxt">' + esc(n.title) + '</div>' +
           '<div class="inboxb">' + esc(n.body) + '</div>' +
           '<div class="inboxm">' + when(n.created_at) + '</div></div>' +
+          '<div style="display:flex;flex-direction:column;gap:5px;align-items:flex-end">' +
           '<button class="flip" data-read="' + (n.read_at ? 1 : 0) + '">' +
-          (n.read_at ? 'Unread' : 'Read') + '</button></div>';
+          (n.read_at ? 'Unread' : 'Read') + '</button>' +
+          '<button class="flip del" title="Delete from your list">Delete</button>' +
+          '</div></div>';
       }).join('');
 
-      Array.prototype.forEach.call(list.querySelectorAll('.flip'), function (b) {
+      Array.prototype.forEach.call(list.querySelectorAll('.del'), function (b) {
+        b.addEventListener('click', function (e) {
+          e.stopPropagation();
+          var row = b.closest('.inboxrow');
+          api('/api/inbox/delete', {
+            method: 'POST', body: JSON.stringify({ ids: [Number(row.dataset.id)] })
+          }).then(loadInbox).then(refreshCount);
+        });
+      });
+
+      Array.prototype.forEach.call(list.querySelectorAll('.flip:not(.del)'), function (b) {
         b.addEventListener('click', function (e) {
           e.stopPropagation();
           var row = b.closest('.inboxrow');

@@ -29,6 +29,8 @@ import { registerRoles } from './routes/roles';
 import { registerPay } from './routes/pay';
 import { registerTotalLoss } from './routes/totalloss';
 import { registerCloseout } from './routes/closeout';
+import { registerAudit } from './routes/audit';
+import { registerPayroll } from './routes/payroll';
 import { registerCalendar } from './routes/gcal';
 import { purgeExpiredSessions } from './auth/session';
 import { closeQueue, startWorker } from './queue';
@@ -77,6 +79,8 @@ async function main(): Promise<void> {
   await registerPay(app);
   await registerTotalLoss(app);
   await registerCloseout(app);
+  await registerAudit(app);
+  await registerPayroll(app);
   await registerCalendar(app);
 
   app.get('/api/health', async () => {

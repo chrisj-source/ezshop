@@ -186,7 +186,7 @@
   </div>
 </div>
 
-<script src="/shell.js?v=7"></script>
+<script src="/shell.js?v=8"></script>
 <script>
 (function () {
   var api = Shell.api, esc = Shell.esc;
@@ -213,6 +213,8 @@
     { k: 'storage', t: 'Storage' },
     /* Their own pages — too big to live in a pane here, but they belong to Admin,
        so the tab strip is where you reach them. */
+    { k: 'payroll', t: 'Payroll', href: '/payroll.html' },
+    { k: 'audit', t: 'Audit log', href: '/audit.html' },
     { k: 'roles', t: 'Roles &amp; permissions', href: '/permissions.html' },
     { k: 'pay', t: 'Sales pay', href: '/pay.html' }
   ];

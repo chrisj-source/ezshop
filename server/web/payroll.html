@@ -1,0 +1,608 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1c2740">
+<title>Payroll — Easy Shop</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/shell.css?v=7">
+<style>
+  #main { flex:1; min-height:0; display:flex; flex-direction:column; }
+  .adminbar { display:flex; align-items:center; gap:18px; padding:12px 18px 0; flex:none; flex-wrap:wrap; }
+  .atab {
+    font:500 11.5px var(--font); padding:0 0 9px; background:none; border:none;
+    color:var(--dim); border-bottom:2px solid transparent; text-decoration:none;
+  }
+  .atab:hover { color:var(--muted); }
+  .atab.sel { color:var(--text); border-bottom-color:var(--acc); }
+  .abarline { height:1px; background:var(--line); flex:none; }
+
+  .periodbar {
+    display:flex; align-items:center; gap:16px; padding:14px 18px; background:var(--surf);
+    border-bottom:1px solid var(--line); flex:none; flex-wrap:wrap;
+  }
+  .step {
+    width:26px; height:26px; display:grid; place-items:center; border:1px solid var(--line);
+    border-radius:4px; font:400 14px var(--font); color:var(--muted); background:transparent;
+  }
+  .step:hover { border-color:var(--acc); color:var(--acc); }
+  .pername { font:500 13.5px var(--font); }
+  .persub { font:400 11px var(--font); color:var(--dim); margin-top:3px; }
+  .lbl { font:400 9.5px var(--font); letter-spacing:.08em; text-transform:uppercase; color:var(--dim); margin-bottom:4px; }
+  .pick {
+    background:var(--bg); border:1px solid var(--line); border-radius:5px; color:var(--text);
+    font:400 11.5px var(--font); padding:7px 10px;
+  }
+  .vr2 { width:1px; height:30px; background:var(--line); }
+  .paidbtn {
+    font:500 11.5px var(--font); color:var(--bg); background:var(--acc); border:1px solid var(--acc);
+    border-radius:4px; padding:7px 13px;
+  }
+  .ghost2 {
+    font:400 11.5px var(--font); color:var(--muted); background:transparent;
+    border:1px solid var(--line); border-radius:4px; padding:7px 12px;
+  }
+  .ghost2:hover { border-color:var(--acc); color:var(--acc); }
+  .paidmark {
+    font:600 8.5px var(--font); letter-spacing:.1em; text-transform:uppercase; color:var(--done);
+    border:1px solid var(--done); border-radius:3px; padding:3px 7px;
+  }
+
+  .cols { display:grid; grid-template-columns:286px minmax(0,1fr); flex:1; min-height:0; }
+  .rail { border-right:1px solid var(--line); display:flex; flex-direction:column; min-height:0; }
+  .railhead { padding:14px 16px 10px; flex:none; }
+  .railhead .h { font:600 8.5px var(--font); letter-spacing:.12em; text-transform:uppercase; color:var(--dim); }
+  .railhead .s { font:400 11px var(--font); color:var(--dim); margin-top:4px; }
+  .raillist { flex:1; overflow-y:auto; min-height:0; }
+  .person {
+    display:flex; align-items:center; gap:10px; padding:11px 16px; cursor:pointer;
+    border-bottom:1px solid var(--whisper);
+  }
+  .person:hover { background:var(--whisper); }
+  .person.sel { background:var(--whisper); box-shadow:inset 2px 0 0 var(--acc); }
+  .person .n { font:500 12.5px var(--font); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .person .m { display:flex; align-items:center; gap:7px; margin-top:3px; }
+  .person .tr { font:400 10.5px var(--font); color:var(--dim); }
+  .chip {
+    font:500 8.5px var(--font); letter-spacing:.09em; text-transform:uppercase; padding:2px 6px;
+    border-radius:3px; background:var(--chip); color:var(--acc2);
+  }
+  .chip.salary { color:var(--muted); }
+  .person .amt { font:500 12px var(--font); font-variant-numeric:tabular-nums; text-align:right; }
+  .person .cars { font:400 10.5px var(--font); color:var(--dim); margin-top:3px; text-align:right; }
+  .railfoot {
+    display:flex; align-items:baseline; gap:8px; padding:11px 16px; border-top:1px solid var(--line);
+    flex:none; font:400 11px var(--font); color:var(--dim);
+  }
+  .railfoot .v { margin-left:auto; font:500 12.5px var(--font); font-variant-numeric:tabular-nums; color:var(--acc); }
+
+  .sheet { display:flex; flex-direction:column; min-width:0; min-height:0; }
+  .sheethead { display:flex; align-items:flex-start; gap:18px; padding:18px 20px 0; flex:none; flex-wrap:wrap; }
+  .sheethead h1 { font:500 19px var(--font); margin:0; }
+  .sheethead .s { font:400 11.5px var(--font); color:var(--dim); margin-top:4px; }
+  .modes { display:flex; border:1px solid var(--line); border-radius:5px; overflow:hidden; }
+  .modes button {
+    font:400 11.5px var(--font); color:var(--dim); background:transparent; border:none;
+    border-right:1px solid var(--line); padding:7px 14px;
+  }
+  .modes button:last-child { border-right:none; }
+  .modes button.sel { background:var(--chip); color:var(--acc); font-weight:500; }
+  .salinput {
+    background:transparent; border:1px solid var(--line); border-radius:4px; color:var(--text);
+    font:500 13px var(--font); font-variant-numeric:tabular-nums; padding:7px 9px; width:110px;
+  }
+  .stats { display:flex; gap:26px; padding:16px 20px 14px; flex:none; flex-wrap:wrap; }
+  .stat .k { font:400 9.5px var(--font); letter-spacing:.08em; text-transform:uppercase; color:var(--dim); }
+  .stat .v { font:500 15px var(--font); font-variant-numeric:tabular-nums; margin-top:5px; }
+
+  .thead, .trow { display:grid; gap:12px; align-items:center; padding:0 20px; }
+  .thead {
+    font:600 8.5px var(--font); letter-spacing:.12em; text-transform:uppercase; color:var(--dim);
+    padding-bottom:8px; flex:none;
+  }
+  .scroll { flex:1; min-height:0; overflow-y:auto; border-top:1px solid var(--line); }
+  .trow { height:36px; border-bottom:1px solid var(--whisper); }
+  .num { font-variant-numeric:tabular-nums; text-align:right; }
+  .tcell { font:400 12px var(--font); color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .tro { font:400 12px var(--font); font-variant-numeric:tabular-nums; }
+  .basis { font:500 9px var(--font); letter-spacing:.08em; text-transform:uppercase; color:var(--dim); }
+  .basis.flat { color:var(--acc2); font-weight:500; }
+  .amt { font:500 12px var(--font); font-variant-numeric:tabular-nums; text-align:right; }
+  .tl { font:600 8px var(--font); letter-spacing:.07em; text-transform:uppercase; color:var(--blocked); }
+
+  .rolled { padding:16px 20px 6px; }
+  .rolledhead { display:flex; align-items:baseline; gap:9px; padding-bottom:8px; border-bottom:1px solid var(--whisper); }
+  .rolledhead .h { font:600 8.5px var(--font); letter-spacing:.12em; text-transform:uppercase; color:var(--acc2); }
+  .rolledhead .s { font:400 10.5px var(--font); color:var(--dim); }
+  .rolledrow {
+    display:grid; grid-template-columns:80px minmax(0,1fr) 150px 90px; gap:12px; align-items:center;
+    height:34px; border-bottom:1px solid var(--whisper); opacity:.62; font:400 12px var(--font);
+  }
+  .sheetfoot {
+    display:flex; align-items:center; gap:14px; padding:13px 20px; border-top:1px solid var(--line);
+    background:var(--surf); flex:none; flex-wrap:wrap;
+  }
+  .sheetfoot .n { font:400 11px/1.5 var(--font); color:var(--dim); max-width:620px; }
+  .sheetfoot .tot { margin-left:auto; display:flex; align-items:baseline; gap:10px; }
+  .sheetfoot .tl2 { font:400 11px var(--font); letter-spacing:.06em; text-transform:uppercase; color:var(--dim); }
+  .sheetfoot .tv { font:500 20px var(--font); font-variant-numeric:tabular-nums; color:var(--acc); }
+  .msg { font:400 11.5px var(--font); color:var(--stopped); }
+  .msg.ok { color:var(--acc2); }
+  .empty { padding:60px 20px; text-align:center; font:400 12.5px var(--font); color:var(--dim); }
+
+  /* The printed sheet. Built from the same data, laid out for paper: white
+     ground, black ink, no chrome. Nothing on screen is reused — a dark
+     interface prints as a black rectangle. */
+  #print { display:none; }
+  @media print {
+    body > *:not(#print) { display:none !important; }
+    body { background:#fff; display:block; }
+    #print { display:block; color:#1b1d22; font:400 10.5px/1.45 Inter, sans-serif; padding:0; }
+    #print .phead { display:flex; align-items:flex-start; gap:18px; padding-bottom:12px; border-bottom:1.5px solid #1b1d22; }
+    #print .shop { font:600 13px Inter,sans-serif; letter-spacing:.14em; text-transform:uppercase; }
+    #print .shopsub, #print .pmeta { font:400 10px Inter,sans-serif; color:#5c626e; margin-top:4px; }
+    #print .pright { margin-left:auto; text-align:right; }
+    #print .ptitle { font:500 12px Inter,sans-serif; }
+    #print .pwho { display:flex; gap:34px; padding:16px 0 14px; border-bottom:1px solid #d8dce3; }
+    #print .pk { font:600 8px Inter,sans-serif; letter-spacing:.13em; text-transform:uppercase; color:#7b818c; }
+    #print .pv { font:500 17px Inter,sans-serif; margin-top:5px; }
+    #print .pv.sm { font:500 13px Inter,sans-serif; }
+    #print .pvs { font:400 10.5px Inter,sans-serif; color:#5c626e; margin-top:3px; }
+    #print table { width:100%; border-collapse:collapse; margin-top:14px; }
+    #print th {
+      text-align:left; font:600 8px Inter,sans-serif; letter-spacing:.12em; text-transform:uppercase;
+      color:#7b818c; padding:0 0 7px;
+    }
+    #print th.r, #print td.r { text-align:right; }
+    #print td { padding:6px 0; font:400 10.5px Inter,sans-serif; border-bottom:1px solid #eceef2; }
+    #print tr.sum td { border-top:1.5px solid #1b1d22; border-bottom:none; padding-top:11px; font-weight:500; }
+    #print tr.sum2 td { border:none; padding-top:5px; font-weight:500; }
+    #print tr.tot td { border:none; padding-top:9px; font:600 12px Inter,sans-serif; }
+    #print tr.tot td.r { font:600 15px Inter,sans-serif; }
+    #print .rollbox { margin-top:16px; padding:11px 13px; border:1px solid #d8dce3; border-radius:5px; }
+    #print .rollline { font:400 10.5px Inter,sans-serif; color:#5c626e; margin-top:4px; }
+    #print .sigs { display:flex; gap:34px; align-items:flex-end; margin-top:44px; }
+    #print .sig { flex:1; }
+    #print .sigline { height:1px; background:#1b1d22; }
+    #print .siglbl { margin-top:5px; font:400 9px Inter,sans-serif; color:#7b818c; }
+    #print .pfoot { margin-top:14px; font:400 8.5px/1.5 Inter,sans-serif; color:#8b909a; }
+    #print .sheetpage { break-after:page; }
+    #print .sheetpage:last-child { break-after:auto; }
+  }
+
+  @media (max-width:900px) {
+    .cols { grid-template-columns:1fr; }
+    .rail { display:none; }
+  }
+</style>
+</head>
+<body>
+
+<div class="bar">
+  <div class="brand"><div class="mark">ES</div><div class="word">Easy Shop</div></div>
+  <div class="vr"></div>
+  <div class="co" id="coName">—</div>
+  <div id="nav"></div>
+  <div class="spacer"></div>
+  <div id="bell"></div>
+  <div class="who" id="who">—</div>
+  <button class="ghostbtn" id="signout">Sign out</button>
+</div>
+<div class="hairline"></div>
+
+<div class="adminbar" id="tabs"></div>
+<div class="abarline"></div>
+
+<div id="periodbar"></div>
+<div id="main"></div>
+<div id="print"></div>
+
+<script src="/shell.js?v=8"></script>
+<script>
+(function () {
+  var api = Shell.api, esc = Shell.esc;
+  var ME = null, DATA = null, SEL = null, SHEET = null, END = null;
+
+  function $(id) { return document.getElementById(id); }
+  function usd(cents) {
+    if (cents === null || cents === undefined) return '—';
+    return '$' + (Number(cents) / 100).toLocaleString('en-US',
+      { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+  function hrs(n) { return (Number(n) || 0).toFixed(1); }
+  function cap1(s) { return String(s || '').charAt(0).toUpperCase() + String(s || '').slice(1); }
+  function say(text, ok) {
+    var m = $('msg');
+    if (!m) return;
+    m.className = 'msg' + (ok ? ' ok' : '');
+    m.textContent = text || '';
+    if (text) setTimeout(function () { if (m.textContent === text) m.textContent = ''; }, 7000);
+  }
+  function dayName(iso) {
+    return new Date(iso + 'T00:00:00').toLocaleDateString('en-US',
+      { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
+  }
+  function closedAt(v) {
+    var d = new Date(String(v).replace(' ', 'T'));
+    return d.toLocaleDateString('en-US', { weekday: 'short' }) + ' ' +
+      d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }).toLowerCase();
+  }
+  function ampm(hhmm) {
+    var p = String(hhmm).split(':'), h = Number(p[0]);
+    return (h % 12 || 12) + ':' + p[1] + ' ' + (h < 12 ? 'am' : 'pm');
+  }
+
+  var TABS = [
+    { t: 'Statuses', href: '/admin.html?tab=statuses' },
+    { t: 'Lanes and gates', href: '/admin.html?tab=lanes' },
+    { t: 'Notification groups', href: '/admin.html?tab=notify' },
+    { t: 'People', href: '/admin.html?tab=people' },
+    { t: 'Vendors', href: '/admin.html?tab=vendors' },
+    { t: 'Shop settings', href: '/admin.html?tab=settings' },
+    { t: 'Storage', href: '/admin.html?tab=storage' },
+    { t: 'Payroll', href: '/payroll.html', sel: true },
+    { t: 'Audit log', href: '/audit.html' },
+    { t: 'Roles &amp; permissions', href: '/permissions.html' },
+    { t: 'Sales pay', href: '/pay.html' }
+  ];
+
+  api('/api/me').then(function (me) {
+    ME = me;
+    Shell.mount({ me: me, active: 'admin' });
+    $('tabs').innerHTML = TABS.map(function (t) {
+      return '<a class="atab' + (t.sel ? ' sel' : '') + '" href="' + t.href + '">' + t.t + '</a>';
+    }).join('');
+    return load();
+  }).catch(function (e) { if (e.message !== 'signed out') console.error(e); });
+
+  function load() {
+    return api('/api/payroll' + (END ? '?end=' + END : '')).then(function (d) {
+      DATA = d;
+      END = d.period.end;
+      if (!SEL || !d.people.some(function (p) { return p.userId === SEL; })) {
+        SEL = d.people.length ? d.people[0].userId : null;
+      }
+      renderPeriod();
+      render();
+      return SEL ? loadSheet() : null;
+    }).catch(function (e) {
+      $('main').innerHTML = '<div class="empty">' + esc(e.message) + '</div>';
+    });
+  }
+
+  function loadSheet() {
+    return api('/api/payroll/person/' + SEL + '?end=' + END).then(function (d) {
+      SHEET = d;
+      renderSheet();
+      renderPrint();
+    });
+  }
+
+  function renderPeriod() {
+    var p = DATA.period;
+    $('periodbar').innerHTML = '<div class="periodbar">' +
+      '<button class="step" id="prev">‹</button>' +
+      '<div><div class="pername">Week ending ' + esc(dayName(p.end)) + '</div>' +
+      '<div class="persub">Closed by ' + esc(cap1(p.closeDay)) + ' ' + esc(ampm(p.cutoff)) +
+      ' · ' + (p.paidAt ? 'paid ' + new Date(p.paidAt).toLocaleDateString() : 'not yet paid') +
+      (p.runBy ? ' · last run by ' + esc(p.runBy) : '') + '</div></div>' +
+      '<button class="step" id="next"' + (p.isCurrent ? ' disabled' : '') + '>›</button>' +
+      '<div class="vr2"></div>' +
+      '<div><div class="lbl">Week closes</div><select class="pick" id="day"' +
+      (DATA.canEdit ? '' : ' disabled') + '>' +
+      p.days.map(function (d) {
+        return '<option value="' + d + '"' + (d === p.closeDay ? ' selected' : '') + '>' + cap1(d) + '</option>';
+      }).join('') + '</select></div>' +
+      '<div><div class="lbl">Cutoff</div><select class="pick" id="cut"' +
+      (DATA.canEdit ? '' : ' disabled') + '>' +
+      ['12:00', '13:00', '14:00', '15:00', '16:00', '17:00', '18:00'].map(function (t) {
+        return '<option value="' + t + '"' + (t === p.cutoff ? ' selected' : '') + '>' + ampm(t) + '</option>';
+      }).join('') + '</select></div>' +
+      '<div style="max-width:250px;font:400 10.5px/1.45 var(--font);color:var(--dim);padding-top:14px">' +
+      'Applies to everyone paid by the car or on a salary. Sales runs on its own period.</div>' +
+      '<div style="margin-left:auto;display:flex;align-items:center;gap:9px;flex-wrap:wrap">' +
+      '<span class="msg" id="msg"></span>' +
+      (p.paidAt ? '<span class="paidmark">Paid</span>' : '') +
+      '<div style="font:400 11.5px var(--font);color:var(--dim)">Shop this week ' +
+      '<span style="color:var(--acc);font-weight:500">' + usd(DATA.totalCents) + '</span></div>' +
+      '<button class="ghost2" id="printAll">Print all sheets</button>' +
+      (p.paidAt || !DATA.canEdit ? '' : '<button class="paidbtn" id="markPaid">Mark period paid</button>') +
+      '</div></div>';
+
+    $('prev').addEventListener('click', function () { END = p.prevEnd; SHEET = null; load(); });
+    $('next').addEventListener('click', function () {
+      if (p.isCurrent) return;
+      END = p.nextEnd; SHEET = null; load();
+    });
+    if (DATA.canEdit) {
+      $('day').addEventListener('change', savePeriod);
+      $('cut').addEventListener('change', savePeriod);
+      var mp = $('markPaid');
+      if (mp) mp.addEventListener('click', function () {
+        api('/api/payroll/run', { method: 'POST', body: JSON.stringify({ end: END, pay: true }) })
+          .then(function (r) { say(r.note, true); return load(); })
+          .catch(function (e) { say(e.message); });
+      });
+    }
+    $('printAll').addEventListener('click', function () { printAll(); });
+  }
+
+  function savePeriod() {
+    api('/api/payroll/period', {
+      method: 'PATCH',
+      body: JSON.stringify({ day: $('day').value, cutoff: $('cut').value })
+    }).then(function (r) { say(r.note, true); return load(); })
+      .catch(function (e) { say(e.message); });
+  }
+
+  function render() {
+    var h = ['<div class="cols"><div class="rail">' +
+      '<div class="railhead"><div class="h">Paid this week</div>' +
+      '<div class="s">' + DATA.people.length + ' people · sales is on its own screen</div></div>' +
+      '<div class="raillist">'];
+
+    if (!DATA.people.length) {
+      h.push('<div class="empty">Nobody on payroll yet. Add trades and rates on the People tab.</div>');
+    }
+
+    DATA.people.forEach(function (p) {
+      h.push('<div class="person' + (p.userId === SEL ? ' sel' : '') + '" data-u="' + p.userId + '">' +
+        '<div style="min-width:0"><div class="n">' + esc(p.name) + '</div>' +
+        '<div class="m"><div class="tr">' + esc(p.positionLabel || '—') + '</div>' +
+        '<div class="chip' + (p.payMode === 'salary' ? ' salary' : '') + '">' +
+        (p.payMode === 'salary' ? 'Salary' : 'Per car') + '</div></div></div>' +
+        '<div style="margin-left:auto"><div class="amt">' + usd(p.totalCents) + '</div>' +
+        '<div class="cars">' + p.cars + (p.cars === 1 ? ' car' : ' cars') + '</div></div></div>');
+    });
+
+    h.push('</div><div class="railfoot"><div>Week total</div>' +
+      '<div class="v">' + usd(DATA.totalCents) + '</div></div></div>' +
+      '<div class="sheet" id="sheet"></div></div>');
+
+    $('main').innerHTML = h.join('');
+
+    Array.prototype.forEach.call($('main').querySelectorAll('.person'), function (row) {
+      row.addEventListener('click', function () {
+        SEL = Number(row.dataset.u);
+        SHEET = null;
+        render();
+        loadSheet();
+      });
+    });
+
+    renderSheet();
+  }
+
+  function renderSheet() {
+    var el = $('sheet');
+    if (!el) return;
+    if (!SHEET || SHEET.person.userId !== SEL) {
+      el.innerHTML = '<div class="empty">Pick somebody to see their sheet.</div>';
+      return;
+    }
+
+    var p = SHEET.person, s = SHEET.summary, salaried = p.payMode === 'salary';
+    var grid = salaried
+      ? 'grid-template-columns:80px minmax(0,1fr) 150px 90px'
+      : 'grid-template-columns:80px minmax(0,1fr) 150px 92px 84px 84px 108px';
+
+    var h = ['<div class="sheethead"><div><h1>' + esc(p.name) + '</h1>' +
+      '<div class="s">' + esc(p.positionLabel || '—') + ' · ' +
+      (salaried
+        ? 'salary, paid regardless of what closed'
+        : 'paid by the car — a flat price where the file set one, otherwise hours at ' +
+          usd(p.rateCents) + ', both from close-out') + '</div></div>' +
+      '<div style="margin-left:auto;display:flex;align-items:flex-end;gap:10px;flex-wrap:wrap">' +
+      '<div><div class="lbl">How this person is paid</div><div class="modes">' +
+      '<button data-mode="per_car" class="' + (salaried ? '' : 'sel') + '"' +
+      (DATA.canEdit ? '' : ' disabled') + '>Per car</button>' +
+      '<button data-mode="salary" class="' + (salaried ? 'sel' : '') + '"' +
+      (DATA.canEdit ? '' : ' disabled') + '>Salary</button></div></div>' +
+      (salaried
+        ? '<div><div class="lbl">Weekly salary</div>' +
+          '<input class="salinput" id="sal" value="' + (p.salaryCents / 100).toFixed(2) + '"' +
+          (DATA.canEdit ? '' : ' disabled') + '></div>'
+        : '') +
+      '<button class="ghost2" id="printOne">Print this sheet</button></div></div>'];
+
+    var stats = salaried
+      ? [['Cars closed', String(s.cars)], ['Hours logged', hrs(s.hours)],
+         ['Salary', usd(s.totalCents)], ['Missed cutoff', String(SHEET.rolled.length)]]
+      : [['Cars closed', String(s.cars)],
+         ['By the hour', s.hourlyCars + ' cars · ' + hrs(s.hours) + ' hrs'],
+         ['Flat price', s.flatCars + (s.flatCars === 1 ? ' car' : ' cars')],
+         ['Rate', usd(p.rateCents) + ' / hr'],
+         ['Missed cutoff', String(SHEET.rolled.length)]];
+
+    h.push('<div class="stats">' + stats.map(function (st) {
+      return '<div class="stat"><div class="k">' + esc(st[0]) + '</div>' +
+        '<div class="v">' + esc(st[1]) + '</div></div>';
+    }).join('') + '</div>');
+
+    h.push('<div class="thead" style="' + grid + '"><div>RO</div><div>Vehicle</div><div>Closed</div>' +
+      (salaried ? '<div class="num">Hours</div>'
+        : '<div>Basis</div><div class="num">Hours</div><div class="num">Rate</div><div class="num">Earned</div>') +
+      '</div><div class="scroll">');
+
+    if (!SHEET.cars.length) {
+      h.push('<div class="empty">Nothing of theirs closed before the cutoff this week.</div>');
+    }
+
+    SHEET.cars.forEach(function (c) {
+      var flat = c.basis === 'flat' || c.basis === 'pct';
+      h.push('<div class="trow" style="' + grid + '">' +
+        '<div class="tro">' + esc(c.roNumber) + '</div>' +
+        '<div class="tcell">' + esc(c.vehicle) +
+        (c.totalLoss ? ' <span class="tl">total loss</span>' : '') + '</div>' +
+        '<div class="tcell" style="color:var(--dim)">' + esc(closedAt(c.closedAt)) + '</div>' +
+        (salaried ? '' : '<div class="basis' + (flat ? ' flat' : '') + '">' +
+          (flat ? 'Flat price' : 'Hours') + '</div>') +
+        '<div class="tcell num">' + (c.hours === null ? '—' : hrs(c.hours)) + '</div>' +
+        (salaried ? '' :
+          '<div class="tcell num">' + (c.rateCents === null ? '—' : usd(c.rateCents)) + '</div>' +
+          '<div class="amt">' + usd(c.costCents) + '</div>') +
+        '</div>');
+    });
+
+    h.push('<div class="rolled"><div class="rolledhead">' +
+      '<div class="h">Missed the cutoff</div><div class="s">' +
+      (SHEET.rolled.length
+        ? 'Closed after ' + cap1(DATA.period.closeDay) + ' ' + ampm(DATA.period.cutoff) + ' · pays next week'
+        : '') + '</div></div>');
+
+    if (!SHEET.rolled.length) {
+      h.push('<div style="padding:9px 0;font:400 11.5px var(--font);color:var(--dim)">' +
+        'Nothing of this person’s closed after the cutoff.</div>');
+    }
+    SHEET.rolled.forEach(function (c) {
+      h.push('<div class="rolledrow"><div>' + esc(c.roNumber) + '</div>' +
+        '<div class="tcell">' + esc(c.vehicle) + '</div>' +
+        '<div class="tcell">' + esc(closedAt(c.closedAt)) + '</div>' +
+        '<div style="text-align:right;font:400 11px var(--font);color:var(--dim)">next week</div></div>');
+    });
+    h.push('</div></div>');
+
+    h.push('<div class="sheetfoot"><div class="n">' +
+      (salaried
+        ? 'Salary is the whole of it. What these cars would have paid by the hour is not calculated and not printed.'
+        : 'Each car pays the way its close-out says — a flat price where one was agreed, hours at the rate otherwise. Change it on the file and this sheet follows.') +
+      '</div><div class="tot"><div class="tl2">' +
+      (salaried ? 'Salary this week' : 'Owed this week') + '</div>' +
+      '<div class="tv">' + usd(s.totalCents) + '</div></div></div>');
+
+    el.innerHTML = h.join('');
+
+    Array.prototype.forEach.call(el.querySelectorAll('[data-mode]'), function (b) {
+      b.addEventListener('click', function () {
+        if (!DATA.canEdit) return;
+        var salInput = $('sal');
+        api('/api/payroll/person/' + SEL, {
+          method: 'PATCH',
+          body: JSON.stringify({
+            mode: b.dataset.mode,
+            salaryCents: Math.round(Number((salInput ? salInput.value : p.salaryCents / 100)) * 100)
+          })
+        }).then(function (r) { say(r.note, true); return load(); })
+          .catch(function (e) { say(e.message); });
+      });
+    });
+    var sal = $('sal');
+    if (sal) sal.addEventListener('change', function () {
+      api('/api/payroll/person/' + SEL, {
+        method: 'PATCH',
+        body: JSON.stringify({ mode: 'salary', salaryCents: Math.round(Number(sal.value) * 100) })
+      }).then(function () { say('Salary saved.', true); return load(); })
+        .catch(function (e) { say(e.message); });
+    });
+    $('printOne').addEventListener('click', function () { renderPrint(); window.print(); });
+  }
+
+  /* ------------------------------------------------------------ the paper */
+
+  function sheetPage(sheet) {
+    var p = sheet.person, s = sheet.summary, salaried = p.payMode === 'salary';
+    var per = DATA.period;
+    var h = ['<div class="sheetpage">' +
+      '<div class="phead"><div><div class="shop">' + esc(ME.company ? ME.company.name : 'Easy Shop') + '</div>' +
+      '<div class="shopsub">Technician pay sheet</div></div>' +
+      '<div class="pright"><div class="ptitle">Week ending ' + esc(dayName(per.end)) + '</div>' +
+      '<div class="pmeta">Cutoff ' + esc(cap1(per.closeDay)) + ' ' + esc(ampm(per.cutoff)) +
+      ' · printed ' + new Date().toLocaleString() + '</div>' +
+      (per.paidAt ? '<div class="pmeta">Paid ' + new Date(per.paidAt).toLocaleDateString() + '</div>' : '') +
+      '</div></div>',
+
+      '<div class="pwho"><div><div class="pk">Technician</div><div class="pv">' + esc(p.name) + '</div>' +
+      '<div class="pvs">' + esc(p.positionLabel || '—') + '</div></div>' +
+      '<div><div class="pk">Paid</div><div class="pv sm">' + (salaried ? 'Salary' : 'By the car') + '</div>' +
+      '<div class="pvs">' + (salaried
+        ? 'Paid in full regardless of what closed this week'
+        : 'Flat price where the file set one, otherwise ' + usd(p.rateCents) + ' / hr') + '</div></div>' +
+      '<div class="pright"><div class="pk">Cars closed</div><div class="pv">' + s.cars + '</div></div>' +
+      '<div style="text-align:right"><div class="pk">Hours ' + (salaried ? 'logged' : 'paid') + '</div>' +
+      '<div class="pv">' + hrs(s.hours) + '</div></div></div>'];
+
+    h.push('<table><thead><tr><th>RO</th><th>Vehicle</th><th>Closed</th>' +
+      (salaried ? '<th class="r">Hours</th>'
+        : '<th>Basis</th><th class="r">Hours</th><th class="r">Rate</th><th class="r">Earned</th>') +
+      '</tr></thead><tbody>');
+
+    sheet.cars.forEach(function (c) {
+      var flat = c.basis === 'flat' || c.basis === 'pct';
+      h.push('<tr><td>' + esc(c.roNumber) + '</td><td>' + esc(c.vehicle) + '</td>' +
+        '<td>' + esc(closedAt(c.closedAt)) + '</td>' +
+        (salaried ? '' : '<td>' + (flat ? 'Flat price' : 'Hours') + '</td>') +
+        '<td class="r">' + (c.hours === null ? '—' : hrs(c.hours)) + '</td>' +
+        (salaried ? '' :
+          '<td class="r">' + (c.rateCents === null ? '—' : usd(c.rateCents)) + '</td>' +
+          '<td class="r">' + usd(c.costCents) + '</td>') +
+        '</tr>');
+    });
+
+    if (salaried) {
+      h.push('<tr class="sum"><td colspan="3">' + s.cars + (s.cars === 1 ? ' car' : ' cars') +
+        ' closed</td><td class="r">' + hrs(s.hours) + '</td></tr>' +
+        '<tr class="tot"><td colspan="3">Salary this week</td>' +
+        '<td class="r">' + usd(s.totalCents) + '</td></tr>');
+    } else {
+      var hourly = sheet.cars.filter(function (c) { return c.basis === 'hours' || c.basis === 'ems'; });
+      var flatCars = sheet.cars.filter(function (c) { return c.basis === 'flat' || c.basis === 'pct'; });
+      var hourlyCents = hourly.reduce(function (n, c) { return n + (c.costCents || 0); }, 0);
+      var flatCents = flatCars.reduce(function (n, c) { return n + (c.costCents || 0); }, 0);
+      h.push('<tr class="sum"><td colspan="4">Paid by the hour · ' + hourly.length +
+        (hourly.length === 1 ? ' car' : ' cars') + '</td>' +
+        '<td class="r">' + hrs(s.hours) + '</td><td></td>' +
+        '<td class="r">' + usd(hourlyCents) + '</td></tr>' +
+        '<tr class="sum2"><td colspan="4">Flat price · ' + flatCars.length +
+        (flatCars.length === 1 ? ' car' : ' cars') + '</td><td></td><td></td>' +
+        '<td class="r">' + usd(flatCents) + '</td></tr>' +
+        '<tr class="tot"><td colspan="4">Total owed this week</td><td></td><td></td>' +
+        '<td class="r">' + usd(s.totalCents) + '</td></tr>');
+    }
+    h.push('</tbody></table>');
+
+    if (sheet.rolled.length) {
+      h.push('<div class="rollbox"><div class="pk">Closed after the cutoff — pays next week</div>' +
+        sheet.rolled.map(function (c) {
+          return '<div class="rollline">' + esc(c.roNumber) + ' · ' + esc(c.vehicle) +
+            ' · closed ' + esc(closedAt(c.closedAt)) + '</div>';
+        }).join('') + '</div>');
+    }
+
+    h.push('<div class="sigs">' +
+      '<div class="sig"><div class="sigline"></div><div class="siglbl">Technician signature</div></div>' +
+      '<div class="sig"><div class="sigline"></div><div class="siglbl">Shop signature</div></div>' +
+      '<div style="width:130px"><div class="sigline"></div><div class="siglbl">Date</div></div></div>');
+
+    h.push('<div class="pfoot">' +
+      (salaried
+        ? 'No per-car figure is calculated or printed for a salaried technician — the salary is the whole of the pay.'
+        : 'Figures are the close-out cost recorded on each file. Corrections made after this sheet is issued appear as their own line on the next week.') +
+      '</div></div>');
+
+    return h.join('');
+  }
+
+  function renderPrint() {
+    $('print').innerHTML = SHEET ? sheetPage(SHEET) : '';
+  }
+
+  /** Every sheet, one page each, fetched fresh so nothing prints stale. */
+  function printAll() {
+    say('Building every sheet…', true);
+    Promise.all(DATA.people.map(function (p) {
+      return api('/api/payroll/person/' + p.userId + '?end=' + END);
+    })).then(function (all) {
+      $('print').innerHTML = all.filter(function (s) {
+        return s.cars.length || s.summary.totalCents;
+      }).map(sheetPage).join('');
+      say('');
+      window.print();
+      /* Put the single sheet back, so a later Print this sheet is not the lot. */
+      setTimeout(renderPrint, 1000);
+    }).catch(function (e) { say(e.message); });
+  }
+})();
+</script>
+</body>
+</html>
