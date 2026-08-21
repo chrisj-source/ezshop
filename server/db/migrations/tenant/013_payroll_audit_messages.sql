@@ -62,14 +62,14 @@ ALTER TABLE audit_log ADD COLUMN ro_id BIGINT UNSIGNED NULL COMMENT 'the file th
 ALTER TABLE audit_log ADD COLUMN label VARCHAR(190) NULL COMMENT 'one line, already written for a human';
 ALTER TABLE audit_log ADD COLUMN changes JSON NULL COMMENT '[{field, from, to}]';
 ALTER TABLE audit_log ADD COLUMN note VARCHAR(500) NULL COMMENT 'what the person wrote with the change, if anything';
-ALTER TABLE audit_log ADD COLUMN sensitive TINYINT(1) NOT NULL DEFAULT 0;
+ALTER TABLE audit_log ADD COLUMN is_sensitive TINYINT(1) NOT NULL DEFAULT 0;
 ALTER TABLE audit_log ADD COLUMN source VARCHAR(24) NOT NULL DEFAULT 'web' COMMENT 'web, mobile, ems, system';
 ALTER TABLE audit_log ADD COLUMN client VARCHAR(190) NULL COMMENT 'user agent and address, as recorded';
 
 ALTER TABLE audit_log ADD KEY ix_audit_when (created_at);
 ALTER TABLE audit_log ADD KEY ix_audit_actor (user_id, created_at);
 ALTER TABLE audit_log ADD KEY ix_audit_ro (ro_id, created_at);
-ALTER TABLE audit_log ADD KEY ix_audit_sensitive (sensitive, created_at);
+ALTER TABLE audit_log ADD KEY ix_audit_sensitive (is_sensitive, created_at);
 
 -- Old rows have no area and no label. Give them the ones their entity implies so
 -- the screen reads as one list rather than a new list on top of a blank one.
@@ -80,8 +80,8 @@ UPDATE audit_log SET area = 'Permissions'  WHERE area IS NULL AND entity IN ('ro
 UPDATE audit_log SET area = 'Setup'        WHERE area IS NULL AND entity IN ('status', 'time_off');
 UPDATE audit_log SET area = 'Repair order' WHERE area IS NULL;
 UPDATE audit_log SET ro_id = entity_id WHERE ro_id IS NULL AND entity = 'repair_order';
-UPDATE audit_log SET sensitive = 1
- WHERE sensitive = 0 AND (area IN ('Money', 'Permissions')
+UPDATE audit_log SET is_sensitive = 1
+ WHERE is_sensitive = 0 AND (area IN ('Money', 'Permissions')
     OR action IN ('void', 'delete', 'removed', 'close_undo', 'total_loss_undo'));
 
 -- ===========================================================================

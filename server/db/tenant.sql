@@ -664,7 +664,7 @@ CREATE TABLE audit_log (
   changes         JSON          NULL COMMENT '[{field, from, to}]',
   note            VARCHAR(500)  NULL COMMENT 'what the person wrote with it, if anything',
   detail          JSON          NULL,
-  sensitive       TINYINT(1)    NOT NULL DEFAULT 0 COMMENT 'money, deletes, permissions',
+  is_sensitive    TINYINT(1)    NOT NULL DEFAULT 0 COMMENT 'money, deletes, permissions',
   source          VARCHAR(24)   NOT NULL DEFAULT 'web' COMMENT 'web, mobile, ems, system',
   client          VARCHAR(190)  NULL,
   created_at      DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -672,7 +672,7 @@ CREATE TABLE audit_log (
   KEY ix_audit_when (created_at),
   KEY ix_audit_actor (user_id, created_at),
   KEY ix_audit_ro (ro_id, created_at),
-  KEY ix_audit_sensitive (sensitive, created_at)
+  KEY ix_audit_sensitive (is_sensitive, created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ===========================================================================

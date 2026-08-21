@@ -78,7 +78,7 @@ function values(companyActor: Actor, w: AuditWrite): unknown[] {
 const SQL = `
   INSERT INTO audit_log
     (user_id, user_name, actor_role, entity, entity_id, ro_id, action, area, label,
-     changes, note, detail, sensitive, source, client)
+     changes, note, detail, is_sensitive, source, client)
   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
 
 /**

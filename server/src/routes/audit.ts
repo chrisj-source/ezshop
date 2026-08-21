@@ -70,7 +70,7 @@ export async function registerAudit(app: FastifyInstance): Promise<void> {
 
     if (q.who) { where.push('a.user_name = ?'); args.push(q.who); }
     if (q.area && AREAS.includes(q.area)) { where.push(`${AREA_SQL} = ?`); args.push(q.area); }
-    if (q.sensitive === '1') where.push('a.sensitive = 1');
+    if (q.sensitive === '1') where.push('a.is_sensitive = 1');
     if (q.ro) { where.push('a.ro_id = ?'); args.push(Number(q.ro)); }
     if (q.q && q.q.trim()) {
       const like = '%' + q.q.trim() + '%';
@@ -91,7 +91,7 @@ export async function registerAudit(app: FastifyInstance): Promise<void> {
       SELECT a.id, a.user_id, a.user_name, a.actor_role, a.entity, a.entity_id,
              COALESCE(a.ro_id, CASE WHEN a.entity = 'repair_order' THEN a.entity_id END) AS ro_id,
              a.action, ${AREA_SQL} AS area, ${LABEL_SQL} AS label,
-             a.changes, a.note, a.detail, a.sensitive,
+             a.changes, a.note, a.detail, a.is_sensitive,
              a.source, a.client, a.created_at,
              r.ro_number, l.lead_number
       FROM audit_log a
@@ -106,7 +106,7 @@ export async function registerAudit(app: FastifyInstance): Promise<void> {
        span at all, and how much of it nobody wrote a note about. */
     const [tally] = await tq<RowDataPacket[]>(cid, `
       SELECT COUNT(*) AS total,
-             SUM(a.sensitive = 1) AS sensitive,
+             SUM(a.is_sensitive = 1) AS sensitive,
              SUM(a.note IS NULL OR a.note = '') AS silent
       FROM audit_log a
       LEFT JOIN repair_orders r
@@ -123,7 +123,7 @@ export async function registerAudit(app: FastifyInstance): Promise<void> {
         action: r.action,
         label: r.label,
         note: r.note,
-        sensitive: !!r.sensitive,
+        sensitive: !!r.is_sensitive,
         source: r.source,
         client: r.client,
         entity: r.entity,
@@ -151,7 +151,7 @@ export async function registerAudit(app: FastifyInstance): Promise<void> {
 
     const id = Number((req.params as { id: string }).id);
     const rows = await tq<RowDataPacket[]>(ctx.company!.id, `
-      SELECT id, user_name, actor_role, area, action, label, note, sensitive, source, created_at, changes
+      SELECT id, user_name, actor_role, area, action, label, note, is_sensitive, source, created_at, changes
       FROM audit_log WHERE ro_id = ? OR (entity = 'repair_order' AND entity_id = ?)
       ORDER BY id DESC LIMIT 200`, [id, id]);
 
@@ -159,7 +159,7 @@ export async function registerAudit(app: FastifyInstance): Promise<void> {
       items: rows.map(r => ({
         id: r.id, when: r.created_at, who: r.user_name ?? 'System', role: r.actor_role,
         area: r.area, action: r.action, label: r.label, note: r.note,
-        sensitive: !!r.sensitive, source: r.source, changes: parseJson(r.changes) ?? []
+        sensitive: !!r.is_sensitive, source: r.source, changes: parseJson(r.changes) ?? []
       }))
     };
   });
