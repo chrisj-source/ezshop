@@ -336,15 +336,15 @@ export async function registerParts(app: FastifyInstance): Promise<void> {
 
     const cid = ctx.company!.id;
     const b = req.body as {
-      lines: Array<{ id: number; short?: number; received?: number }>;
+      lines: Array<{ id: number; short?: number; received?: number; costCents?: number }>;
       receivedAt?: string; invoiceNo?: string;
     };
     if (!b.lines?.length) return reply.code(400).send({ error: 'Nothing selected' });
 
     const ids = b.lines.map(l => Number(l.id)).filter(Boolean);
     const rows = await tq<Array<RowDataPacket & {
-      id: number; ro_id: number; description: string; qty: number; state: string;
-    }>>(cid, 'SELECT id, ro_id, description, qty, state FROM parts_lines WHERE id IN (?)', [ids]);
+      id: number; ro_id: number; description: string; qty: number; state: string; cost_cents: number;
+    }>>(cid, 'SELECT id, ro_id, description, qty, state, cost_cents FROM parts_lines WHERE id IN (?)', [ids]);
 
     const files = new Set<number>();
     const shorted: string[] = [];
@@ -357,12 +357,28 @@ export async function registerParts(app: FastifyInstance): Promise<void> {
         : Math.max(0, row.qty - short);
       const state = received >= row.qty ? 'received' : received > 0 ? 'partial' : 'backordered';
 
+      /* Cost is usually only known when the invoice arrives with the part, so
+         receiving is where it gets typed. Only a money-capable user may set it;
+         an empty field leaves whatever the line was carrying. */
+      const cost = ctx.caps.money && ask.costCents !== undefined && ask.costCents !== null
+        ? Math.max(0, Math.round(Number(ask.costCents)))
+        : null;
+
       await texec(cid, `
         UPDATE parts_lines
         SET qty_received = ?, state = ?, received_at = COALESCE(?, CURDATE()),
-            invoice_no = COALESCE(NULLIF(?, ''), invoice_no)
+            invoice_no = COALESCE(NULLIF(?, ''), invoice_no),
+            cost_cents = COALESCE(?, cost_cents)
         WHERE id = ?`,
-        [received, state, b.receivedAt ?? null, b.invoiceNo ?? null, row.id]);
+        [received, state, b.receivedAt ?? null, b.invoiceNo ?? null, cost, row.id]);
+
+      if (cost !== null && cost !== Number(row.cost_cents ?? 0)) {
+        await audit(cid, actorFrom(req), {
+          entity: 'part', entityId: row.id, roId: row.ro_id, action: 'part_cost_set', area: 'Parts',
+          label: `Cost entered on receive — ${row.description}`,
+          changes: [{ field: 'Cost', from: String(row.cost_cents ?? 0), to: String(cost) }]
+        });
+      }
 
       await texec(cid,
         `INSERT INTO ro_notes (ro_id, kind, body, user_id, user_name) VALUES (?, 'auto', ?, ?, ?)`,

@@ -651,8 +651,12 @@
 
     var h = '<div class="lines">';
 
-    if (ME.caps.manageParts && (toOrder || onOrder)) {
+    if (ME.caps.manageParts) {
       h += '<div class="row" style="padding:8px 0 10px;gap:8px;align-items:center">' +
+        '<button class="btn btn-ghost" data-addpart="' + f.roId + '">Add part</button>' +
+        (ME.caps.money
+          ? '<button class="btn btn-ghost" data-costs="' + f.roId + '">Costs</button>'
+          : '') +
         (toOrder
           ? '<button class="btn btn-ghost" data-orderfile="' + f.roId + '">Order ' + toOrder +
             ' line' + (toOrder === 1 ? '' : 's') + '</button>'
@@ -704,6 +708,10 @@
           : '') +
         (l.state === 'need'
           ? '<button class="linebtn" data-orderfile="' + f.roId + '">Order</button>'
+          : '') +
+        (ME.caps.money && ['received', 'partial'].indexOf(l.state) >= 0
+          ? '<button class="linebtn" data-costs="' + f.roId + '" data-costline="' + l.id + '" ' +
+            'title="Type the cost off the invoice">cost</button>'
           : '') +
         (Number(l.qty_received || 0) > 0 && Number(l.qty_received) < Number(l.qty)
           ? '<span class="lstate" style="color:var(--stopped);border:1px solid var(--stopped)" ' +
@@ -759,6 +767,22 @@
       });
     });
 
+    Array.prototype.forEach.call($('body').querySelectorAll('[data-costs]'), function (b) {
+      b.addEventListener('click', function (e) {
+        e.stopPropagation();
+        var f = byRo().filter(function (x) { return String(x.roId) === b.dataset.costs; })[0];
+        if (f) openCosts(f, b.dataset.costline ? Number(b.dataset.costline) : null);
+      });
+    });
+
+    Array.prototype.forEach.call($('body').querySelectorAll('[data-addpart]'), function (b) {
+      b.addEventListener('click', function (e) {
+        e.stopPropagation();
+        var f = byRo().filter(function (x) { return String(x.roId) === b.dataset.addpart; })[0];
+        if (f) openAddPart(f);
+      });
+    });
+
     /* Most dealers want the last 8 over the phone; the full 17 goes on the clipboard. */
     Array.prototype.forEach.call($('body').querySelectorAll('[data-vin]'), function (b) {
       b.addEventListener('click', function (e) {
@@ -775,6 +799,154 @@
   }
 
   /* ------------------------------------------------- order and receive */
+
+  /**
+   * The invoice usually turns up after the part does, and often disagrees with
+   * what was quoted. Every line on the file is editable here, received or not,
+   * so a stack of invoices is worked through in one pass rather than a file at a
+   * time through the drawer. Blank leaves a line alone.
+   */
+  function openCosts(f, focusId) {
+    $('dTitle').textContent = 'Costs — ' + f.ro;
+    $('dSub').textContent = (f.vehicle || '') + (f.vin ? ' · …' + String(f.vin).slice(-8) : '');
+    $('scrim').classList.add('open');
+    $('drawer').classList.add('open');
+    $('drawer').setAttribute('aria-hidden', 'false');
+
+    var h = ['<div class="sec">Off the invoice</div>',
+      '<div class="row"><input id="cInv" placeholder="Vendor invoice number — optional" ' +
+      'style="flex:1;min-width:160px"></div>',
+      '<div class="sec">' + f.lines.length + ' line' + (f.lines.length === 1 ? '' : 's') +
+      ' — type what it actually cost</div>'];
+
+    f.lines.forEach(function (l) {
+      var cost = Number(l.cost_cents || 0);
+      h.push('<div class="log" style="display:flex;gap:10px;align-items:flex-start">' +
+        '<div style="min-width:0;flex:1">' +
+        '<div class="log-b">' + esc(l.description) + '</div>' +
+        '<div class="log-m">' + esc([LABEL[l.state] || l.state, l.vendor_name || 'no vendor',
+          l.po_number ? 'order ' + l.po_number : '', 'qty ' + l.qty].filter(Boolean).join(' · ')) +
+        ' · ' + money(l.price_cents) + ' list</div></div>' +
+        '<div style="display:flex;gap:8px;align-items:flex-start;text-align:right">' +
+        '<div><div class="sub" style="margin:0">list</div>' +
+        '<input class="c-price" data-for="' + l.id + '" type="number" min="0" step="0.01" ' +
+        'value="' + (Number(l.price_cents) ? (Number(l.price_cents) / 100).toFixed(2) : '') + '" ' +
+        'style="width:84px;text-align:right"></div>' +
+        '<div><div class="sub" style="margin:0">cost</div>' +
+        '<input class="c-cost" data-for="' + l.id + '" type="number" min="0" step="0.01" ' +
+        'value="' + (cost ? (cost / 100).toFixed(2) : '') + '" ' +
+        'placeholder="0.00" style="width:84px;text-align:right"></div></div></div>');
+    });
+
+    h.push('<div class="msg" id="cMsg"></div>',
+      '<div class="row" style="margin-top:12px">' +
+      '<button class="btn btn-solid" id="cSave">Save costs</button>' +
+      '<span class="sub">Only what you changed is written, and each change is logged.</span></div>');
+
+    $('dBody').innerHTML = h.join('');
+
+    if (focusId) {
+      var target = $('dBody').querySelector('.c-cost[data-for="' + focusId + '"]');
+      if (target) { target.focus(); target.select(); }
+    }
+
+    $('cSave').addEventListener('click', function () {
+      var inv = $('cInv').value.trim();
+      var writes = [];
+
+      f.lines.forEach(function (l) {
+        var costEl = $('dBody').querySelector('.c-cost[data-for="' + l.id + '"]');
+        var priceEl = $('dBody').querySelector('.c-price[data-for="' + l.id + '"]');
+        var body = {};
+        if (costEl && costEl.value !== '') {
+          var c = Math.round(Number(costEl.value) * 100);
+          if (c !== Number(l.cost_cents || 0)) body.costCents = c;
+        }
+        if (priceEl && priceEl.value !== '') {
+          var p = Math.round(Number(priceEl.value) * 100);
+          if (p !== Number(l.price_cents || 0)) body.priceCents = p;
+        }
+        if (inv) body.invoiceNo = inv;
+        if (Object.keys(body).length && !(Object.keys(body).length === 1 && body.invoiceNo)) {
+          writes.push(api('/api/parts/' + l.id, { method: 'PATCH', body: JSON.stringify(body) }));
+        }
+      });
+
+      if (!writes.length) return dMsg('cMsg', 'Nothing changed.', 'err');
+      Promise.all(writes)
+        .then(function () { closeDrawer(); return load(); })
+        .then(function () { Shell.refreshCount(); })
+        .catch(function (e) { dMsg('cMsg', e.message, 'err'); });
+    });
+  }
+
+  /**
+   * A line the estimate never had. The desk adds it here rather than going back
+   * to the file: it lands in the same place, needed and not yet ordered, so the
+   * next order picks it up with everything else.
+   */
+  function openAddPart(f) {
+    $('dTitle').textContent = 'Add a part — ' + f.ro;
+    $('dSub').textContent = (f.vehicle || '') + (f.vin ? ' · …' + String(f.vin).slice(-8) : '');
+    $('scrim').classList.add('open');
+    $('drawer').classList.add('open');
+    $('drawer').setAttribute('aria-hidden', 'false');
+
+    $('dBody').innerHTML = [
+      '<div class="sec">What it is</div>',
+      '<div class="row"><input id="aDesc" placeholder="Part — as you would say it on the phone" ' +
+      'style="flex:1;min-width:200px"></div>',
+      '<div class="row" style="margin-top:10px">' +
+      '<input id="aNum" placeholder="Part number — optional" style="flex:1;min-width:140px">' +
+      '<select id="aType"><option value="">Type</option><option value="OEM">OEM</option>' +
+      '<option value="Aftermarket">Aftermarket</option><option value="Recycled">Recycled</option>' +
+      '<option value="Glass">Glass</option><option value="Other">Other</option></select>' +
+      '<input id="aQty" type="number" min="1" step="1" value="1" style="width:70px" title="Quantity"></div>',
+      (ME.caps.money
+        ? '<div class="sec">Money</div>' +
+          '<div class="row"><input id="aPrice" type="number" min="0" step="0.01" ' +
+          'placeholder="List price" style="width:120px">' +
+          '<input id="aCost" type="number" min="0" step="0.01" placeholder="Cost — if you know it" ' +
+          'style="width:150px">' +
+          '<span class="sub">Cost can wait until the part is in your hands.</span></div>'
+        : ''),
+      '<div class="sec">Where it is coming from — optional</div>',
+      '<div class="row"><select id="aVendor" style="flex:1;min-width:150px">' +
+      '<option value="">No vendor yet</option>' +
+      VENDORS.map(function (v) {
+        return '<option value="' + v.id + '">' + esc(v.name) + (v.kind ? ' · ' + esc(v.kind) : '') + '</option>';
+      }).join('') + '</select>' +
+      '<input id="aEta" type="date" style="width:150px" title="ETA, if the vendor has given one"></div>',
+      '<div class="row" style="margin-top:10px">' +
+      '<label class="sub" style="display:flex;align-items:center;gap:7px">' +
+      '<input type="checkbox" id="aGating" checked> The car cannot go without it</label></div>',
+      '<div class="msg" id="aMsg"></div>',
+      '<div class="row" style="margin-top:12px">' +
+      '<button class="btn btn-solid" id="aSave">Add the line</button>' +
+      '<span class="sub">Lands as needed, not ordered.</span></div>'
+    ].join('');
+
+    $('aSave').addEventListener('click', function () {
+      var desc = $('aDesc').value.trim();
+      if (!desc) return dMsg('aMsg', 'What is the part?', 'err');
+      api('/api/ro/' + f.roId + '/parts', {
+        method: 'POST',
+        body: JSON.stringify({
+          description: desc,
+          partNumber: $('aNum').value.trim() || undefined,
+          partType: $('aType').value || undefined,
+          qty: Number($('aQty').value || 1) || 1,
+          priceCents: $('aPrice') && $('aPrice').value ? Math.round(Number($('aPrice').value) * 100) : undefined,
+          costCents: $('aCost') && $('aCost').value ? Math.round(Number($('aCost').value) * 100) : undefined,
+          vendorId: $('aVendor').value ? Number($('aVendor').value) : undefined,
+          eta: $('aEta').value || undefined,
+          gating: $('aGating').checked
+        })
+      }).then(function () { closeDrawer(); return load(); })
+        .then(function () { Shell.refreshCount(); })
+        .catch(function (e) { dMsg('aMsg', e.message, 'err'); });
+    });
+  }
 
   /**
    * Ordering is not a flag. One order goes to one vendor with an order number
@@ -873,15 +1045,24 @@
         '<div class="log-m">' + esc([l.vendor_name || 'no vendor',
           l.po_number ? 'order ' + l.po_number : '',
           l.eta ? 'ETA ' + shopDate(l.eta) : ''].filter(Boolean).join(' · ')) + '</div></div>' +
-        '<div style="text-align:right"><div class="sub" style="margin:0">short of ' + owed + '</div>' +
+        '<div style="text-align:right;display:flex;gap:8px;align-items:flex-start">' +
+        (ME.caps.money
+          ? '<div><div class="sub" style="margin:0">cost each</div>' +
+            '<input class="r-cost" data-for="' + l.id + '" type="number" min="0" step="0.01" ' +
+            'placeholder="' + (Number(l.cost_cents) ? (Number(l.cost_cents) / 100).toFixed(2) : '0.00') + '" ' +
+            'style="width:84px;text-align:right"></div>'
+          : '') +
+        '<div><div class="sub" style="margin:0">short of ' + owed + '</div>' +
         '<input class="r-short" data-for="' + l.id + '" type="number" min="0" max="' + owed + '" ' +
-        'value="0" style="width:64px;text-align:right"></div></div>');
+        'value="0" style="width:64px;text-align:right"></div></div></div>');
     });
 
     h.push('<div class="msg" id="rMsg"></div>',
       '<div class="row" style="margin-top:12px">' +
       '<button class="btn btn-solid" id="rSend">Mark received</button>' +
-      '<span class="sub">Anything short stays on order for the rest.</span></div>');
+      '<span class="sub">Anything short stays on order for the rest.' +
+      (ME.caps.money ? ' A cost typed here replaces what the line was carrying.' : '') +
+      '</span></div>');
 
     $('dBody').innerHTML = h.join('');
 
@@ -890,7 +1071,10 @@
         return c.checked;
       }).map(function (c) {
         var shortEl = $('dBody').querySelector('.r-short[data-for="' + c.dataset.id + '"]');
-        return { id: Number(c.dataset.id), short: shortEl ? Number(shortEl.value || 0) : 0 };
+        var costEl = $('dBody').querySelector('.r-cost[data-for="' + c.dataset.id + '"]');
+        var out = { id: Number(c.dataset.id), short: shortEl ? Number(shortEl.value || 0) : 0 };
+        if (costEl && costEl.value !== '') out.costCents = Math.round(Number(costEl.value) * 100);
+        return out;
       });
       if (!picked.length) return dMsg('rMsg', 'Nothing ticked.', 'err');
       api('/api/parts/bulk-receive', {
