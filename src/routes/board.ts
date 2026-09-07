@@ -1,0 +1,239 @@
+import { FastifyInstance } from 'fastify';
+import { RowDataPacket } from 'mysql2/promise';
+import { tq } from '../db/tenant';
+import { requireCompany, requireFeature } from '../middleware/context';
+import { scrubMoney } from '../permissions';
+
+interface BoardRow extends RowDataPacket {
+  id: number; ro_number: string; status_slot: string | null; status_since: Date | null;
+  on_hold: number; hold_reason: string | null; hold_owner: string | null; claim_number: string | null;
+  repair_path: string; ro_type: string; opened_at: Date; promised_at: Date | null; target_days: number | null;
+  amount_cents: number; labor_hours: string;
+  delivered_at: Date | null; closed_at: Date | null; paid_at: Date | null;
+  close_date: string | null; paid: number;
+  rental_cost_cents: number; voided_days: number;
+  total_loss_at: Date | null; total_loss_note: string | null;
+  customer_name: string | null; customer_phone: string | null; insurer_name: string | null;
+  vin: string | null; year: number | null; make: string | null; model: string | null;
+  color: string | null; plate: string | null; plate_state: string | null; status_by: string | null;
+  status_label: string | null; customer_label: string | null; group_id: string | null;
+  group_label: string | null; lane_key: string | null; kind: string | null;
+  age_yellow_hours: number | null; age_red_hours: number | null;
+  parts_waiting: number; supp_open: number;
+}
+
+export async function registerBoard(app: FastifyInstance): Promise<void> {
+
+  /**
+   * The whole board in one payload. A shop with a few hundred open files is
+   * well under a megabyte; pagination lives in the client.
+   */
+  app.get('/api/board', async (req, reply) => {
+    const ctx = requireCompany(req, reply);
+    if (!ctx) return;
+    if (!requireFeature(ctx, 'board', reply)) return;
+
+    const q = req.query as { closed?: string; since?: string };
+    const wantClosed = q.closed === '1';
+
+    const params: unknown[] = [];
+    let scope = '';
+
+    // Technicians see only the files assigned to them, when the shop says so.
+    if (!ctx.caps.seesAllRepairOrders) {
+      scope = ` AND EXISTS (SELECT 1 FROM ro_assignments a WHERE a.ro_id = r.id AND a.user_id = ?)`;
+      params.push(ctx.user.id);
+      /* A totalled car leaves the technicians' lists but keeps its assignments:
+         nobody is unassigned, the work simply is not theirs any more. Anyone who
+         sees the whole board still sees it, at the head of the board. */
+      scope += ' AND r.total_loss_at IS NULL';
+    }
+
+    /* A file is off the board if EITHER stamp is set: `closed_at` is the pickup
+       moment, `close_date` is the books date and the flag for "closed properly".
+       Older and imported files can carry the books date with no pickup stamp, and
+       reading only `closed_at` left those sitting on the open board. */
+    const CLOSED_ANY = '(r.close_date IS NOT NULL OR r.closed_at IS NOT NULL)';
+    const closedClause = wantClosed
+      ? `${CLOSED_ANY} AND r.voided_at IS NULL
+         AND COALESCE(r.close_date, DATE(r.closed_at)) > DATE_SUB(CURDATE(), INTERVAL 90 DAY)`
+      : `r.close_date IS NULL AND r.closed_at IS NULL AND r.voided_at IS NULL`;
+
+    const rows = await tq<BoardRow[]>(ctx.company!.id, `
+      SELECT
+        r.id, r.ro_number, r.status_slot, r.status_since, r.on_hold, r.hold_reason, r.hold_owner,
+        r.claim_number, r.repair_path, r.ro_type, r.opened_at, r.promised_at, r.target_days,
+        r.amount_cents, r.labor_hours,
+        c.name AS customer_name, c.phone AS customer_phone,
+        ins.name AS insurer_name,
+        v.vin, v.year, v.make, v.model, v.color, v.plate, v.plate_state,
+        s.label AS status_label, s.customer_label, s.group_id, s.lane_key, s.kind,
+        s.age_yellow_hours, s.age_red_hours,
+        r.close_date, r.paid, r.total_loss_at, r.total_loss_note,
+        r.delivered_at, r.closed_at, r.paid_at, r.rental_cost_cents,
+        g.label AS group_label,
+        (SELECT COUNT(*) FROM parts_lines p
+          WHERE p.ro_id = r.id AND p.gating = 1
+            AND p.state IN ('need','ordered','partial','backordered')) AS parts_waiting,
+        (SELECT COUNT(*) FROM supplements sp
+          WHERE sp.ro_id = r.id AND sp.state IN ('draft','sent','awaiting')) AS supp_open,
+        (SELECT h.user_name FROM ro_status_history h
+          WHERE h.ro_id = r.id ORDER BY h.id DESC LIMIT 1) AS status_by
+      FROM repair_orders r
+      LEFT JOIN clients c   ON c.id = r.client_id
+      LEFT JOIN clients ins ON ins.id = r.insurer_client_id
+      LEFT JOIN vehicles v  ON v.id = r.vehicle_id
+      LEFT JOIN statuses s  ON s.slot_id = r.status_slot
+      LEFT JOIN status_groups g ON g.group_id = s.group_id
+      WHERE ${closedClause}${scope}
+      ORDER BY r.opened_at DESC
+    `, params);
+
+    const assignments = await tq<Array<RowDataPacket & {
+      ro_id: number; position_key: string; display_name: string | null; user_id: number | null;
+    }>>(
+      ctx.company!.id,
+      `SELECT a.ro_id, a.position_key, a.display_name, a.user_id FROM ro_assignments a
+       JOIN repair_orders r ON r.id = a.ro_id
+       WHERE r.voided_at IS NULL AND ${wantClosed ? CLOSED_ANY : '(r.close_date IS NULL AND r.closed_at IS NULL)'}`
+    );
+
+    const byRo = new Map<number, Record<string, string | null>>();
+    // Who by name for display, and by id so the board can filter to one person.
+    const idsByRo = new Map<number, Record<string, number | null>>();
+    for (const a of assignments) {
+      const m = byRo.get(a.ro_id) ?? {};
+      m[a.position_key] = a.display_name;
+      byRo.set(a.ro_id, m);
+
+      const ids = idsByRo.get(a.ro_id) ?? {};
+      ids[a.position_key] = a.user_id;
+      idsByRo.set(a.ro_id, ids);
+    }
+
+    const now = Date.now();
+    const files = rows.map(r => {
+      const sinceMs = r.status_since ? now - new Date(r.status_since).getTime() : 0;
+      const hoursInStatus = Math.floor(sinceMs / 3_600_000);
+      /* Cycle time is in-to-ready. Once the car is ready the clock stops — it is
+         not the shop's number any more, it is the customer's. Days spent voided
+         never counted and still do not. */
+      const cycleEnd = r.delivered_at ? new Date(r.delivered_at).getTime() : now;
+      const daysInShop = Math.max(0,
+        Math.floor((cycleEnd - new Date(r.opened_at).getTime()) / 86_400_000) - Number(r.voided_days ?? 0));
+      /* Ready to picked up is what a rental actually costs, so it runs on its own
+         and only where there is a rental. */
+      const rentalEnd = r.closed_at ? new Date(r.closed_at).getTime() : now;
+      const rentalDays = Number(r.rental_cost_cents ?? 0) > 0
+        ? Math.max(0, Math.floor((rentalEnd - new Date(r.opened_at).getTime()) / 86_400_000))
+        : null;
+
+      let age: 'ok' | 'yellow' | 'red' = 'ok';
+      if (r.age_red_hours && hoursInStatus >= r.age_red_hours) age = 'red';
+      else if (r.age_yellow_hours && hoursInStatus >= r.age_yellow_hours) age = 'yellow';
+
+      return scrubMoney({
+        id: r.id,
+        ro: r.ro_number,
+        statusSlot: r.status_slot,
+        status: r.status_label,
+        customerStatus: r.customer_label,
+        group: r.total_loss_at ? 'lane_total_loss' : r.group_id,
+        groupLabel: r.total_loss_at ? 'Total loss' : r.group_label,
+        /* The 00 lane is synthesised from the flag, never a status slot: a shop
+           reconfiguring its board cannot break it, and the file keeps the slot
+           it was sitting in. */
+        lane: r.total_loss_at ? 'total_loss' : r.lane_key,
+        laneNumber: r.total_loss_at ? '00' : null,
+        totalLoss: !!r.total_loss_at,
+        totalLossAt: r.total_loss_at,
+        totalLossNote: r.total_loss_note,
+        kind: r.kind,
+        onHold: r.on_hold === 1,
+        holdReason: r.hold_reason,
+        holdOwner: r.hold_owner,
+        repairPath: r.repair_path,
+        roType: r.ro_type,
+        customer: r.customer_name,
+        phone: r.customer_phone,
+        insurer: r.insurer_name,
+        claimNumber: r.claim_number,
+        statusSince: r.status_since,
+        vehicle: [r.year, r.make, r.model].filter(Boolean).join(' ') || null,
+        color: r.color,
+        plate: r.plate,
+        plateState: r.plate_state,
+        vin: r.vin,
+        statusBy: r.status_by,
+        openedAt: r.opened_at,
+        promisedAt: r.promised_at,
+        /* The board needs to know a file is closed, not just that it is here:
+           the closed view groups by it. */
+        closeDate: r.close_date,
+        closedAt: r.closed_at,
+        paid: r.paid === 1,
+        targetDays: r.target_days,
+        daysInShop,
+        /* True once the car is ready: the board should show a final figure, not a
+           number that keeps climbing while it sits waiting for collection. */
+        cycleStopped: !!r.delivered_at,
+        rentalDays,
+        hoursInStatus,
+        age,
+        partsWaiting: r.parts_waiting,
+        supplementsOpen: r.supp_open,
+        amount_cents: r.amount_cents,
+        laborHours: Number(r.labor_hours),
+        assigned: byRo.get(r.id) ?? {},
+        assignedIds: idsByRo.get(r.id) ?? {}
+      }, ctx.caps);
+    });
+
+    const statuses = await tq<RowDataPacket[]>(ctx.company!.id, `
+      SELECT s.slot_id, s.label, s.customer_label, s.group_id, s.lane_key, s.kind,
+             s.owner_role, s.age_yellow_hours, s.age_red_hours, s.sort_order, s.is_terminal,
+        g.label AS group_label, g.sort_order AS group_order
+      FROM statuses s JOIN status_groups g ON g.group_id = s.group_id
+      WHERE s.visible = 1
+      ORDER BY g.sort_order, s.sort_order
+    `);
+
+    return {
+      files, statuses, caps: ctx.caps, count: files.length,
+      /* Drawn above every real lane. It is not in the statuses table, so the
+         board is told about it here. */
+      totalLossLane: { key: 'total_loss', label: 'Total loss', number: '00', group: 'lane_total_loss' },
+      totalLosses: files.filter(f => (f as { totalLoss?: boolean }).totalLoss).length
+    };
+  });
+
+  /** KPI strip. Computed server-side so every role sees the same numbers. */
+  app.get('/api/board/summary', async (req, reply) => {
+    const ctx = requireCompany(req, reply);
+    if (!ctx) return;
+
+    const [row] = await tq<RowDataPacket[]>(ctx.company!.id, `
+      SELECT
+        COUNT(*) AS in_list,
+        SUM(r.on_hold = 1) AS on_hold,
+        SUM(r.labor_hours) AS labor_hours,
+        AVG(GREATEST(DATEDIFF(COALESCE(r.delivered_at, NOW()), r.opened_at) - r.voided_days, 0)) AS avg_days,
+        SUM(r.promised_at IS NOT NULL AND r.promised_at < CURDATE()) AS past_target,
+        SUM(TIMESTAMPDIFF(HOUR, r.status_since, NOW()) >= 96) AS stalled,
+        COALESCE(SUM(r.amount_cents), 0) AS severity_cents
+      FROM repair_orders r
+      LEFT JOIN statuses s ON s.slot_id = r.status_slot
+      WHERE r.close_date IS NULL AND r.closed_at IS NULL AND r.voided_at IS NULL
+    `);
+
+    return {
+      inList: Number(row.in_list ?? 0),
+      onHold: Number(row.on_hold ?? 0),
+      laborHours: Number(row.labor_hours ?? 0),
+      avgDays: row.avg_days === null ? 0 : Math.round(Number(row.avg_days) * 10) / 10,
+      pastTarget: Number(row.past_target ?? 0),
+      stalled: Number(row.stalled ?? 0),
+      severityCents: ctx.caps.money ? Number(row.severity_cents ?? 0) : null
+    };
+  });
+}

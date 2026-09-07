@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Platform — Easy Shop</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root { --bg:#131c2e;--surf:#1c2740;--text:#e7eaf2;--muted:#aab3c4;--dim:#7f8ca4;
+          --line:#2c3a55;--whisper:rgba(231,234,242,.08);--acc:#d9a441;--acc2:#e5bf68;
+          --move:#7f9dc4;--stopped:#d07e6f;--done:#6fae8c;--font:'Inter',system-ui,sans-serif; }
+  * { box-sizing:border-box; }
+  html,body { height:100%; }
+  body { margin:0;background:var(--bg);color:var(--text);font-family:var(--font);
+         display:flex;flex-direction:column;overflow:hidden; }
+  a { color:var(--acc2);text-decoration:none; } a:hover { color:var(--acc); }
+  button { font-family:var(--font);cursor:pointer; }
+  :focus-visible { outline:2px solid var(--acc);outline-offset:2px; }
+  .bar { display:flex;align-items:center;gap:16px;height:52px;padding:0 18px;background:var(--surf);flex:none; }
+  .mark { width:22px;height:22px;border:1px solid var(--acc);border-radius:4px;display:grid;
+          place-items:center;font:600 9.5px var(--font);color:var(--acc); }
+  .word { font:600 13px var(--font);letter-spacing:.13em;text-transform:uppercase; }
+  .vr { width:1px;height:18px;background:var(--line); }
+  .tag { font:500 12px var(--font);letter-spacing:.1em;text-transform:uppercase;color:var(--acc2); }
+  .main { flex:1;min-height:0;display:grid;grid-template-columns:300px 1fr; }
+  .list { border-right:1px solid var(--whisper);overflow-y:auto; }
+  .item { display:flex;align-items:center;gap:10px;padding:11px 14px;cursor:pointer;
+          border-bottom:1px solid var(--whisper);border-left:2px solid transparent; }
+  .item:hover { background:var(--whisper); }
+  .item.sel { background:var(--whisper);border-left-color:var(--acc); }
+  .dot { width:8px;height:8px;border-radius:50%;flex:none; }
+  .nm { font:500 12.5px var(--font);white-space:nowrap;overflow:hidden;text-overflow:ellipsis; }
+  .sb { font:400 10px var(--font);color:var(--dim);margin-top:2px; }
+  .pane { overflow-y:auto;padding:0 0 30px; }
+  .sec { font:600 8.5px var(--font);letter-spacing:.13em;text-transform:uppercase;
+         color:var(--acc2);padding:20px 18px 9px; }
+  .fhead { display:flex;align-items:center;gap:12px;padding:16px 18px 14px;
+           border-bottom:1px solid var(--whisper); }
+  .pill { font:500 8.5px var(--font);letter-spacing:.09em;text-transform:uppercase;
+          padding:3px 7px;border-radius:3px;white-space:nowrap; }
+  .btn { font:500 11.5px var(--font);border-radius:4px;padding:7px 12px;background:transparent; }
+  .frow { display:grid;grid-template-columns:3px 1fr 96px;gap:12px;align-items:center;
+          padding:11px 13px;border-bottom:1px solid var(--whisper); }
+  .edge { width:3px;height:22px;border-radius:1px; }
+  .ft { font:500 12px var(--font); }
+  .fd { font:400 10.5px var(--font);color:var(--dim);margin-top:2px;line-height:1.45; }
+  .toggle { font:500 10px var(--font);text-align:center;padding:4px 0;border-radius:3px;
+            border:1px solid var(--line);color:var(--dim);background:transparent;width:100%; }
+  .toggle.on { border-color:var(--acc);color:var(--text); }
+  .toggle:disabled { border-style:dashed;cursor:default;opacity:.6; }
+  .empty { padding:60px 20px;text-align:center;color:var(--dim);font:400 13px var(--font); }
+  .msg { font:400 11.5px var(--font);padding:9px 12px;border-radius:4px;margin:12px 18px;display:none; }
+  .msg.err { display:block;color:var(--stopped);border:1px solid var(--stopped); }
+</style>
+</head>
+<body>
+
+<div class="bar">
+  <div style="display:flex;align-items:center;gap:9px"><div class="mark">ES</div><div class="word">Easy Shop</div></div>
+  <div class="vr"></div>
+  <div class="tag">Platform</div>
+  <div style="margin-left:auto;display:flex;align-items:center;gap:12px">
+    <a href="/board.html" style="font:400 11px var(--font);color:var(--dim)">My shop</a>
+    <div id="who" style="font:400 11px var(--font);color:var(--dim)">—</div>
+    <button class="btn" id="signout" style="border:1px solid var(--line);color:var(--dim);padding:5px 10px">Sign out</button>
+  </div>
+</div>
+
+<div class="main">
+  <div class="list" id="list"></div>
+  <div class="pane" id="pane"><div class="empty">Loading…</div></div>
+</div>
+
+<script>
+(function () {
+  var COS = [], SEL = null;
+  function $(id) { return document.getElementById(id); }
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+    return { '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]; }); }
+  function api(p, o) {
+    return fetch(p, Object.assign({ headers: { 'content-type': 'application/json' } }, o || {}))
+      .then(function (r) {
+        if (r.status === 401) { location.href = '/'; throw new Error('out'); }
+        return r.json().then(function (j) { if (!r.ok) throw new Error(j.error); return j; });
+      });
+  }
+  var TONE = { active: 'var(--done)', trial: 'var(--move)', suspended: 'var(--stopped)' };
+
+  api('/api/me').then(function (me) {
+    if (!me.isPlatformOwner) { location.href = '/board.html'; return; }
+    $('who').textContent = me.user.name + ' · platform owner';
+    return api('/api/platform/companies');
+  }).then(function (d) {
+    if (!d) return;
+    COS = d.companies;
+    renderList();
+    if (COS.length) select(COS[0].id);
+    else $('pane').innerHTML = '<div class="empty">No companies yet.</div>';
+  }).catch(function (e) { if (e.message !== 'out') console.error(e); });
+
+  function renderList() {
+    $('list').innerHTML = COS.map(function (c) {
+      return '<div class="item' + (c.id === SEL ? ' sel' : '') + '" data-id="' + c.id + '">' +
+        '<div class="dot" style="background:' + (TONE[c.status] || 'var(--dim)') + '"></div>' +
+        '<div style="min-width:0;flex:1"><div class="nm">' + esc(c.name) + '</div>' +
+        '<div class="sb">' + esc([c.city, c.plan_code, c.shop_type].filter(Boolean).join(' · ')) + '</div></div>' +
+        '</div>';
+    }).join('');
+    Array.prototype.forEach.call($('list').children, function (el) {
+      el.addEventListener('click', function () { select(Number(el.dataset.id)); });
+    });
+  }
+
+  function select(id) {
+    SEL = id;
+    renderList();
+    $('pane').innerHTML = '<div class="empty">Loading…</div>';
+    api('/api/platform/companies/' + id).then(renderPane);
+  }
+
+  function renderPane(d) {
+    var c = d.company, h = [];
+    var suspended = c.status === 'suspended';
+
+    h.push('<div class="fhead"><div style="min-width:0">' +
+      '<div style="display:flex;align-items:baseline;gap:9px">' +
+      '<div style="font:500 16px var(--font)">' + esc(c.name) + '</div>' +
+      '<span class="pill" style="color:' + TONE[c.status] + ';border:1px solid ' + TONE[c.status] + '">' + esc(c.status) + '</span>' +
+      '</div><div class="sb">' + esc([c.city, c.db_name, c.owner_email].filter(Boolean).join(' · ')) + '</div>' +
+      '</div><div style="margin-left:auto;display:flex;gap:8px">' +
+      '<button class="btn" id="enter" style="border:1px solid var(--line);color:var(--muted)">Open this company</button>' +
+      '<button class="btn" id="susp" style="border:1px solid ' + (suspended ? 'var(--done);color:var(--done)' : 'var(--stopped);color:var(--stopped)') + '">' +
+      (suspended ? 'Switch back on' : 'Switch off') + '</button></div></div>');
+
+    h.push('<div class="msg" id="pmsg"></div>');
+
+    h.push('<div class="sec">Account</div>');
+    h.push('<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;padding:0 18px">' +
+      kv('Plan', c.plan_code) + kv('Shop type', c.shop_type) + kv('Seats', c.seats) +
+      kv('Users', d.users.length) + '</div>');
+
+    var onCount = d.features.filter(function (f) { return f.is_core || (f.is_available && f.enabled); }).length;
+    h.push('<div class="sec">Features <span style="color:var(--dim);font-weight:400;text-transform:none;letter-spacing:0">' +
+      onCount + ' of ' + d.features.length + ' on</span></div>');
+    h.push('<div style="margin:0 18px;border:1px solid var(--line);border-radius:6px;overflow:hidden">');
+    d.features.forEach(function (f) {
+      var dep = f.requires_key ? d.features.filter(function (x) { return x.feature_key === f.requires_key; })[0] : null;
+      var depOff = dep && !(dep.is_core || (dep.is_available && dep.enabled));
+      var on = f.is_core ? true : (f.is_available && f.enabled === 1 && !depOff);
+      var label = f.is_core ? 'Always on' : !f.is_available ? 'Not yet' : on ? 'On' : 'Off';
+      var note = !f.is_available ? f.description + ' Not available yet.'
+               : depOff ? f.description + ' Off because ' + dep.label + ' is off.' : f.description;
+      h.push('<div class="frow"' + (!f.is_available || depOff ? ' style="opacity:.55"' : '') + '>' +
+        '<div class="edge" style="background:' + (on ? 'var(--done)' : 'var(--line)') + '"></div>' +
+        '<div><div class="ft">' + esc(f.label) + '</div><div class="fd">' + esc(note) + '</div></div>' +
+        '<button class="toggle' + (on ? ' on' : '') + '" data-key="' + esc(f.feature_key) + '" data-on="' + (f.enabled ? 1 : 0) + '"' +
+        (f.is_core || !f.is_available ? ' disabled' : '') + '>' + label + '</button></div>');
+    });
+    h.push('</div>');
+
+    h.push('<div class="sec">People</div><div style="padding:0 18px">');
+    d.users.forEach(function (u) {
+      h.push('<div style="padding:8px 0;border-top:1px solid var(--whisper)">' +
+        '<div style="font:400 12px var(--font)">' + esc(u.name) + ' <span style="color:var(--dim)">· ' + esc(u.role) + '</span></div>' +
+        '<div class="sb">' + esc(u.email || 'no email') + (u.last_login_at ? ' · last in ' + new Date(u.last_login_at).toLocaleDateString() : ' · never signed in') + '</div></div>');
+    });
+    h.push('</div>');
+
+    $('pane').innerHTML = h.join('');
+
+    $('enter').addEventListener('click', function () {
+      api('/api/platform/companies/' + c.id + '/enter', { method: 'POST' })
+        .then(function () { location.href = '/board.html'; });
+    });
+
+    $('susp').addEventListener('click', function () {
+      var next = suspended ? 'active' : 'suspended';
+      if (!suspended && !confirm('Switch off ' + c.name + '? Everyone there is signed out immediately. No data is deleted.')) return;
+      api('/api/platform/companies/' + c.id + '/status', {
+        method: 'POST', body: JSON.stringify({ status: next })
+      }).then(function () {
+        return api('/api/platform/companies').then(function (d2) { COS = d2.companies; select(c.id); });
+      }).catch(showErr);
+    });
+
+    Array.prototype.forEach.call($('pane').querySelectorAll('.toggle:not([disabled])'), function (b) {
+      b.addEventListener('click', function () {
+        api('/api/platform/companies/' + c.id + '/features/' + b.dataset.key, {
+          method: 'POST', body: JSON.stringify({ enabled: b.dataset.on !== '1' })
+        }).then(function () { select(c.id); }).catch(showErr);
+      });
+    });
+  }
+
+  function kv(k, v) {
+    return '<div><div style="font:600 8.5px var(--font);letter-spacing:.12em;text-transform:uppercase;color:var(--acc2)">' +
+      esc(k) + '</div><div style="font:400 13px var(--font);margin-top:5px">' + esc(v) + '</div></div>';
+  }
+
+  function showErr(e) {
+    var m = $('pmsg'); if (!m) return alert(e.message);
+    m.textContent = e.message; m.className = 'msg err';
+  }
+
+  $('signout').addEventListener('click', function () {
+    api('/api/auth/logout', { method: 'POST' }).then(function () { location.href = '/'; });
+  });
+})();
+</script>
+</body>
+</html>

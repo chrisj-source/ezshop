@@ -1,0 +1,1394 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1c2740">
+<title>Parts — Easy Shop</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/shell.css?v=7">
+<style>
+  .legend { display:flex; align-items:center; gap:14px; margin-left:8px; }
+  .legitem { display:flex; align-items:center; gap:6px; font:400 10.5px var(--font); color:var(--dim); }
+  .legswatch { width:14px; height:6px; border-radius:1px; }
+
+  /* RO-level grid, then part lines nested under it. */
+  .pgrid {
+    display:grid;
+    grid-template-columns:16px 116px minmax(180px,236px) minmax(200px,1fr) 92px 84px 108px 104px 112px;
+    gap:12px; align-items:center; padding:0 18px; min-width:1100px;
+  }
+  main { overflow-x:auto; }
+  .phead { height:32px; position:sticky; top:0; z-index:2; background:var(--surf); }
+  .phead > div {
+    font:600 8.5px var(--font); letter-spacing:.12em; text-transform:uppercase; color:var(--acc2);
+  }
+  .prow { height:56px; border-bottom:1px solid var(--whisper); cursor:pointer; }
+  .prow:hover { background:var(--surf); }
+  .caret { font:400 9px var(--font); color:var(--dim); transition:transform .12s ease; }
+  .caret.open { transform:rotate(90deg); color:var(--acc); }
+
+  .grouphead {
+    display:flex; align-items:center; gap:9px; padding:8px 18px; background:var(--surf);
+    border-top:1px solid var(--whisper); border-bottom:1px solid var(--whisper);
+  }
+  .gdot { width:8px; height:8px; border-radius:50%; flex:none; }
+  .gname { font:500 12px var(--font); letter-spacing:.06em; text-transform:uppercase; }
+
+  .segs { display:flex; gap:3px; flex:1; max-width:170px; }
+  .segbar { height:6px; border-radius:1px; }
+
+  /* Nested part lines. */
+  .lines {
+    background:rgba(231,234,242,.03); border-bottom:1px solid var(--whisper);
+    overflow-x:auto;
+  }
+  .lgrid {
+    display:grid;
+    grid-template-columns:26px minmax(160px,1fr) 108px 72px 58px 132px 92px 104px 168px;
+    gap:12px; align-items:center; padding:0 18px 0 34px; height:44px;
+    border-bottom:1px solid var(--whisper); min-width:1080px;
+  }
+  .lgrid:last-child { border-bottom:none; }
+  .lhead > div {
+    font:600 8px var(--font); letter-spacing:.11em; text-transform:uppercase; color:var(--dim);
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  }
+  .lhead { height:30px; }
+  .lstate {
+    justify-self:start; font:500 8.5px var(--font); letter-spacing:.08em; text-transform:uppercase;
+    padding:3px 7px; border-radius:3px; white-space:nowrap;
+  }
+  .linebtn {
+    font:400 10px var(--font); padding:4px 8px; border-radius:3px; background:transparent;
+    border:1px solid var(--line); color:var(--muted); white-space:nowrap; flex:none;
+  }
+  .linebtn:hover { border-color:var(--acc); color:var(--acc); }
+  /* The RO number is a way into the file — the desk is often one field short. */
+  .rolink { color:var(--acc); text-decoration:none; border-bottom:1px dashed var(--acc); }
+  .rolink:hover { color:var(--text); border-bottom-color:var(--text); }
+  .locked { padding:64px 18px; display:flex; flex-direction:column; align-items:center; gap:8px; }
+
+  @media (max-width:1100px) {
+    .pgrid {
+      grid-template-columns:16px 108px minmax(140px,1fr) 92px 84px 104px;
+      min-width:0;
+    }
+    .pgrid > .hide-md, .prow > .hide-md { display:none; }
+    /* Six visible cells into six tracks: .hide-md removes three of the nine. */
+    .lgrid {
+      grid-template-columns:22px minmax(130px,1fr) 52px 92px 74px 88px 150px;
+      padding-left:24px; min-width:0;
+    }
+    .lgrid > .hide-md { display:none; }
+    main { overflow-x:visible; }
+    .lines { overflow-x:visible; }
+  }
+
+  /* ------------------------------------------------------------ phone
+     Below 760 the nine-column table has no honest form. Each file becomes a
+     card and each part line a stacked card; no sideways scroll anywhere. */
+  @media (max-width:760px) {
+    .phead { display:none; }
+    .pgrid { padding:0; gap:0; }
+    .grouphead { padding:8px 14px; }
+    .grouphead .sub:last-child { display:none; }
+
+    .prow[data-ro] {
+      display:grid; height:auto; padding:11px 14px 12px; gap:5px 10px;
+      grid-template-columns:14px minmax(0,1fr) auto; align-items:start;
+      grid-template-areas:
+        "car ro    days"
+        "car veh   money"
+        "car stat  stat";
+    }
+    .prow[data-ro] > div:nth-child(1) { grid-area:car; align-self:center; }
+    .prow[data-ro] > div:nth-child(2) { grid-area:ro; }
+    .prow[data-ro] > div:nth-child(3) { grid-area:veh; }
+    .prow[data-ro] > div:nth-child(4) { grid-area:stat; }
+    .prow[data-ro] > div:nth-child(6) { grid-area:days; }
+    .prow[data-ro] > div:nth-child(6) > div { justify-content:flex-end; }
+    .prow[data-ro] > div:nth-child(8) { grid-area:money; align-self:end; }
+    .prow[data-ro] > div:nth-child(4) > div:first-child { flex-wrap:wrap; }
+    .prow[data-ro] .segs { max-width:none; min-width:80px; }
+
+    /* Part lines: description, then a meta run, then the actions on their own
+       row at a thumb-sized target. Part number and type come back — the parts
+       desk needs them more on a phone than at a screen. */
+    .lhead { display:none; }
+    .lines { padding:0 0 4px; }
+    .lines > .row { padding:8px 14px 10px; }
+    .lgrid {
+      display:flex; flex-wrap:wrap; align-items:center; gap:4px 10px;
+      height:auto; padding:10px 14px 11px; min-width:0;
+    }
+    .lgrid > .hide-md { display:block; }
+    .lgrid > div:nth-child(1) { flex:none; min-width:14px; }
+    .lgrid > div:nth-child(2) { flex:1 1 auto; min-width:0; white-space:normal; }
+    .lgrid > div:nth-child(8) { margin-left:auto; }
+    .lgrid > div:nth-child(9) { flex:1 1 100%; flex-wrap:wrap; margin-top:2px; }
+    .lgrid .linebtn { min-height:44px; padding:0 14px; font-size:11.5px; }
+  }
+
+  /* ------------------------------------------------------- pull sheet */
+  .pmodal[hidden], .pmscrim[hidden] { display:none; }
+  .pmscrim { position:fixed; inset:0; background:rgba(9,13,20,.72); z-index:60; }
+  .pmodal {
+    position:fixed; z-index:61; left:50%; top:50%; transform:translate(-50%,-50%);
+    width:min(680px,calc(100vw - 24px)); max-height:min(84vh,900px);
+    display:flex; flex-direction:column;
+    background:var(--bg); border:1px solid var(--line); border-radius:8px;
+    box-shadow:0 24px 60px rgba(0,0,0,.5);
+  }
+  .pmhead { padding:14px 16px 12px; box-shadow:inset 0 -1px 0 var(--line); }
+  .pmbody { flex:1; overflow-y:auto; padding:4px 16px 12px; }
+  .pmfoot {
+    display:flex; align-items:center; gap:10px; padding:12px 16px;
+    box-shadow:inset 0 1px 0 var(--line);
+  }
+  .pmveh {
+    display:flex; align-items:center; gap:9px; padding:11px 0 9px;
+    border-bottom:1px solid var(--whisper); margin-top:6px;
+  }
+  .pmline {
+    display:grid; grid-template-columns:20px minmax(0,1fr) auto; gap:4px 10px;
+    align-items:start; padding:8px 0; border-bottom:1px solid var(--whisper);
+  }
+  .pmodal input[type=checkbox] { width:16px; height:16px; accent-color:var(--acc); margin:2px 0 0; }
+
+  #printroot { display:none; }
+  .short { color:#a11; font-weight:600; }
+  .sheetsign {
+    display:grid; grid-template-columns:1fr 200px; gap:34px; margin-top:44px;
+    font:400 9pt var(--font); color:#444;
+  }
+  .sheetsign > div { border-top:1px solid #111; padding-top:4px; }
+
+  @media print {
+    html, body {
+      display:block; overflow:visible; height:auto;
+      background:#fff; color:#111;
+    }
+    body > *:not(#printroot) { display:none !important; }
+    #printroot { display:block; }
+
+    @page { size:letter portrait; margin:.5in; }
+
+    .sheetpage { break-after:page; page-break-after:always; }
+    .sheetpage:last-child { break-after:auto; page-break-after:auto; }
+    .sheettop {
+      display:flex; align-items:baseline; justify-content:space-between;
+      border-bottom:1.5px solid #111; padding-bottom:6px;
+    }
+    .sheetco { font:600 11pt var(--font); letter-spacing:.02em; }
+    .sheetkind { font:600 8.5pt var(--font); letter-spacing:.14em; text-transform:uppercase; }
+    .sheetro { font:600 17pt var(--font); margin:12px 0 2px; }
+    .sheetveh { font:400 12pt var(--font); }
+    .sheetvin { font:400 9.5pt var(--font); letter-spacing:.06em; margin-top:3px; color:#333; }
+    .sheettbl { width:100%; border-collapse:collapse; margin-top:14px; }
+    .sheettbl thead { display:table-header-group; }
+    .sheettbl th {
+      font:600 7.5pt var(--font); letter-spacing:.11em; text-transform:uppercase;
+      text-align:left; padding:0 6px 5px; border-bottom:1px solid #111; color:#111;
+    }
+    .sheettbl td {
+      font:400 10pt var(--font); padding:7px 6px; border-bottom:1px solid #ccc;
+      vertical-align:top; color:#111;
+    }
+    .sheettbl tr { break-inside:avoid; page-break-inside:avoid; }
+    .sheettbl .n { text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap; }
+    .sheettbl tfoot td {
+      font-weight:600; border-top:1.5px solid #111; border-bottom:none; padding-top:8px;
+    }
+    .sheetfoot { font:400 8.5pt var(--font); color:#444; margin-top:10px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="bar">
+  <div class="brand"><div class="mark">ES</div><div class="word">Easy Shop</div></div>
+  <div class="vr"></div>
+  <div class="co" id="coName">—</div>
+  <div id="nav"></div>
+  <div class="spacer"></div>
+  <div id="bell"></div>
+  <div class="who" id="who">—</div>
+  <button class="ghostbtn" id="signout">Sign out</button>
+</div>
+<div class="hairline"></div>
+
+<div class="filters">
+  <input type="search" id="fSearch" placeholder="Search RO #, part #, vendor, colour…">
+  <select id="fVendor"><option value="">Vendor: All</option></select>
+  <select id="fState"><option value="">Type: All</option></select>
+  <div class="legend" id="legend"></div>
+  <div class="spacer"></div>
+  <button class="btn btn-ghost" id="vendorsBtn">Vendors</button>
+  <a class="btn btn-ghost" href="/clients.html">Wholesale clients</a>
+  <button class="btn btn-ghost" id="printBtn">Print pull sheet</button>
+  <button class="btn" id="expandAll">Expand all</button>
+</div>
+
+<div class="kpis" id="kpis"></div>
+
+<main>
+  <div id="body"></div>
+</main>
+
+<div class="scrim" id="scrim"></div>
+<aside class="drawer" id="drawer" aria-hidden="true">
+  <div class="dhead">
+    <div style="min-width:0;flex:1">
+      <div style="font:500 16px var(--font)" id="dTitle">Vendors</div>
+      <div class="sub" id="dSub">Who you order from</div>
+    </div>
+    <button class="close" id="dClose" aria-label="Close">&times;</button>
+  </div>
+  <div class="dbody" id="dBody"></div>
+</aside>
+
+<div class="pmscrim" id="pmScrim" hidden></div>
+<div class="pmodal" id="pmodal" hidden role="dialog" aria-modal="true" aria-label="Print pull sheet">
+  <div class="pmhead">
+    <div style="display:flex;align-items:flex-start;gap:12px">
+      <div style="flex:1;min-width:0">
+        <div style="font:500 15px var(--font)">Print pull sheet</div>
+        <div class="sub" id="pmScope">—</div>
+      </div>
+      <button class="close" id="pmClose" aria-label="Close">&times;</button>
+    </div>
+    <div class="segctl" id="pmMode" style="margin-top:11px;width:max-content">
+      <button data-mode="order" class="sel">To order</button>
+      <button data-mode="ordered">On order</button>
+      <button data-mode="received">Received</button>
+    </div>
+  </div>
+  <div class="pmbody" id="pmBody"></div>
+  <div class="pmfoot">
+    <button class="btn btn-solid" id="pmPrint">Print</button>
+    <button class="btn btn-ghost" id="pmCancel">Cancel</button>
+    <span class="sub" id="pmCount" style="margin:0 0 0 auto"></span>
+  </div>
+</div>
+
+<div id="printroot"></div>
+
+<script src="/shell.js?v=8"></script>
+<script>
+(function () {
+  var api = Shell.api, esc = Shell.esc;
+  var ME = null, PARTS = [], VENDORS = [], RETURNS = [], OPEN = {}, ALL_OPEN = false;
+  /* A parts line under this margin reads thin. The server sends its own value. */
+  var THIN_PCT = 20;
+
+  /* One tone per part state, used by the legend, the segments and the chips. */
+  var TONE = {
+    need: 'var(--dim)', ordered: 'var(--move)', partial: 'var(--blocked)',
+    received: 'var(--done)', backordered: 'var(--stopped)',
+    returned: 'var(--dim)', not_needed: 'var(--line)'
+  };
+  var LABEL = {
+    need: 'Needed', ordered: 'Ordered', partial: 'Partial', received: 'Received',
+    backordered: 'Backordered', returned: 'Returned', not_needed: 'Not needed'
+  };
+
+  /* RO-level rollup — how the shop actually talks about a file's parts. */
+  var GROUPS = [
+    { k: 'backordered', t: 'Backordered', tone: 'var(--stopped)',
+      note: 'a part is not coming when it was promised' },
+    { k: 'late', t: 'Past ETA', tone: 'var(--stopped)', note: 'ordered, ETA gone by' },
+    { k: 'need', t: 'To order', tone: 'var(--dim)', note: 'nothing ordered yet' },
+    { k: 'ordered', t: 'On order', tone: 'var(--move)', note: 'waiting on delivery' },
+    { k: 'received', t: 'All in', tone: 'var(--done)', note: 'every gating part is here' }
+  ];
+
+  function $(id) { return document.getElementById(id); }
+  function money(c) {
+    if (c == null) return '—';
+    return '$' + (c / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+  function money0(c) { return c == null ? '—' : '$' + Math.round(c / 100).toLocaleString('en-US'); }
+  function shopDate(v) {
+    if (!v) return '';
+    var d = new Date(v);
+    var p = function (n) { return String(n).padStart(2, '0'); };
+    return p(d.getMonth() + 1) + '-' + p(d.getDate()) + '-' + String(d.getFullYear()).slice(2);
+  }
+
+  api('/api/me').then(function (me) {
+    ME = me;
+    if (!me.company) { location.href = '/'; return null; }
+    if (me.features.indexOf('parts') < 0) {
+      document.body.innerHTML = '<div class="empty">Parts tracking is not switched on for this shop.</div>';
+      return null;
+    }
+    Shell.mount({ me: me, active: 'parts' });
+
+    if (!me.caps.manageParts) {
+      $('body').innerHTML = '<div class="locked">' +
+        '<div style="font:500 14px var(--font)">Parts ordering is restricted</div>' +
+        '<div style="font:400 12px var(--font);color:var(--dim)">' +
+        'The parts desk, estimating, production and the owner order parts. ' +
+        'You can still see what a file is waiting on from its repair order.</div></div>';
+      document.querySelector('.filters').hidden = true;
+      return null;
+    }
+
+    $('legend').innerHTML = ['need', 'ordered', 'backordered', 'received'].map(function (k) {
+      return '<div class="legitem"><div class="legswatch" style="background:' + TONE[k] + '"></div>' +
+        esc(LABEL[k]) + '</div>';
+    }).join('');
+
+    $('fState').innerHTML = '<option value="">Type: All</option>' +
+      ['need', 'ordered', 'partial', 'backordered', 'received'].map(function (k) {
+        return '<option value="' + k + '">' + esc(LABEL[k]) + '</option>';
+      }).join('');
+
+    return load().then(function () {
+      /* Coming back from a repair order opened off a parts line: the same file is
+         still expanded, where the desk left it. */
+      var back = new URLSearchParams(location.search).get('open');
+      if (back) {
+        OPEN[back] = true;
+        render();
+        history.replaceState(null, '', '/parts.html');
+      }
+    });
+  }).catch(function (e) { if (e.message !== 'signed out') console.error(e); });
+
+  function load() {
+    return Promise.all([
+      api('/api/parts'),
+      api('/api/parts/returns').catch(function () { return { returns: [] }; })
+    ]).then(function (res) {
+      var d = res[0];
+      RETURNS = res[1].returns || [];
+      PARTS = d.parts;
+      VENDORS = d.vendors;
+      if (d.thinMarginPct) THIN_PCT = Number(d.thinMarginPct);
+      $('fVendor').innerHTML = '<option value="">Vendor: All</option>' +
+        VENDORS.map(function (v) { return '<option value="' + v.id + '">' + esc(v.name) + '</option>'; }).join('');
+      renderKpis(d.summary);
+      render();
+    });
+  }
+
+  function renderKpis(s) {
+    var files = byRo();
+    var cells = [
+      { v: files.length, k: 'Files waiting' },
+      { v: s.needed, k: 'To order' },
+      { v: s.ordered, k: 'On order' },
+      { v: s.backordered, k: 'Back ordered', tone: s.backordered ? 'var(--stopped)' : '' },
+      { v: s.late, k: 'Past ETA', tone: s.late ? 'var(--stopped)' : '' }
+    ];
+
+    if (ME.caps.money && s.listCents != null) {
+      var pp = s.marginPct != null
+        ? s.marginPct
+        : (s.listCents ? Math.round(((s.listCents - s.costCents) / s.listCents) * 100) : 0);
+      cells.push(
+        { v: money0(s.listCents), k: 'List' },
+        { v: money0(s.costCents), k: 'Cost' },
+        { v: pp + '%', k: 'Parts profit', tone: pp < THIN_PCT ? 'var(--stopped)' : '' }
+      );
+    }
+
+    $('kpis').innerHTML = cells.map(function (i) {
+      return '<div><div class="kpi-v"' + (i.tone ? ' style="color:' + i.tone + '"' : '') + '>' +
+        esc(i.v) + '</div><div class="kpi-k">' + esc(i.k) + '</div></div>';
+    }).join('') + '<div class="kpi-tail"></div>';
+  }
+
+  /* -------------------------------------------------------- grouping */
+
+  function filteredLines() {
+    var q = $('fSearch').value.trim().toLowerCase();
+    var vend = $('fVendor').value;
+    var st = $('fState').value;
+
+    return PARTS.filter(function (p) {
+      if (st && p.state !== st) return false;
+      if (vend && String(p.vendor_id) !== vend) return false;
+      if (q && [p.ro_number, p.description, p.part_number, p.vendor_name, p.customer_name,
+                p.vehicle, p.color, p.vin]
+        .filter(Boolean).join(' ').toLowerCase().indexOf(q) < 0) return false;
+      return true;
+    });
+  }
+
+  /** Collapse the part lines into one entry per repair order. */
+  function byRo() {
+    var map = {};
+    filteredLines().forEach(function (p) {
+      var key = p.ro_id;
+      if (!map[key]) {
+        map[key] = {
+          roId: p.ro_id, ro: p.ro_number, vehicle: p.vehicle, color: p.color, vin: p.vin,
+          customer: p.customer_name, status: p.status_label,
+          openedAt: p.opened_at, daysInShop: p.days_in_shop, targetDays: p.target_days,
+          lines: []
+        };
+      }
+      map[key].lines.push(p);
+    });
+
+    return Object.keys(map).map(function (k) {
+      var f = map[k];
+      var gating = f.lines.filter(function (l) { return Number(l.gating) === 1; });
+      var counts = {};
+      f.lines.forEach(function (l) { counts[l.state] = (counts[l.state] || 0) + 1; });
+
+      var late = f.lines.filter(function (l) {
+        return Number(l.days_late) > 0 && l.state !== 'received';
+      });
+      var etas = f.lines.map(function (l) { return l.eta; }).filter(Boolean).sort();
+      var ordered = f.lines.map(function (l) { return l.days_since_ordered; })
+        .filter(function (v) { return v != null; });
+
+      f.counts = counts;
+      f.gatingOpen = gating.filter(function (l) {
+        return ['need', 'ordered', 'partial', 'backordered'].indexOf(l.state) >= 0;
+      }).length;
+      f.late = late.length;
+      f.worstEta = etas.length ? etas[etas.length - 1] : null;
+      f.sinceOrdered = ordered.length ? Math.max.apply(null, ordered) : null;
+      f.listCents = f.lines.reduce(function (a, l) {
+        return a + Number(l.price_cents || 0) * Number(l.qty || 1);
+      }, 0);
+      f.costCents = f.lines.reduce(function (a, l) {
+        return a + Number(l.cost_cents || 0) * Number(l.qty || 1);
+      }, 0);
+      f.received = f.lines.filter(function (l) { return l.state === 'received'; }).length;
+      /* Parts profit is margin on list, over the lines still owed. */
+      var openLines = f.lines.filter(function (l) {
+        return ['need', 'ordered', 'partial', 'backordered'].indexOf(l.state) >= 0;
+      });
+      var oList = openLines.reduce(function (a, l) {
+        return a + Number(l.price_cents || 0) * Number(l.qty || 1);
+      }, 0);
+      var oCost = openLines.reduce(function (a, l) {
+        return a + Number(l.cost_cents || 0) * Number(l.qty || 1);
+      }, 0);
+      f.marginPct = oList ? Math.round(((oList - oCost) / oList) * 100) : null;
+      f.thinLines = openLines.filter(function (l) {
+        var lp = Number(l.price_cents || 0);
+        return lp > 0 && ((lp - Number(l.cost_cents || 0)) / lp) * 100 < THIN_PCT;
+      }).length;
+
+      f.group = counts.backordered ? 'backordered'
+        : late.length ? 'late'
+        : counts.need ? 'need'
+        : (counts.ordered || counts.partial) ? 'ordered'
+        : 'received';
+
+      return f;
+    }).sort(function (a, b) {
+      return Number(b.daysInShop || 0) - Number(a.daysInShop || 0);
+    });
+  }
+
+  function segsFor(f) {
+    var total = f.lines.length || 1;
+    var order = ['received', 'partial', 'ordered', 'backordered', 'need'];
+    return order.filter(function (k) { return f.counts[k]; }).map(function (k) {
+      return '<div class="segbar" style="flex:' + f.counts[k] + ';background:' + TONE[k] + '" ' +
+        'title="' + f.counts[k] + ' ' + esc(LABEL[k].toLowerCase()) + '"></div>';
+    }).join('');
+  }
+
+  function summaryFor(f) {
+    var bits = [];
+    if (f.counts.need) bits.push(f.counts.need + ' to order');
+    if (f.counts.ordered) bits.push(f.counts.ordered + ' on order');
+    if (f.counts.partial) bits.push(f.counts.partial + ' partial');
+    if (f.counts.backordered) bits.push(f.counts.backordered + ' backordered');
+    if (!bits.length) bits.push('all ' + f.lines.length + ' in');
+    return bits.join(' · ');
+  }
+
+  /* ---------------------------------------------------------- render */
+
+  /**
+   * Parts bought against a file that was later voided. Money on a shelf: it
+   * stays here until somebody says the part went back or is being kept.
+   */
+  function returnsHtml() {
+    if (!RETURNS.length) return '';
+    return '<div class="grouphead" style="margin-top:0">' +
+      '<div class="gdot" style="background:var(--stopped)"></div>' +
+      '<div class="gname">To return</div>' +
+      '<div class="sub">' + RETURNS.length + '</div>' +
+      '<div class="sub" style="margin-left:auto">ordered against a file that was voided</div></div>' +
+      RETURNS.map(function (l) {
+        return '<div class="pgrid prow" style="grid-template-columns:1fr">' +
+          '<div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">' +
+          '<div style="min-width:0;flex:1">' +
+          '<div class="cellmain">' + esc(l.description) +
+          (l.part_number ? ' <span class="cellsub" style="display:inline">' + esc(l.part_number) + '</span>' : '') +
+          '</div><div class="cellsub">RO ' + esc(l.ro_number || '') +
+          ' · ' + esc(l.void_reason || 'voided') +
+          (l.vendor_name ? ' · ' + esc(l.vendor_name) : '') +
+          (l.po_number ? ' · PO ' + esc(l.po_number) : '') +
+          (ME.caps.money && l.cost_cents ? ' · ' + money(l.cost_cents) : '') + '</div></div>' +
+          (ME.caps.manageParts
+            ? '<button class="linebtn" data-retok="' + l.id + '">Returned</button>' +
+              '<button class="linebtn" data-retkeep="' + l.id + '">Keeping it</button>'
+            : '') + '</div></div>';
+      }).join('');
+  }
+
+  function render() {
+    var files = byRo();
+    var ret = returnsHtml();
+
+    if (!files.length) {
+      $('body').innerHTML = ret + '<div class="empty">' +
+        (PARTS.length ? 'Nothing matches those filters.'
+          : 'No parts on any open file yet.<br>Add them from a repair order, or accept an estimate ' +
+            'on the Import screen — the lines come across with it.') + '</div>';
+      wireLines();
+      return;
+    }
+
+    var head = '<div class="pgrid phead"><div></div>' +
+      '<div>RO #</div><div>Vehicle</div><div>Parts status</div>' +
+      '<div class="hide-md">Back order</div><div>In shop</div>' +
+      '<div class="hide-md">Since ordered</div>' +
+      (ME.caps.money ? '<div style="text-align:right">List</div>' : '<div></div>') +
+      (ME.caps.money ? '<div class="hide-md" style="text-align:right">Cost</div>'
+        : '<div class="hide-md" style="text-align:right">Received</div>') + '</div>';
+
+    var html = ret + head;
+
+    GROUPS.forEach(function (g) {
+      var mine = files.filter(function (f) { return f.group === g.k; });
+      if (!mine.length) return;
+
+      html += '<div><div class="grouphead">' +
+        '<div class="gdot" style="background:' + g.tone + '"></div>' +
+        '<div class="gname">' + esc(g.t) + '</div>' +
+        '<div class="sub">' + mine.length + '</div>' +
+        '<div class="sub" style="margin-left:auto">' + esc(g.note) + '</div></div>';
+
+      mine.forEach(function (f) {
+        var isOpen = ALL_OPEN || OPEN[f.roId];
+        var over = f.targetDays != null && f.daysInShop > f.targetDays;
+
+        html += '<div class="pgrid prow" data-ro="' + f.roId + '">' +
+          '<div class="caret' + (isOpen ? ' open' : '') + '">▶</div>' +
+
+          '<div><div style="font:500 12px var(--font);font-variant-numeric:tabular-nums">' +
+          '<a class="rolink" href="/board.html?ro=' + f.roId + '&back=parts" ' +
+          'title="Open the repair order — the file without leaving the parts list">' +
+          esc(f.ro) + '</a></div><div class="cellsub">in ' + shopDate(f.openedAt) + '</div></div>' +
+
+          '<div style="min-width:0"><div class="cellmain" title="' + esc(f.vehicle || '') + '">' +
+          esc(f.vehicle || '—') + (f.color ? ' · ' + esc(f.color) : '') + '</div><div class="cellsub">' +
+          esc(f.customer || '—') + (f.vin ? ' · …' + esc(String(f.vin).slice(-8)) : '') + '</div></div>' +
+
+          '<div style="min-width:0"><div style="display:flex;align-items:center;gap:8px">' +
+          '<div style="font:400 11.5px var(--font);white-space:nowrap">' + esc(summaryFor(f)) + '</div>' +
+          '<div class="segs">' + segsFor(f) + '</div></div>' +
+          '<div class="cellsub">' + esc(f.status || '') + '</div></div>' +
+
+          '<div class="hide-md">' + (f.counts.backordered
+            ? '<div style="font:500 11.5px var(--font);color:var(--stopped)">' +
+              f.counts.backordered + ' line' + (f.counts.backordered === 1 ? '' : 's') + '</div>'
+            : f.late
+              ? '<div style="font:500 11.5px var(--font);color:var(--stopped)">' + f.late + ' past ETA</div>'
+              : '<div class="cellsub" style="margin:0">—</div>') +
+          '<div class="cellsub">' + (f.worstEta ? 'ETA ' + shopDate(f.worstEta) : '') + '</div></div>' +
+
+          '<div><div style="display:flex;align-items:baseline;gap:4px">' +
+          '<span style="font:500 15px/1 var(--font);font-variant-numeric:tabular-nums;color:' +
+          (over ? 'var(--stopped)' : 'var(--text)') + '">' + f.daysInShop + '</span>' +
+          '<span class="cellsub" style="margin:0">' + (f.targetDays ? 'of ' + f.targetDays : '') +
+          '</span></div></div>' +
+
+          '<div class="hide-md">' + (f.sinceOrdered == null
+            ? '<div class="cellsub" style="margin:0">nothing ordered</div>'
+            : '<div style="font:500 12px var(--font);font-variant-numeric:tabular-nums">' +
+              f.sinceOrdered + 'd</div>') + '</div>' +
+
+          (ME.caps.money
+            ? '<div class="cellnum">' + money(f.listCents) + '</div>'
+            : '<div></div>') +
+
+          (ME.caps.money
+            ? '<div class="hide-md"><div class="cellnum">' + money(f.costCents) + '</div>' +
+              '<div class="cellsub" style="text-align:right' +
+              (f.marginPct != null && f.marginPct < THIN_PCT ? ';color:var(--stopped)' : '') + '" ' +
+              'title="Parts profit — margin on list">' +
+              (f.marginPct != null ? f.marginPct + '% PP'
+                : f.received + ' of ' + f.lines.length) + '</div></div>'
+            : '<div class="hide-md cellnum">' + f.received + ' of ' + f.lines.length + '</div>') +
+          '</div>';
+
+        if (isOpen) html += lineTable(f);
+      });
+
+      html += '</div>';
+    });
+
+    $('body').innerHTML = html;
+
+    Array.prototype.forEach.call($('body').querySelectorAll('[data-ro]'), function (el) {
+      el.addEventListener('click', function () {
+        var id = el.dataset.ro;
+        if (ALL_OPEN) {
+          // Collapsing one out of "expand all" turns the flag off and keeps the rest open.
+          ALL_OPEN = false;
+          byRo().forEach(function (f) { OPEN[f.roId] = true; });
+        }
+        OPEN[id] = !OPEN[id];
+        render();
+      });
+    });
+
+    wireLines();
+  }
+
+  function lineTable(f) {
+    var toOrder = f.lines.filter(function (l) { return l.state === 'need'; }).length;
+    var onOrder = f.lines.filter(function (l) {
+      return ['ordered', 'partial', 'backordered'].indexOf(l.state) >= 0;
+    }).length;
+
+    var h = '<div class="lines">';
+
+    if (ME.caps.manageParts) {
+      h += '<div class="row" style="padding:8px 0 10px;gap:8px;align-items:center">' +
+        '<button class="btn btn-ghost" data-addpart="' + f.roId + '">Add part</button>' +
+        (ME.caps.money
+          ? '<button class="btn btn-ghost" data-costs="' + f.roId + '">Costs</button>'
+          : '') +
+        (toOrder
+          ? '<button class="btn btn-ghost" data-orderfile="' + f.roId + '">Order ' + toOrder +
+            ' line' + (toOrder === 1 ? '' : 's') + '</button>'
+          : '') +
+        (onOrder
+          ? '<button class="btn btn-ghost" data-recvfile="' + f.roId + '">Receive ' + onOrder +
+            ' line' + (onOrder === 1 ? '' : 's') + '</button>'
+          : '') +
+        '<span class="sub">' +
+        (f.vin ? 'VIN …' + esc(String(f.vin).slice(-8)) + ' · ' : '') +
+        (ME.caps.money && f.thinLines
+          ? f.thinLines + ' line' + (f.thinLines === 1 ? '' : 's') + ' under ' + THIN_PCT + '% margin'
+          : 'one order, one vendor, one order number') +
+        '</span>' +
+        (f.vin
+          ? '<button class="linebtn" data-vin="' + esc(f.vin) + '" ' +
+            'title="Copy the full 17">copy all 17</button>'
+          : '') +
+        '</div>';
+    }
+
+    h += '<div class="lgrid lhead"><div>Line</div><div>Part</div><div class="hide-md">Number</div>' +
+      '<div class="hide-md">Type</div><div>Qty</div><div>Vendor</div><div>ETA</div>' +
+      (ME.caps.money ? '<div style="text-align:right">Price / cost</div>' : '<div></div>') +
+      '<div>State</div></div>';
+
+    f.lines.forEach(function (l) {
+      var late = Number(l.days_late) > 0 && l.state !== 'received';
+      h += '<div class="lgrid">' +
+        '<div class="cellsub" style="margin:0">' + (l.line_no || '·') + '</div>' +
+        '<div class="cellmain" title="' + esc(l.description) + '">' + esc(l.description) + '</div>' +
+        '<div class="cellsub hide-md" style="margin:0">' + esc(l.part_number || '—') + '</div>' +
+        '<div class="cellsub hide-md" style="margin:0">' + esc(l.part_type || '—') + '</div>' +
+        '<div class="cellsub" style="margin:0">' + l.qty_received + '/' + l.qty + '</div>' +
+        '<div><div class="cellsub" style="margin:0">' + esc(l.vendor_name || '—') + '</div>' +
+        (l.po_number ? '<div class="cellsub">order ' + esc(l.po_number) + '</div>' : '') + '</div>' +
+        '<div class="cellsub" style="margin:0' + (late ? ';color:var(--stopped)' : '') + '">' +
+        (l.eta ? shopDate(l.eta) : '—') + (late ? ' · ' + l.days_late + 'd' : '') + '</div>' +
+        (ME.caps.money
+          ? '<div><div class="cellnum" style="font-weight:400">' + money(l.price_cents) + '</div>' +
+            '<div class="cellsub" style="text-align:right">' +
+            (Number(l.cost_cents) ? money(l.cost_cents) : 'no cost') + '</div></div>'
+          : '<div></div>') +
+        '<div style="display:flex;align-items:center;gap:6px;min-width:0">' +
+        '<span class="lstate" style="color:' + TONE[l.state] + ';border:1px solid ' + TONE[l.state] + '">' +
+        esc(LABEL[l.state] || l.state) + '</span>' +
+        (l.state !== 'received'
+          ? '<button class="linebtn" data-recv="' + l.id + '">Received</button>'
+          : '') +
+        (l.state === 'need'
+          ? '<button class="linebtn" data-orderfile="' + f.roId + '">Order</button>'
+          : '') +
+        (ME.caps.money && ['received', 'partial'].indexOf(l.state) >= 0
+          ? '<button class="linebtn" data-costs="' + f.roId + '" data-costline="' + l.id + '" ' +
+            'title="Type the cost off the invoice">cost</button>'
+          : '') +
+        (Number(l.qty_received || 0) > 0 && Number(l.qty_received) < Number(l.qty)
+          ? '<span class="lstate" style="color:var(--stopped);border:1px solid var(--stopped)" ' +
+            'title="Part of this line arrived; the rest is still owed">' +
+            (Number(l.qty) - Number(l.qty_received)) + ' short</span>'
+          : '') +
+        '</div></div>';
+    });
+
+    return h + '</div>';
+  }
+
+  function wireLines() {
+    Array.prototype.forEach.call($('body').querySelectorAll('[data-retok]'), function (b) {
+      b.addEventListener('click', function (e) {
+        e.stopPropagation();
+        api('/api/parts/' + b.dataset.retok + '/return-cleared', {
+          method: 'POST', body: JSON.stringify({ outcome: 'returned' })
+        }).then(load);
+      });
+    });
+
+    Array.prototype.forEach.call($('body').querySelectorAll('[data-retkeep]'), function (b) {
+      b.addEventListener('click', function (e) {
+        e.stopPropagation();
+        api('/api/parts/' + b.dataset.retkeep + '/return-cleared', {
+          method: 'POST', body: JSON.stringify({ outcome: 'kept' })
+        }).then(load);
+      });
+    });
+    Array.prototype.forEach.call($('body').querySelectorAll('[data-recv]'), function (b) {
+      b.addEventListener('click', function (e) {
+        e.stopPropagation();
+        api('/api/parts/' + b.dataset.recv, {
+          method: 'PATCH', body: JSON.stringify({ state: 'received' })
+        }).then(load).then(function () { Shell.refreshCount(); });
+      });
+    });
+
+    Array.prototype.forEach.call($('body').querySelectorAll('[data-orderfile]'), function (b) {
+      b.addEventListener('click', function (e) {
+        e.stopPropagation();
+        var f = byRo().filter(function (x) { return String(x.roId) === b.dataset.orderfile; })[0];
+        if (f) openOrder(f);
+      });
+    });
+
+    Array.prototype.forEach.call($('body').querySelectorAll('[data-recvfile]'), function (b) {
+      b.addEventListener('click', function (e) {
+        e.stopPropagation();
+        var f = byRo().filter(function (x) { return String(x.roId) === b.dataset.recvfile; })[0];
+        if (f) openReceive(f);
+      });
+    });
+
+    Array.prototype.forEach.call($('body').querySelectorAll('[data-costs]'), function (b) {
+      b.addEventListener('click', function (e) {
+        e.stopPropagation();
+        var f = byRo().filter(function (x) { return String(x.roId) === b.dataset.costs; })[0];
+        if (f) openCosts(f, b.dataset.costline ? Number(b.dataset.costline) : null);
+      });
+    });
+
+    Array.prototype.forEach.call($('body').querySelectorAll('[data-addpart]'), function (b) {
+      b.addEventListener('click', function (e) {
+        e.stopPropagation();
+        var f = byRo().filter(function (x) { return String(x.roId) === b.dataset.addpart; })[0];
+        if (f) openAddPart(f);
+      });
+    });
+
+    /* Most dealers want the last 8 over the phone; the full 17 goes on the clipboard. */
+    Array.prototype.forEach.call($('body').querySelectorAll('[data-vin]'), function (b) {
+      b.addEventListener('click', function (e) {
+        e.stopPropagation();
+        if (navigator.clipboard) navigator.clipboard.writeText(b.dataset.vin);
+        b.textContent = 'copied';
+        setTimeout(function () { b.textContent = 'copy all 17'; }, 1600);
+      });
+    });
+
+    Array.prototype.forEach.call($('body').querySelectorAll('a.rolink'), function (a) {
+      a.addEventListener('click', function (e) { e.stopPropagation(); });
+    });
+  }
+
+  /* ------------------------------------------------- order and receive */
+
+  /**
+   * The invoice usually turns up after the part does, and often disagrees with
+   * what was quoted. Every line on the file is editable here, received or not,
+   * so a stack of invoices is worked through in one pass rather than a file at a
+   * time through the drawer. Blank leaves a line alone.
+   */
+  function openCosts(f, focusId) {
+    $('dTitle').textContent = 'Costs — ' + f.ro;
+    $('dSub').textContent = (f.vehicle || '') + (f.vin ? ' · …' + String(f.vin).slice(-8) : '');
+    $('scrim').classList.add('open');
+    $('drawer').classList.add('open');
+    $('drawer').setAttribute('aria-hidden', 'false');
+
+    var h = ['<div class="sec">Off the invoice</div>',
+      '<div class="row"><input id="cInv" placeholder="Vendor invoice number — optional" ' +
+      'style="flex:1;min-width:160px"></div>',
+      '<div class="sec">' + f.lines.length + ' line' + (f.lines.length === 1 ? '' : 's') +
+      ' — type what it actually cost</div>'];
+
+    f.lines.forEach(function (l) {
+      var cost = Number(l.cost_cents || 0);
+      h.push('<div class="log" style="display:flex;gap:10px;align-items:flex-start">' +
+        '<div style="min-width:0;flex:1">' +
+        '<div class="log-b">' + esc(l.description) + '</div>' +
+        '<div class="log-m">' + esc([LABEL[l.state] || l.state, l.vendor_name || 'no vendor',
+          l.po_number ? 'order ' + l.po_number : '', 'qty ' + l.qty].filter(Boolean).join(' · ')) +
+        ' · ' + money(l.price_cents) + ' list</div></div>' +
+        '<div style="display:flex;gap:8px;align-items:flex-start;text-align:right">' +
+        '<div><div class="sub" style="margin:0">list</div>' +
+        '<input class="c-price" data-for="' + l.id + '" type="number" min="0" step="0.01" ' +
+        'value="' + (Number(l.price_cents) ? (Number(l.price_cents) / 100).toFixed(2) : '') + '" ' +
+        'style="width:84px;text-align:right"></div>' +
+        '<div><div class="sub" style="margin:0">cost</div>' +
+        '<input class="c-cost" data-for="' + l.id + '" type="number" min="0" step="0.01" ' +
+        'value="' + (cost ? (cost / 100).toFixed(2) : '') + '" ' +
+        'placeholder="0.00" style="width:84px;text-align:right"></div></div></div>');
+    });
+
+    h.push('<div class="msg" id="cMsg"></div>',
+      '<div class="row" style="margin-top:12px">' +
+      '<button class="btn btn-solid" id="cSave">Save costs</button>' +
+      '<span class="sub">Only what you changed is written, and each change is logged.</span></div>');
+
+    $('dBody').innerHTML = h.join('');
+
+    if (focusId) {
+      var target = $('dBody').querySelector('.c-cost[data-for="' + focusId + '"]');
+      if (target) { target.focus(); target.select(); }
+    }
+
+    $('cSave').addEventListener('click', function () {
+      var inv = $('cInv').value.trim();
+      var writes = [];
+
+      f.lines.forEach(function (l) {
+        var costEl = $('dBody').querySelector('.c-cost[data-for="' + l.id + '"]');
+        var priceEl = $('dBody').querySelector('.c-price[data-for="' + l.id + '"]');
+        var body = {};
+        if (costEl && costEl.value !== '') {
+          var c = Math.round(Number(costEl.value) * 100);
+          if (c !== Number(l.cost_cents || 0)) body.costCents = c;
+        }
+        if (priceEl && priceEl.value !== '') {
+          var p = Math.round(Number(priceEl.value) * 100);
+          if (p !== Number(l.price_cents || 0)) body.priceCents = p;
+        }
+        if (inv) body.invoiceNo = inv;
+        if (Object.keys(body).length && !(Object.keys(body).length === 1 && body.invoiceNo)) {
+          writes.push(api('/api/parts/' + l.id, { method: 'PATCH', body: JSON.stringify(body) }));
+        }
+      });
+
+      if (!writes.length) return dMsg('cMsg', 'Nothing changed.', 'err');
+      Promise.all(writes)
+        .then(function () { closeDrawer(); return load(); })
+        .then(function () { Shell.refreshCount(); })
+        .catch(function (e) { dMsg('cMsg', e.message, 'err'); });
+    });
+  }
+
+  /**
+   * A line the estimate never had. The desk adds it here rather than going back
+   * to the file: it lands in the same place, needed and not yet ordered, so the
+   * next order picks it up with everything else.
+   */
+  function openAddPart(f) {
+    $('dTitle').textContent = 'Add a part — ' + f.ro;
+    $('dSub').textContent = (f.vehicle || '') + (f.vin ? ' · …' + String(f.vin).slice(-8) : '');
+    $('scrim').classList.add('open');
+    $('drawer').classList.add('open');
+    $('drawer').setAttribute('aria-hidden', 'false');
+
+    $('dBody').innerHTML = [
+      '<div class="sec">What it is</div>',
+      '<div class="row"><input id="aDesc" placeholder="Part — as you would say it on the phone" ' +
+      'style="flex:1;min-width:200px"></div>',
+      '<div class="row" style="margin-top:10px">' +
+      '<input id="aNum" placeholder="Part number — optional" style="flex:1;min-width:140px">' +
+      '<select id="aType"><option value="">Type</option><option value="OEM">OEM</option>' +
+      '<option value="Aftermarket">Aftermarket</option><option value="Recycled">Recycled</option>' +
+      '<option value="Glass">Glass</option><option value="Other">Other</option></select>' +
+      '<input id="aQty" type="number" min="1" step="1" value="1" style="width:70px" title="Quantity"></div>',
+      (ME.caps.money
+        ? '<div class="sec">Money</div>' +
+          '<div class="row"><input id="aPrice" type="number" min="0" step="0.01" ' +
+          'placeholder="List price" style="width:120px">' +
+          '<input id="aCost" type="number" min="0" step="0.01" placeholder="Cost — if you know it" ' +
+          'style="width:150px">' +
+          '<span class="sub">Cost can wait until the part is in your hands.</span></div>'
+        : ''),
+      '<div class="sec">Where it is coming from — optional</div>',
+      '<div class="row"><select id="aVendor" style="flex:1;min-width:150px">' +
+      '<option value="">No vendor yet</option>' +
+      VENDORS.map(function (v) {
+        return '<option value="' + v.id + '">' + esc(v.name) + (v.kind ? ' · ' + esc(v.kind) : '') + '</option>';
+      }).join('') + '</select>' +
+      '<input id="aEta" type="date" style="width:150px" title="ETA, if the vendor has given one"></div>',
+      '<div class="row" style="margin-top:10px">' +
+      '<label class="sub" style="display:flex;align-items:center;gap:7px">' +
+      '<input type="checkbox" id="aGating" checked> The car cannot go without it</label></div>',
+      '<div class="msg" id="aMsg"></div>',
+      '<div class="row" style="margin-top:12px">' +
+      '<button class="btn btn-solid" id="aSave">Add the line</button>' +
+      '<span class="sub">Lands as needed, not ordered.</span></div>'
+    ].join('');
+
+    $('aSave').addEventListener('click', function () {
+      var desc = $('aDesc').value.trim();
+      if (!desc) return dMsg('aMsg', 'What is the part?', 'err');
+      api('/api/ro/' + f.roId + '/parts', {
+        method: 'POST',
+        body: JSON.stringify({
+          description: desc,
+          partNumber: $('aNum').value.trim() || undefined,
+          partType: $('aType').value || undefined,
+          qty: Number($('aQty').value || 1) || 1,
+          priceCents: $('aPrice') && $('aPrice').value ? Math.round(Number($('aPrice').value) * 100) : undefined,
+          costCents: $('aCost') && $('aCost').value ? Math.round(Number($('aCost').value) * 100) : undefined,
+          vendorId: $('aVendor').value ? Number($('aVendor').value) : undefined,
+          eta: $('aEta').value || undefined,
+          gating: $('aGating').checked
+        })
+      }).then(function () { closeDrawer(); return load(); })
+        .then(function () { Shell.refreshCount(); })
+        .catch(function (e) { dMsg('aMsg', e.message, 'err'); });
+    });
+  }
+
+  /**
+   * Ordering is not a flag. One order goes to one vendor with an order number
+   * and an ETA, covering as many lines as the desk ticks — which is how a single
+   * order to a supplier actually happens.
+   */
+  function openOrder(f) {
+    var lines = f.lines.filter(function (l) { return l.state === 'need'; });
+    if (!lines.length) return;
+
+    $('dTitle').textContent = 'Order parts — ' + f.ro;
+    $('dSub').textContent = (f.vehicle || '') + (f.vin ? ' · …' + String(f.vin).slice(-8) : '');
+    $('scrim').classList.add('open');
+    $('drawer').classList.add('open');
+    $('drawer').setAttribute('aria-hidden', 'false');
+
+    var h = ['<div class="sec">Who it is going to</div>',
+      '<div class="row"><select id="oVendor" style="flex:1;min-width:150px">' +
+      '<option value="">Pick a vendor</option>' +
+      VENDORS.map(function (v) {
+        return '<option value="' + v.id + '">' + esc(v.name) + (v.kind ? ' · ' + esc(v.kind) : '') + '</option>';
+      }).join('') + '</select>' +
+      '<button class="btn btn-ghost" id="oVendors">Edit list</button></div>',
+      '<div class="row" style="margin-top:10px">' +
+      '<input id="oPo" placeholder="Order or invoice number" style="flex:1;min-width:150px">' +
+      '<input id="oEta" type="date" style="width:150px" title="When the vendor says it lands"></div>',
+      '<div class="sec">Lines — untick anything not on this order</div>'];
+
+    lines.forEach(function (l) {
+      h.push('<div class="log" style="display:flex;gap:10px;align-items:flex-start">' +
+        '<input type="checkbox" class="o-line" data-id="' + l.id + '" checked ' +
+        'style="margin-top:3px">' +
+        '<div style="min-width:0;flex:1">' +
+        '<div class="log-b">' + esc(l.description) + '</div>' +
+        '<div class="log-m">' + esc([l.part_number, l.part_type, 'qty ' + l.qty].filter(Boolean).join(' · ')) +
+        (ME.caps.money ? ' · ' + money(l.price_cents) + ' list / ' +
+          (Number(l.cost_cents) ? money(l.cost_cents) : 'no cost yet') : '') + '</div></div></div>');
+    });
+
+    h.push('<div class="msg" id="oMsg"></div>',
+      '<div class="row" style="margin-top:12px">' +
+      '<button class="btn btn-solid" id="oSend">Mark ordered</button>' +
+      '<span class="sub">Ordered date is stamped today.</span></div>');
+
+    $('dBody').innerHTML = h.join('');
+    $('oVendors').addEventListener('click', openVendors);
+
+    $('oSend').addEventListener('click', function () {
+      var ids = Array.prototype.filter.call($('dBody').querySelectorAll('.o-line'), function (c) {
+        return c.checked;
+      }).map(function (c) { return Number(c.dataset.id); });
+      if (!ids.length) { return dMsg('oMsg', 'Nothing ticked.', 'err'); }
+      if (!$('oVendor').value) { return dMsg('oMsg', 'Pick the vendor this is going to.', 'err'); }
+      api('/api/parts/bulk-order', {
+        method: 'POST',
+        body: JSON.stringify({
+          ids: ids,
+          vendorId: Number($('oVendor').value),
+          poNumber: $('oPo').value.trim() || undefined,
+          eta: $('oEta').value || undefined
+        })
+      }).then(function () { closeDrawer(); return load(); })
+        .then(function () { Shell.refreshCount(); })
+        .catch(function (e) { dMsg('oMsg', e.message, 'err'); });
+    });
+  }
+
+  /**
+   * Receiving stays quick, but records the date and what came short: a line with
+   * anything owed stays on order for the remainder.
+   */
+  function openReceive(f) {
+    var lines = f.lines.filter(function (l) {
+      return ['ordered', 'partial', 'backordered'].indexOf(l.state) >= 0;
+    });
+    if (!lines.length) return;
+
+    $('dTitle').textContent = 'Receive parts — ' + f.ro;
+    $('dSub').textContent = (f.vehicle || '') + (f.vin ? ' · …' + String(f.vin).slice(-8) : '');
+    $('scrim').classList.add('open');
+    $('drawer').classList.add('open');
+    $('drawer').setAttribute('aria-hidden', 'false');
+
+    var h = ['<div class="sec">What arrived</div>',
+      '<div class="row"><input id="rInv" placeholder="Vendor invoice number — optional" ' +
+      'style="flex:1;min-width:160px">' +
+      '<input id="rDate" type="date" style="width:150px" title="Received date — today unless you change it"></div>'];
+
+    lines.forEach(function (l) {
+      var owed = Number(l.qty) - Number(l.qty_received || 0);
+      h.push('<div class="log" style="display:flex;gap:10px;align-items:flex-start">' +
+        '<input type="checkbox" class="r-line" data-id="' + l.id + '" data-qty="' + l.qty + '" checked ' +
+        'style="margin-top:3px">' +
+        '<div style="min-width:0;flex:1">' +
+        '<div class="log-b">' + esc(l.description) + '</div>' +
+        '<div class="log-m">' + esc([l.vendor_name || 'no vendor',
+          l.po_number ? 'order ' + l.po_number : '',
+          l.eta ? 'ETA ' + shopDate(l.eta) : ''].filter(Boolean).join(' · ')) + '</div></div>' +
+        '<div style="text-align:right;display:flex;gap:8px;align-items:flex-start">' +
+        (ME.caps.money
+          ? '<div><div class="sub" style="margin:0">cost each</div>' +
+            '<input class="r-cost" data-for="' + l.id + '" type="number" min="0" step="0.01" ' +
+            'placeholder="' + (Number(l.cost_cents) ? (Number(l.cost_cents) / 100).toFixed(2) : '0.00') + '" ' +
+            'style="width:84px;text-align:right"></div>'
+          : '') +
+        '<div><div class="sub" style="margin:0">short of ' + owed + '</div>' +
+        '<input class="r-short" data-for="' + l.id + '" type="number" min="0" max="' + owed + '" ' +
+        'value="0" style="width:64px;text-align:right"></div></div></div>');
+    });
+
+    h.push('<div class="msg" id="rMsg"></div>',
+      '<div class="row" style="margin-top:12px">' +
+      '<button class="btn btn-solid" id="rSend">Mark received</button>' +
+      '<span class="sub">Anything short stays on order for the rest.' +
+      (ME.caps.money ? ' A cost typed here replaces what the line was carrying.' : '') +
+      '</span></div>');
+
+    $('dBody').innerHTML = h.join('');
+
+    $('rSend').addEventListener('click', function () {
+      var picked = Array.prototype.filter.call($('dBody').querySelectorAll('.r-line'), function (c) {
+        return c.checked;
+      }).map(function (c) {
+        var shortEl = $('dBody').querySelector('.r-short[data-for="' + c.dataset.id + '"]');
+        var costEl = $('dBody').querySelector('.r-cost[data-for="' + c.dataset.id + '"]');
+        var out = { id: Number(c.dataset.id), short: shortEl ? Number(shortEl.value || 0) : 0 };
+        if (costEl && costEl.value !== '') out.costCents = Math.round(Number(costEl.value) * 100);
+        return out;
+      });
+      if (!picked.length) return dMsg('rMsg', 'Nothing ticked.', 'err');
+      api('/api/parts/bulk-receive', {
+        method: 'POST',
+        body: JSON.stringify({
+          lines: picked,
+          receivedAt: $('rDate').value || undefined,
+          invoiceNo: $('rInv').value.trim() || undefined
+        })
+      }).then(function () { closeDrawer(); return load(); })
+        .then(function () { Shell.refreshCount(); })
+        .catch(function (e) { dMsg('rMsg', e.message, 'err'); });
+    });
+  }
+
+  function dMsg(id, text, kind) {
+    var el = $(id);
+    if (!el) return;
+    el.textContent = text;
+    el.className = 'msg ' + (kind || '');
+  }
+
+  /* --------------------------------------------------------- vendors */
+
+  function openVendors() {
+    $('dTitle').textContent = 'Vendors';
+    $('dSub').textContent = 'Who you order from';
+    $('scrim').classList.add('open');
+    $('drawer').classList.add('open');
+    $('drawer').setAttribute('aria-hidden', 'false');
+
+    var h = ['<div class="sec">Add a vendor</div>',
+      '<div class="row"><input id="vName" placeholder="Dealer, aftermarket or recycler" ' +
+      'style="flex:1;min-width:160px">' +
+      '<select id="vKind"><option value="OEM">OEM</option><option value="Aftermarket">Aftermarket</option>' +
+      '<option value="Recycled">Recycled</option><option value="Glass">Glass</option>' +
+      '<option value="Other">Other</option></select>' +
+      '<button class="btn btn-ghost" id="vAdd">Add</button></div>',
+      '<div class="msg" id="vMsg"></div>',
+      '<div class="sec">' + VENDORS.length + ' vendor' + (VENDORS.length === 1 ? '' : 's') + '</div>'];
+
+    if (!VENDORS.length) h.push('<div class="sub">None yet.</div>');
+    VENDORS.forEach(function (v) {
+      var lines = PARTS.filter(function (p) { return p.vendor_id === v.id; }).length;
+      h.push('<div class="log"><div class="log-b">' + esc(v.name) + '</div>' +
+        '<div class="log-m">' + esc([v.kind, v.phone].filter(Boolean).join(' · ') || 'no details') +
+        ' · ' + lines + ' open line' + (lines === 1 ? '' : 's') + '</div></div>');
+    });
+
+    $('dBody').innerHTML = h.join('');
+
+    $('vAdd').addEventListener('click', function () {
+      var name = $('vName').value.trim();
+      if (!name) {
+        $('vMsg').textContent = 'A name is required.';
+        $('vMsg').className = 'msg err';
+        return;
+      }
+      api('/api/vendors', {
+        method: 'POST', body: JSON.stringify({ name: name, kind: $('vKind').value })
+      }).then(function () { return load(); }).then(openVendors)
+        .catch(function (e) {
+          $('vMsg').textContent = e.message;
+          $('vMsg').className = 'msg err';
+        });
+    });
+  }
+
+  /* ------------------------------------------------------- pull sheet */
+
+  /**
+   * A sheet is a vendor and receiving document, not the screen with its chrome
+   * hidden. One page per vehicle, only the lines the desk ticked, on white.
+   */
+  var PM_MODES = {
+    order: { t: 'To order', states: ['need'],
+      note: 'nothing ordered yet — what to buy' },
+    ordered: { t: 'On order', states: ['ordered', 'partial', 'backordered'],
+      note: 'out at a vendor — what to check in' },
+    received: { t: 'Received', states: ['received', 'partial'],
+      note: 'in the building — what came and what it cost' }
+  };
+  var PM = { mode: 'order', off: {} };
+
+  /* One vehicle if the desk has a single file open, otherwise everything the
+     filters left on screen. */
+  function pmScope() {
+    var files = byRo();
+    if (!ALL_OPEN) {
+      var open = files.filter(function (f) { return OPEN[f.roId]; });
+      if (open.length === 1) return open;
+    }
+    return files;
+  }
+
+  function pmGroups() {
+    var states = PM_MODES[PM.mode].states;
+    return pmScope().map(function (f) {
+      return { f: f, lines: f.lines.filter(function (l) { return states.indexOf(l.state) >= 0; }) };
+    }).filter(function (g) { return g.lines.length; });
+  }
+
+  /* Ticks are remembered per mode, so flipping the toggle does not lose them. */
+  function pmOn(l) { return !PM.off[PM.mode + ':' + l.id]; }
+  function pmSet(id, on) {
+    var k = PM.mode + ':' + id;
+    if (on) delete PM.off[k]; else PM.off[k] = 1;
+  }
+
+  function partType(t) {
+    if (!t) return '—';
+    var s = String(t);
+    return /^oem$/i.test(s) ? 'OEM' : s.charAt(0).toUpperCase() + s.slice(1);
+  }
+
+  function openPrint() {
+    PM.off = {};
+    $('pmScrim').hidden = false;
+    $('pmodal').hidden = false;
+    renderPm();
+  }
+
+  function closePrint() {
+    $('pmScrim').hidden = true;
+    $('pmodal').hidden = true;
+  }
+
+  function renderPm() {
+    var groups = pmGroups(), scope = pmScope();
+
+    $('pmScope').textContent = (scope.length === 1
+      ? scope[0].ro + ' · ' + (scope[0].vehicle || '')
+      : scope.length + ' vehicles matching the filters') +
+      ' · ' + PM_MODES[PM.mode].note;
+
+    if (!groups.length) {
+      $('pmBody').innerHTML = '<div class="empty" style="padding:40px 8px">Nothing ' +
+        ({ order: 'left to order', ordered: 'on order', received: 'received' })[PM.mode] +
+        ' in this scope.</div>';
+      $('pmCount').textContent = '';
+      $('pmPrint').disabled = true;
+      return;
+    }
+    $('pmPrint').disabled = false;
+
+    var total = 0, on = 0;
+    $('pmBody').innerHTML = groups.map(function (g) {
+      var gOn = g.lines.filter(pmOn).length;
+      total += g.lines.length; on += gOn;
+      var f = g.f;
+
+      return '<div class="pmveh">' +
+        '<input type="checkbox" data-pmveh="' + f.roId + '"' +
+        (gOn === g.lines.length ? ' checked' : '') + '>' +
+        '<div style="min-width:0;flex:1">' +
+        '<div style="font:500 12.5px var(--font)">' + esc(f.ro) + ' · ' +
+        esc(f.vehicle || '—') + (f.color ? ' · ' + esc(f.color) : '') + '</div>' +
+        '<div class="sub" style="margin:2px 0 0">' +
+        (f.vin ? 'VIN ' + esc(f.vin) : 'no VIN on file') + '</div></div>' +
+        '<div class="sub" style="margin:0">' + gOn + ' of ' + g.lines.length + '</div></div>' +
+        g.lines.map(function (l) {
+          return '<label class="pmline">' +
+            '<input type="checkbox" data-pmline="' + l.id + '"' + (pmOn(l) ? ' checked' : '') + '>' +
+            '<div style="min-width:0">' +
+            '<div style="font:400 12px var(--font)">' + esc(l.description) + '</div>' +
+            '<div class="sub" style="margin:2px 0 0;white-space:normal">' +
+            esc([l.part_number || 'no part #', partType(l.part_type), 'qty ' + l.qty,
+              l.vendor_name].filter(Boolean).join(' · ')) + '</div></div>' +
+            (ME.caps.money
+              ? '<div class="cellnum" style="font-weight:400">' + money(l.price_cents) +
+                '<div class="sub" style="margin:2px 0 0">' +
+                (Number(l.cost_cents) ? money(l.cost_cents) + ' cost' : 'no cost') + '</div></div>'
+              : '<div></div>') +
+            '</label>';
+        }).join('');
+    }).join('');
+
+    $('pmCount').textContent = on + ' of ' + total + ' line' + (total === 1 ? '' : 's');
+
+    Array.prototype.forEach.call($('pmBody').querySelectorAll('[data-pmline]'), function (c) {
+      c.addEventListener('change', function () { pmSet(c.dataset.pmline, c.checked); renderPm(); });
+    });
+
+    Array.prototype.forEach.call($('pmBody').querySelectorAll('[data-pmveh]'), function (c) {
+      var g = groups.filter(function (x) { return String(x.f.roId) === c.dataset.pmveh; })[0];
+      if (g) {
+        var n = g.lines.filter(pmOn).length;
+        c.indeterminate = n > 0 && n < g.lines.length;
+      }
+      c.addEventListener('change', function () {
+        if (g) g.lines.forEach(function (l) { pmSet(l.id, c.checked); });
+        renderPm();
+      });
+    });
+  }
+
+  function sheetsHtml() {
+    var kind = PM_MODES[PM.mode].t;
+    var co = (ME.company && ME.company.name) || 'Easy Shop';
+    var when = new Date().toLocaleDateString('en-US',
+      { year: 'numeric', month: 'short', day: 'numeric' });
+    var showCost = !!ME.caps.money;
+
+    return pmGroups().map(function (g) {
+      var lines = g.lines.filter(pmOn);
+      if (!lines.length) return '';
+      var f = g.f, list = 0, cost = 0;
+      var rec = PM.mode === 'received';
+
+      var rows = lines.map(function (l) {
+        var q = Number(l.qty || 1);
+        list += Number(l.price_cents || 0) * q;
+        cost += Number(l.cost_cents || 0) * q;
+        var got = Number(l.qty_received || 0);
+        return '<tr><td class="n">' + esc(String(l.line_no || '·')) + '</td>' +
+          '<td>' + esc(l.description) + '</td>' +
+          '<td>' + esc(l.part_number || '—') + '</td>' +
+          '<td>' + esc(partType(l.part_type)) + '</td>' +
+          '<td class="n">' + esc(String(l.qty)) + '</td>' +
+          (rec
+            ? '<td class="n">' + esc(String(got)) +
+              (got < q ? ' <span class="short">short ' + (q - got) + '</span>' : '') + '</td>' +
+              '<td>' + esc(shopDate(l.received_at) || '—') + '</td>' +
+              '<td>' + esc(l.invoice_no || '—') + '</td>'
+            : '<td>' + esc(l.vendor_name || '—') + '</td>') +
+          (showCost
+            ? '<td class="n">' + money(l.price_cents) + '</td>' +
+              '<td class="n">' + (Number(l.cost_cents) ? money(l.cost_cents) : '—') + '</td>'
+            : '') + '</tr>';
+      }).join('');
+
+      return '<section class="sheetpage">' +
+        '<div class="sheettop"><div class="sheetco">' + esc(co) + '</div>' +
+        '<div class="sheetkind">Pull sheet · ' + esc(kind) + '</div></div>' +
+        '<div class="sheetro">RO ' + esc(f.ro) + '</div>' +
+        '<div class="sheetveh">' + esc(f.vehicle || '—') +
+        (f.color ? ' · ' + esc(f.color) : '') + '</div>' +
+        '<div class="sheetvin">VIN ' + esc(f.vin || '—') + '</div>' +
+        '<table class="sheettbl"><thead><tr>' +
+        '<th class="n">Line</th><th>Description</th><th>Part #</th><th>Type</th>' +
+        '<th class="n">Qty</th>' +
+        (rec
+          ? '<th class="n">Got</th><th>Received</th><th>Invoice</th>'
+          : '<th>Vendor</th>') +
+        (showCost ? '<th class="n">List</th><th class="n">Cost</th>' : '') +
+        '</tr></thead><tbody>' + rows + '</tbody>' +
+        (showCost
+          ? '<tfoot><tr><td colspan="' + (rec ? 8 : 6) + '">' + lines.length + ' line' +
+            (lines.length === 1 ? '' : 's') + '</td><td class="n">' + money(list) +
+            '</td><td class="n">' + money(cost) + '</td></tr></tfoot>'
+          : '') +
+        '</table>' +
+        (rec
+          ? '<div class="sheetsign"><div>Checked in by</div><div>Date</div></div>'
+          : '') +
+        '<div class="sheetfoot">' + esc(co) + ' · printed ' + esc(when) + '</div>' +
+        '</section>';
+    }).join('');
+  }
+
+  function doPrint() {
+    var html = sheetsHtml();
+    if (!html) return;
+    $('printroot').innerHTML = html;
+    closePrint();
+    setTimeout(function () { window.print(); }, 40);
+  }
+
+  window.addEventListener('afterprint', function () { $('printroot').innerHTML = ''; });
+
+  function closeDrawer() {
+    $('scrim').classList.remove('open');
+    $('drawer').classList.remove('open');
+    $('drawer').setAttribute('aria-hidden', 'true');
+  }
+
+  $('fSearch').addEventListener('input', render);
+  $('fVendor').addEventListener('change', render);
+  $('fState').addEventListener('change', render);
+  $('vendorsBtn').addEventListener('click', openVendors);
+  $('printBtn').addEventListener('click', openPrint);
+  $('pmCancel').addEventListener('click', closePrint);
+  $('pmClose').addEventListener('click', closePrint);
+  $('pmScrim').addEventListener('click', closePrint);
+  $('pmPrint').addEventListener('click', doPrint);
+  Array.prototype.forEach.call($('pmMode').querySelectorAll('button'), function (b) {
+    b.addEventListener('click', function () {
+      PM.mode = b.dataset.mode;
+      Array.prototype.forEach.call($('pmMode').querySelectorAll('button'), function (x) {
+        x.classList.toggle('sel', x === b);
+      });
+      renderPm();
+    });
+  });
+  $('expandAll').addEventListener('click', function () {
+    ALL_OPEN = !ALL_OPEN;
+    if (!ALL_OPEN) OPEN = {};
+    $('expandAll').textContent = ALL_OPEN ? 'Collapse all' : 'Expand all';
+    render();
+  });
+  $('scrim').addEventListener('click', closeDrawer);
+  $('dClose').addEventListener('click', closeDrawer);
+  document.addEventListener('keydown', function (e) {
+    if (e.key !== 'Escape') return;
+    if (!$('pmodal').hidden) closePrint(); else closeDrawer();
+  });
+})();
+</script>
+</body>
+</html>

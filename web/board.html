@@ -1,0 +1,3369 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1c2740">
+<title>Board — Easy Shop</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/shell.css?v=7">
+<style>
+  /* ---- shared ---- */
+  .ro { font-weight:500; font-variant-numeric:tabular-nums; }
+  .seg { display:flex; border:1px solid var(--line); border-radius:4px; overflow:hidden; }
+  .seg button {
+    font:500 10.5px var(--font); padding:6px 11px; background:transparent;
+    border:none; color:var(--dim); min-height:30px;
+  }
+  .seg button.sel { background:var(--acc); color:var(--bg); }
+  .colpanel {
+    position:absolute; left:0; top:calc(100% + 6px); z-index:30; width:222px; background:var(--surf);
+    border:1px solid var(--line); border-radius:6px; box-shadow:var(--shadow-md,0 16px 40px rgba(0,0,0,.45));
+    padding:6px 0;
+  }
+  .colpanel[hidden] { display:none; }
+  .colrow {
+    display:flex; align-items:center; gap:9px; padding:7px 12px;
+    font:400 11.5px var(--font); cursor:pointer;
+  }
+  .colrow:hover { background:var(--whisper); }
+  .colrow.locked { opacity:.45; cursor:default; }
+  .colhead {
+    font:600 8.5px var(--font); letter-spacing:.13em; text-transform:uppercase;
+    color:var(--acc2); padding:9px 12px 6px;
+  }
+
+  /* ---- printing ---- */
+  /* The sheet is the view already on screen: same rows, same filter, chrome
+     stripped. Landscape letter, because nine columns need the width. */
+  .printhead { display:none; }
+  .writein { display:none; }
+
+  @page { size: letter landscape; margin: 12mm 10mm; }
+
+  @media print {
+    :root { --text:#111; --muted:#333; --dim:#555; --line:#999; --whisper:#ddd; }
+    html, body { background:#fff !important; color:#111 !important; height:auto; }
+    body { display:block; }
+
+    .bar, .hairline, .filters, .kpis, .scrim, .modal, .guard, .lightbox,
+    .tabbar, .sheet, .colpanel, .impbanner, .legend, .cardsum, .tailrow { display:none !important; }
+
+    main { display:block; overflow:visible; }
+    .tablewrap, .cyclewrap { padding:0; overflow:visible; }
+
+    .printhead {
+      display:flex; align-items:baseline; gap:14px;
+      border-bottom:1.5px solid #111; padding-bottom:6px; margin-bottom:10px;
+    }
+    .phshop { font:600 13pt 'Inter',sans-serif; color:#111; }
+    .phwhat { font:400 9.5pt 'Inter',sans-serif; color:#333; }
+
+    .gridhead, .cyclehead {
+      background:#fff !important; color:#111 !important; border-bottom:1px solid #111;
+      position:static; height:auto; padding:0 0 4px;
+    }
+    .lanehead {
+      background:#fff !important; position:static; border:none; border-bottom:1px solid #111;
+      padding:9pt 0 3pt; break-after:avoid; page-break-after:avoid;
+    }
+    .lanename { color:#111 !important; }
+
+    .gridrow, .cyclerow {
+      /* The mobile breakpoint hides these in favour of cards, and a portrait
+         sheet is narrow enough to trigger it — so say it outright here. */
+      display:grid !important;
+      break-inside:avoid; page-break-inside:avoid;
+      border-bottom:1px solid #ccc; padding:5pt 0; min-height:0;
+      color:#111 !important; cursor:default;
+    }
+    .gridhead, .cyclehead { display:grid !important; }
+    .lanehead { display:flex !important; }
+    .gridrow *, .cyclerow *, .lanehead * { color:#111 !important; }
+    .cellsub, .sub, .log-m { color:#555 !important; }
+    .edge, .track, .pip { display:none !important; }
+    .flag, .pill { border-color:#999 !important; }
+
+    /* The progression bars survive: they are the point of the cycle sheet. */
+    .pseg { print-color-adjust:exact; -webkit-print-color-adjust:exact; }
+
+    /* A ruled column to write in. The grid gets one more track: rows carry the
+       widened template in --printcols so an inline style cannot win. */
+    .writein { display:block; border-bottom:1px solid #999; height:1.4em; align-self:end; }
+    .gridhead, .gridrow { grid-template-columns:var(--printcols) !important; }
+    /* Proportional, not fixed pixels — the same sheet has to fit portrait and
+       landscape without pushing the write-in column off the page. */
+    .cyclehead, .cyclerow {
+      grid-template-columns:minmax(0,2.3fr) minmax(0,2fr) minmax(0,1.3fr) 46pt 34pt 1.25in !important;
+      gap:10pt !important;
+    }
+
+    .cards, .empty { display:none !important; }
+    a[href]::after { content:none !important; }
+  }
+
+  /* ---- table view ---- */
+  .tablewrap { padding:0 0 24px; }
+
+  /* ---- cycle view ---- */
+  .cyclewrap { padding:0 0 24px; }
+  .legend { display:flex; align-items:center; gap:14px; padding:10px 18px; border-bottom:1px solid var(--whisper); flex-wrap:wrap; }
+  .legitem { display:flex; align-items:center; gap:6px; font:400 10.5px var(--font); color:var(--dim); }
+  .legswatch { width:14px; height:6px; border-radius:1px; }
+  .cyclehead {
+    display:grid; grid-template-columns:250px 286px 1fr 96px 88px; gap:14px; align-items:center;
+    padding:0 18px; height:32px; position:sticky; top:0; z-index:2; background:var(--surf);
+    font:600 8.5px var(--font); letter-spacing:.12em; text-transform:uppercase; color:var(--acc2);
+  }
+  .lanehead {
+    display:flex; align-items:center; gap:9px; padding:8px 18px; background:var(--surf);
+    position:sticky; top:0; z-index:2;
+    border-top:1px solid var(--whisper); border-bottom:1px solid var(--whisper);
+  }
+  .lanen { font:500 9.5px var(--font); font-variant-numeric:tabular-nums; color:var(--acc); }
+  .lanename { font:500 12px var(--font); letter-spacing:.06em; text-transform:uppercase; }
+  /* Total loss: lane 00, above everything, and red on the row. The car is still
+     in the shop, so it stays on the board — it is just not work any more. */
+  .lanehead.tlhead { background:rgba(208,126,111,.16); border-color:rgba(208,126,111,.4); }
+  .lanehead.tlhead .lanen, .lanehead.tlhead .lanename { color:#f0bdb2; }
+  .gridrow.tlrow, .cyclerow.tlrow { background:rgba(208,126,111,.11); }
+  .gridrow.tlrow:hover, .cyclerow.tlrow:hover { background:rgba(208,126,111,.17); }
+  .flag.tlflag {
+    color:#f0bdb2; background:rgba(208,126,111,.2); border:1px solid rgba(208,126,111,.55);
+  }
+  .cyclerow {
+    display:grid; grid-template-columns:250px 286px 1fr 96px 88px; gap:14px; align-items:center;
+    padding:7px 18px; min-height:52px; border-bottom:1px solid var(--whisper); cursor:pointer;
+  }
+  /* A CCC vehicle line runs to fifty characters. Two lines, then an ellipsis —
+     the full text is on the row's title attribute and in the drawer. */
+  .cyclerow .cell {
+    display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical;
+    overflow:hidden; line-height:1.3;
+  }
+  .cyclerow .sub { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .cyclerow:hover { background:var(--surf); }
+  .progress { display:flex; gap:3px; align-items:center; }
+  .pseg { height:6px; flex:1; border-radius:1px; min-width:4px; }
+  .track { height:2px; border-radius:1px; background:var(--whisper); margin-top:5px; }
+  .trackfill { height:100%; border-radius:1px; }
+
+  /* ---- unsaved-changes guard ---- */
+  .guard {
+    position:fixed; inset:0; z-index:70; background:rgba(9,13,20,.72);
+    display:grid; place-items:center; padding:24px;
+  }
+  .guard[hidden] { display:none; }
+  .guardcard {
+    width:min(440px,100%); background:var(--bg); border:1px solid var(--acc);
+    border-radius:8px; padding:18px 20px 16px; box-shadow:0 24px 60px rgba(0,0,0,.55);
+  }
+  .guardtitle { font:500 14px var(--font); }
+  .guardbody {
+    font:400 11.5px/1.6 var(--font); color:var(--muted); margin:9px 0 15px;
+  }
+  .guardbody ul { margin:6px 0 0; padding-left:17px; }
+  .guardbody li { margin:2px 0; }
+  .guardrow { display:flex; gap:9px; flex-wrap:wrap; }
+
+  /* ---- modal: centred, wide, two columns like the mockup ---- */
+  .modal {
+    position:fixed; inset:24px; z-index:30; display:none;
+    background:var(--bg); border:1px solid var(--line); border-radius:8px;
+    box-shadow:0 30px 80px rgba(0,0,0,.55); overflow:hidden;
+    grid-template-rows:auto 1fr;
+  }
+  .modal.open { display:grid; }
+  .mhead {
+    display:flex; align-items:center; gap:10px; padding:0 14px; height:56px;
+    background:var(--surf); box-shadow:inset 0 -1px 0 var(--line); flex-wrap:nowrap;
+  }
+  .mhead .spacer { margin-left:auto; }
+  .mbody { display:grid; grid-template-columns:1fr 392px; min-height:0; }
+  .mcol { overflow-y:auto; padding:0 18px 26px; }
+  .mright { border-left:1px solid var(--whisper); background:rgba(231,234,242,.02); }
+
+  /* Field blocks: label above the value, three to a row. */
+  .fieldset { display:grid; grid-template-columns:repeat(3,1fr); gap:14px 18px; }
+  .fieldset.two { grid-template-columns:repeat(2,1fr); }
+  .fl2 {
+    font:600 8px var(--font); letter-spacing:.11em; text-transform:uppercase;
+    color:var(--acc2); margin-bottom:4px;
+  }
+  .fv2 { font:400 12.5px var(--font); }
+  .fv2.num { font-variant-numeric:tabular-nums; }
+  .secline { border-bottom:1px solid var(--whisper); margin-bottom:12px; padding-bottom:9px; }
+
+  /* ---- collapsible fact blocks ---- */
+  .sec.fold { cursor:pointer; user-select:none; display:flex; align-items:center; gap:8px; }
+  .sec.fold:hover .foldcue { color:var(--acc); }
+  .foldcue {
+    font:400 10px var(--font); color:var(--dim); margin-left:auto; letter-spacing:0;
+    text-transform:none; display:flex; align-items:center; gap:5px;
+  }
+  .foldcue .chev { display:inline-block; transition:transform .12s ease; }
+  .sec.fold.shut .foldcue .chev { transform:rotate(-90deg); }
+  .foldbody[hidden] { display:none; }
+
+  /* ------------------------------------------------------- close-out sheet */
+  .coscrim { position:fixed; inset:0; background:rgba(9,13,20,.74); z-index:70; }
+  .cosheet {
+    position:fixed; z-index:71; left:50%; top:50%; transform:translate(-50%,-50%);
+    width:min(820px, calc(100vw - 28px)); max-height:calc(100vh - 48px);
+    display:flex; flex-direction:column;
+    background:var(--bg); border:1px solid var(--line); border-radius:8px;
+    box-shadow:0 30px 70px rgba(0,0,0,.55);
+  }
+  .coscrim[hidden], .cosheet[hidden] { display:none; }
+  .cohead {
+    display:flex; align-items:flex-start; gap:14px; padding:15px 18px 14px;
+    background:var(--surf); border-bottom:1px solid var(--line); flex:none;
+  }
+  .cohead .cot { font:500 15px var(--font); }
+  .cohead .cos { font:400 11.5px var(--font); color:var(--dim); margin-top:3px; }
+  .cobody { flex:1; min-height:0; overflow-y:auto; }
+  .cofoot {
+    display:flex; align-items:center; gap:12px; padding:13px 18px; flex:none;
+    background:var(--surf); border-top:1px solid var(--line);
+  }
+  .cofoot .spacer { margin-left:auto; }
+  .cosec {
+    font:600 8.5px var(--font); letter-spacing:.12em; text-transform:uppercase;
+    color:var(--acc2); padding:15px 18px 8px;
+  }
+  .cosub { font:400 10.5px/1.5 var(--font); color:var(--dim); padding:0 18px 8px; max-width:620px; }
+  .labhead, .labrow {
+    display:grid; grid-template-columns:126px 74px 152px 172px 66px 88px;
+    column-gap:12px; align-items:center; padding:0 18px;
+  }
+  .labhead {
+    height:26px; border-top:1px solid var(--line); border-bottom:1px solid var(--line);
+    font:600 8.5px var(--font); letter-spacing:.11em; text-transform:uppercase; color:var(--dim);
+  }
+  .labrow { height:40px; border-bottom:1px solid var(--whisper); }
+  .labrow .who { font:500 12px var(--font); white-space:nowrap; }
+  .labrow .tr { font:400 11px var(--font); color:var(--dim); white-space:nowrap; }
+  .labrow input {
+    width:64px; text-align:right; font-variant-numeric:tabular-nums;
+    font:500 12px var(--font); padding:5px 8px;
+  }
+  .labrow input.wide { width:74px; }
+  .labrow input:disabled { color:var(--muted); border-style:dashed; }
+  .labrow .rt { font:400 11px var(--font); font-variant-numeric:tabular-nums; text-align:right; color:var(--dim); }
+  .labrow .rt.none { color:var(--stopped); }
+  .labrow .ct { font:500 12px var(--font); font-variant-numeric:tabular-nums; text-align:right; }
+  .segsm { display:flex; border:1px solid var(--line); border-radius:4px; overflow:hidden; }
+  .segsm button {
+    font:500 10px var(--font); padding:4px 9px; background:transparent; border:none;
+    color:var(--dim); min-height:0; white-space:nowrap;
+  }
+  .segsm button.on { background:var(--acc); color:var(--bg); }
+  .pdrline {
+    display:flex; align-items:center; gap:12px; padding:8px 18px 9px;
+    background:var(--surf); border-bottom:1px solid var(--whisper);
+    font:400 10.5px/1.45 var(--font); color:var(--dim);
+  }
+  .pdrline .spacer { margin-left:auto; }
+  .onerow {
+    display:grid; grid-template-columns:1fr auto 92px; column-gap:12px; align-items:center;
+    padding:9px 18px; border-top:1px solid var(--whisper); border-bottom:1px solid var(--whisper);
+    font:400 11.5px var(--font); color:var(--muted);
+  }
+  .onerow input { width:76px; text-align:right; font-variant-numeric:tabular-nums; font:500 12px var(--font); padding:5px 8px; }
+  .onerow .ct { font:500 12px var(--font); font-variant-numeric:tabular-nums; text-align:right; color:var(--text); }
+  .plines { padding:2px 18px 6px; }
+  .pline {
+    display:flex; align-items:baseline; justify-content:space-between; gap:14px;
+    padding:6px 0; border-bottom:1px solid var(--whisper);
+  }
+  .pline .l { font:400 11.5px var(--font); color:var(--muted); }
+  .pline .l.top { font:500 12px var(--font); color:var(--text); }
+  .pline .n { font:400 9.5px var(--font); color:var(--dim); margin-top:2px; }
+  .pline .v { font:400 12px var(--font); font-variant-numeric:tabular-nums; color:var(--stopped); }
+  .pline .v.zero { color:var(--dim); }
+  .pline .v.top { font:500 12.5px var(--font); color:var(--text); }
+  .profrow {
+    display:flex; align-items:flex-start; justify-content:space-between; gap:14px;
+    margin-top:10px; padding:12px 0 6px; border-top:1px solid var(--line);
+  }
+  .profrow .big { font:600 19px var(--font); font-variant-numeric:tabular-nums; color:var(--acc); }
+  .profrow .big.bad { color:var(--stopped); }
+  .profrow .pc { font:500 13px var(--font); font-variant-numeric:tabular-nums; color:var(--done); }
+  .profrow .pc.thin { color:var(--stopped); }
+  .colock { padding:34px 30px; }
+  .colock .t { font:500 15px var(--font); }
+  .colock .b { font:400 11.5px/1.6 var(--font); color:var(--dim); margin-top:8px; max-width:460px; }
+  .conote {
+    margin:10px 18px 0; padding:9px 12px; background:var(--chip);
+    border-left:2px solid var(--acc); font:400 10.5px/1.5 var(--font); color:var(--muted);
+  }
+  .conote.warn { border-left-color:var(--stopped); }
+  @media (max-width:760px) {
+    .labhead, .labrow { grid-template-columns:1fr 120px 96px; }
+    .labhead .hide-sm, .labrow .hide-sm { display:none; }
+  }
+  .savehint {
+    font:400 11px var(--font); color:var(--dim); margin:9px 0 2px;
+  }
+  /* A small action that belongs to one row — removing a sublet line, say. */
+  .linebtn {
+    flex:none; font:400 11px var(--font); padding:4px 8px; border-radius:3px;
+    background:transparent; border:1px solid var(--line); color:var(--dim); cursor:pointer;
+  }
+  .linebtn:hover { border-color:var(--stopped); color:var(--stopped); }
+
+  @media (max-width:1100px) {
+    .mbody { grid-template-columns:1fr; }
+    .mright { border-left:none; border-top:1px solid var(--line); }
+    .fieldset { grid-template-columns:repeat(2,1fr); }
+  }
+  @media (max-width:820px) {
+    .modal { inset:0; border-radius:0; border:none; }
+    .fieldset { grid-template-columns:1fr 1fr; }
+  }
+
+  /* ---- drawer extras ---- */
+  .promise { display:flex; align-items:flex-start; gap:9px; padding:8px 0; border-top:1px solid var(--whisper); }
+  .promise input[type=checkbox] { margin-top:3px; }
+  .promise.done .ptext { color:var(--dim); text-decoration:line-through; }
+  .ptext { font:400 12px var(--font); line-height:1.45; flex:1; }
+  .assigngrid { display:grid; grid-template-columns:1fr 1fr; gap:10px 14px; }
+  .dropzone {
+    border:1px dashed var(--line); border-radius:6px; padding:16px; text-align:center;
+    font:400 11.5px var(--font); color:var(--dim); cursor:pointer;
+  }
+  .dropzone.hot { border-color:var(--acc); color:var(--acc); background:rgba(217,164,65,.06); }
+  .docrow { display:flex; align-items:center; gap:10px; padding:9px 0; border-top:1px solid var(--whisper); }
+  .partrow { display:grid; grid-template-columns:1fr auto; gap:10px; padding:9px 0; border-top:1px solid var(--whisper); }
+  .photogrid { display:grid; grid-template-columns:repeat(auto-fill,minmax(88px,1fr)); gap:6px; margin-top:10px; }
+  .photocell {
+    position:relative; aspect-ratio:1; border-radius:4px; overflow:hidden;
+    background:var(--surf); border:none; padding:0; cursor:pointer;
+  }
+  .photocell img { width:100%; height:100%; object-fit:cover; display:block; }
+  .photocell:hover { outline:2px solid var(--acc); outline-offset:-2px; }
+  /* Paperwork sits in the same grid as the photos — one sequence, photos first. */
+  .photocell.pdf img { object-fit:cover; object-position:top; }
+  .photocell .kind {
+    position:absolute; left:3px; bottom:3px; font:500 8px var(--font); letter-spacing:.06em;
+    text-transform:uppercase; padding:2px 4px; border-radius:2px;
+    background:rgba(9,13,20,.82); color:var(--acc2);
+  }
+  .photocell .pages {
+    position:absolute; right:3px; bottom:3px; font:400 8px var(--font);
+    padding:2px 4px; border-radius:2px; background:rgba(9,13,20,.82); color:var(--dim);
+  }
+  /* Nothing could be rendered — the extension, in the middle of the tile. */
+  .glyph {
+    width:100%; height:100%; display:grid; place-items:center;
+    font:500 11px var(--font); letter-spacing:.08em; text-transform:uppercase;
+    color:var(--dim); background:var(--surf);
+  }
+  .lightbox {
+    position:fixed; inset:0; z-index:60; background:rgba(9,13,20,.94);
+    display:flex; flex-direction:column; align-items:center; justify-content:center; gap:12px;
+  }
+  .lightbox[hidden] { display:none; }
+  .lightbox img { max-width:94vw; max-height:76vh; border-radius:6px; }
+  /* Zoom to fill: the image goes to its own size and the frame scrolls. */
+  .lightbox.zoom { justify-content:flex-start; }
+  .lightbox.zoom .lbframe { overflow:auto; align-items:flex-start; cursor:zoom-out; }
+  .lightbox.zoom .lbframe img { max-width:none; max-height:none; }
+  .lbframe {
+    display:flex; align-items:center; justify-content:center;
+    max-width:94vw; max-height:76vh; cursor:zoom-in;
+  }
+  .lbbar { display:flex; gap:9px; align-items:center; flex-wrap:wrap; justify-content:center; }
+  .lbmeta { font:400 11px var(--font); color:var(--dim); text-align:center; }
+  /* Arrows sit off the image on a wide screen, under it on a narrow one. */
+  .lbside {
+    position:absolute; top:50%; transform:translateY(-50%); z-index:2;
+    width:44px; height:64px; border-radius:5px; cursor:pointer;
+    background:rgba(9,13,20,.6); border:1px solid var(--line); color:var(--text);
+    font:400 18px var(--font);
+  }
+  .lbside:hover { border-color:var(--acc); color:var(--acc); }
+  .lbside[disabled] { opacity:.25; cursor:default; }
+  #lbBack { left:16px; }
+  #lbFwd { right:16px; }
+  @media (max-width:640px) { .lbside { display:none; } }
+
+  /* ---- mobile: cards instead of a table ---- */
+  .cards { display:none; }
+  .cardsum { display:none; }
+  @media (max-width:820px) {
+    .gridhead, .gridrow, .tailrow, .cyclehead, .cyclerow { display:none; }
+    .cards { display:block; }
+    .tablewrap { padding:0 0 24px; }
+    .card {
+      display:block; width:100%; text-align:left; background:transparent; color:var(--text);
+      border:none; border-bottom:1px solid var(--whisper); padding:13px 14px;
+    }
+    .card:active { background:var(--whisper); }
+    .cardtop { display:flex; align-items:baseline; gap:8px; }
+    .cardro { font:600 15px var(--font); font-variant-numeric:tabular-nums; }
+    .carddays { margin-left:auto; font:500 12px var(--font); font-variant-numeric:tabular-nums; }
+    .cardveh { font:400 13px var(--font); color:var(--muted); margin-top:3px; }
+    .cardline { display:flex; align-items:center; gap:7px; margin-top:8px; flex-wrap:wrap; }
+    .lanehead { padding:8px 14px; }
+    .assigngrid { grid-template-columns:1fr; }
+
+    /* The modal header is a single desktop row; squeezed onto a phone every
+       item wrapped to one word per line and the row ran off the side. Two
+       rows instead: the file on top, its status and actions scrolling under. */
+    .mhead {
+      display:grid; grid-template-columns:auto auto 1fr auto; grid-auto-rows:min-content;
+      align-items:center; gap:4px 9px; height:auto; padding:9px 12px;
+    }
+    .mhead > * { min-width:0; }
+    #dVeh, #dSub {
+      grid-column:1 / -1; margin-left:0;
+      overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+    }
+    #dStatus, #dParts, #dDocs {
+      grid-row:3; white-space:nowrap;
+    }
+    #dStatus { grid-column:1 / span 2; }
+    #dParts { grid-column:3; justify-self:start; }
+    #dDocs { grid-column:4; }
+    .mhead .close { grid-row:1; grid-column:4; }
+    .mhead .spacer { display:none; }
+    #dParts, #dDocs {
+      overflow:hidden; text-overflow:ellipsis; font-size:11px; padding:7px 9px;
+    }
+    .cardsum {
+      position:sticky; top:0; z-index:2; display:flex; align-items:center; gap:12px;
+      padding:7px 14px; background:var(--surf);
+      border-top:1px solid var(--whisper); border-bottom:1px solid var(--whisper);
+      font:400 11px var(--font); color:var(--dim); white-space:nowrap;
+      overflow-x:auto; scrollbar-width:none;
+    }
+    .cardsum::-webkit-scrollbar { display:none; }
+    #fPrint { display:none; }
+    .cardsum b { font:500 12px var(--font); font-variant-numeric:tabular-nums; color:var(--text); }
+  }
+
+  /* Sublets needed — under the cycle lanes, on the same column grid. */
+  .subhead {
+    display:flex; align-items:center; gap:11px; padding:9px 18px; margin-top:16px;
+    background:var(--surf); border-top:1px solid var(--whisper); border-bottom:1px solid var(--whisper);
+  }
+  .subttl { font:500 12px var(--font); letter-spacing:.06em; text-transform:uppercase; color:var(--acc2); }
+  .subnote { font:400 11px var(--font); color:var(--dim); }
+  .submeta { margin-left:auto; display:flex; gap:16px; font:400 11px var(--font); color:var(--muted); }
+  .subgrid {
+    display:grid; grid-template-columns:minmax(180px,1.3fr) minmax(200px,1.4fr) 118px 108px 96px;
+    gap:14px; align-items:center; padding:0 18px;
+  }
+  .subghead { height:26px; }
+  .subghead > div { font:600 8.5px var(--font); letter-spacing:.12em; text-transform:uppercase; color:var(--dim); }
+  .subrow { height:42px; border-bottom:1px solid var(--whisper); cursor:pointer; }
+  .subrow:hover { background:var(--whisper); }
+  .subrow.needed { background:rgba(217,164,65,.06); }
+  .subrow.needed:hover { background:rgba(217,164,65,.12); }
+  .subveh { font:400 12px var(--font); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .subro { font:400 10px var(--font); font-variant-numeric:tabular-nums; color:var(--dim);
+           white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .subcell { font:400 11px var(--font); color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .subnum { font:400 11px var(--font); font-variant-numeric:tabular-nums; color:var(--muted); }
+  .subflag {
+    font:600 8px var(--font); letter-spacing:.09em; text-transform:uppercase;
+    padding:2px 5px; border:1px solid var(--acc); border-radius:3px; color:var(--acc); white-space:nowrap;
+  }
+  @media (max-width:900px) {
+    .subgrid { grid-template-columns:1fr 1fr 96px; }
+    .subgrid > div:nth-child(4), .subgrid > div:nth-child(5) { display:none; }
+  }
+</style>
+</head>
+<body>
+
+<div class="lightbox" id="lightbox" hidden>
+  <button class="lbside" id="lbBack" aria-label="Previous">&#8249;</button>
+  <button class="lbside" id="lbFwd" aria-label="Next">&#8250;</button>
+  <div class="lbframe" id="lbFrame"><img id="lbImg" alt=""></div>
+  <div class="lbmeta" id="lbMeta"></div>
+  <div class="lbbar">
+    <button class="btn btn-ghost" id="lbPrev">Previous</button>
+    <button class="btn btn-ghost" id="lbPagePrev" hidden>Page &#8249;</button>
+    <span class="lbmeta" id="lbPage" hidden></span>
+    <button class="btn btn-ghost" id="lbPageNext" hidden>Page &#8250;</button>
+    <button class="btn btn-ghost" id="lbRotate" hidden>Rotate</button>
+    <button class="btn btn-ghost" id="lbZoom">Zoom to fill</button>
+    <a class="btn" id="lbDownload" download>Download</a>
+    <a class="btn btn-ghost" id="lbTab" target="_blank" rel="noopener">Open in a new tab</a>
+    <button class="btn btn-ghost" id="lbNext">Next</button>
+    <button class="btn btn-ghost" id="lbClose">Close</button>
+  </div>
+</div>
+
+<div class="bar">
+  <div class="brand"><div class="mark">ES</div><div class="word">Easy Shop</div></div>
+  <div class="vr"></div>
+  <div class="co" id="coName">—</div>
+  <div id="nav"></div>
+  <div class="spacer"></div>
+  <a href="/platform.html" id="platformLink" hidden style="font:400 11px var(--font);color:var(--dim)">Platform</a>
+  <div id="bell"></div>
+  <div class="who" id="who">—</div>
+  <button class="ghostbtn" id="signout">Sign out</button>
+</div>
+<div class="hairline"></div>
+
+<div class="filters">
+  <div class="segctl">
+    <button id="vTable" class="sel">Table</button>
+    <button id="vCycle">Cycle</button>
+  </div>
+  <input type="search" id="fSearch" aria-label="Search repair orders" placeholder="Search RO #, VIN, plate, colour, name…">
+  <select id="fStatus"></select>
+  <select id="fGroup"><option value="">All stages</option></select>
+  <select id="fTech"><option value="">Everyone</option></select>
+  <label class="row" style="font:400 11.5px var(--font);color:var(--muted);gap:5px">
+    <input type="checkbox" id="fDone"> Complete
+  </label>
+  <label class="row" style="font:400 11.5px var(--font);color:var(--muted);gap:5px">
+    <input type="checkbox" id="fClosed"> Closed
+  </label>
+  <div style="position:relative">
+    <button class="btn btn-ghost" id="colBtn">Columns ▾</button>
+    <div class="colpanel" id="colPanel" hidden></div>
+  </div>
+  <div class="spacer"></div>
+  <button class="btn btn-ghost" id="fPrint">Print list</button>
+  <a class="btn btn-ghost" href="/import.html" id="importLink" hidden>Import EMS</a>
+  <button class="btn" id="newRo">+ New RO</button>
+</div>
+
+<div class="printhead" id="printHead" aria-hidden="true">
+  <div class="phshop" id="phShop">—</div>
+  <div class="phwhat" id="phWhat">—</div>
+</div>
+
+<div class="kpis" id="kpis"></div>
+
+<main>
+  <div class="tablewrap" id="tableView">
+    <div class="gridhead" id="gridHead"></div>
+    <div id="gridBody"></div>
+    <div class="cards" id="cards"></div>
+    <div class="empty" id="empty" hidden></div>
+  </div>
+  <div class="cyclewrap" id="cycleView" hidden>
+    <div class="legend" id="legend"></div>
+    <div class="cyclehead">
+      <div>Vehicle</div><div>Current status</div><div id="progHead">Progression</div>
+      <div>Days</div><div style="text-align:right">Variance</div><div class="writein"></div>
+    </div>
+    <div id="cycleBody"></div>
+    <div id="subletBlock"></div>
+  </div>
+</main>
+
+<div class="scrim" id="scrim"></div>
+
+<div class="guard" id="guard" hidden>
+  <div class="guardcard">
+    <div class="guardtitle">You have unsaved changes on this file</div>
+    <div class="guardbody" id="guardList"></div>
+    <div class="guardrow">
+      <button class="btn btn-solid" id="gSave">Save and close</button>
+      <button class="btn btn-ghost" id="gKeep">Keep editing</button>
+      <button class="btn btn-danger" id="gDiscard">Discard changes</button>
+    </div>
+    <div class="msg" id="gMsg"></div>
+  </div>
+</div>
+
+<div class="modal" id="drawer" role="dialog" aria-modal="true" aria-labelledby="dRo" hidden>
+  <div class="mhead">
+    <div class="pip" id="dPip" style="background:var(--acc);color:var(--bg)">00</div>
+    <div style="font:500 15px var(--font);font-variant-numeric:tabular-nums" id="dRo">—</div>
+    <div style="font:400 13px var(--font);color:var(--muted)" id="dVeh"></div>
+    <div id="dStatus"></div>
+    <div class="sub" id="dSub" style="margin-left:14px"></div>
+    <div class="spacer"></div>
+    <a class="btn" id="dParts" href="/parts.html">Open parts for this RO</a>
+    <button class="btn btn-ghost" id="dDocs">Documents</button>
+    <button class="close" id="dClose" aria-label="Close">&times;</button>
+  </div>
+  <div class="mbody">
+    <div class="mcol" id="dLeft"></div>
+    <div class="mcol mright" id="dRight"></div>
+  </div>
+</div>
+
+<!-- The close-out sheet. Owner and accounting only; for anyone else the file
+     closes without one, and the figures never leave the server. -->
+<div class="coscrim" id="coScrim" hidden></div>
+<div class="cosheet" id="coSheet" hidden role="dialog" aria-modal="true" aria-label="Close-out">
+  <div class="cohead">
+    <div>
+      <div class="cot" id="coTitle">Closing</div>
+      <div class="cos" id="coSub">—</div>
+    </div>
+    <button class="close" id="coX" aria-label="Cancel">&times;</button>
+  </div>
+  <div class="cobody" id="coBody"></div>
+  <div class="cofoot">
+    <div class="msg" id="coMsg"></div>
+    <div class="spacer"></div>
+    <button class="btn" id="coCancel">Cancel</button>
+    <button class="btn btn-solid" id="coDo">Close the file</button>
+  </div>
+</div>
+
+<script src="/photos.js?v=5"></script>
+<script src="/shell.js?v=8"></script>
+<script>
+(function () {
+  var api = Shell.api, esc = Shell.esc;
+  var ME = null, CFG = null, FILES = [], STATUSES = [], GROUPS = [], LANES = [], STAFF = [];
+  var DOCTYPES = [], OPEN = null, VIEW = 'table', MEDIA = [], LBAT = 0, LBPAGE = 1;
+  /* What had focus before a dialog opened, so it can be given back. */
+  var RETURN_TO = null;
+  var SUBLET_STATES = ['scheduled', 'out', 'returned', 'invoiced'];
+  /* Alphabetical, with the shop's own loaner last — it is not a rental company. */
+  var RENTAL_PROVIDERS = ['Avis', 'Budget', 'Enterprise', 'Hertz', 'Loaner'];
+  /* The close-out sheet's working state while it is open. */
+  var CO = null;
+  var SUBLET_SERVICES = ['ADAS calibration', 'Windshield / glass', 'Alignment', 'Mechanical', 'Other'];
+  var VENDOR_NAMES = [];
+  /* Set while the browser is producing a printout, so the sheet can leave off
+     what a paper list does not need. */
+  var PRINTING = false;
+  var SORT = { key: 'days', dir: 'desc' };
+
+  var STORE = 'es_board_cols';
+
+  /* Columns: `on` is the default, `lock` cannot be hidden, `money` needs access. */
+  var COLUMNS = [
+    { k: 'ro',       t: 'RO #',                w: 104, on: true, lock: true },
+    { k: 'vehicle',  t: 'Vehicle',             w: 232, on: true, lock: true },
+    { k: 'owner',    t: 'Owner',               w: 158, on: true },
+    { k: 'insurance',t: 'Insurance',           w: 172, on: true },
+    { k: 'desk',     t: 'Desk',                w: 52,  on: true },
+    { k: 'assigned', t: 'Assigned',            w: 140, on: false },
+    { k: 'lane',     t: 'Lane',                w: 104, on: false },
+    { k: 'vin',      t: 'VIN',                 w: 158, on: false },
+    { k: 'parts',    t: 'Parts',               w: 66,  on: false, num: true },
+    { k: 'hours',    t: 'Hours',               w: 76,  on: true, num: true },
+    { k: 'amount',   t: 'Amount',              w: 108, on: true, num: true, money: true },
+    { k: 'days',     t: 'Days',                w: 96,  on: true },
+    { k: 'promised', t: 'Promised',            w: 88,  on: false },
+    { k: 'status',   t: 'Status / last update', w: 260, on: true, lock: true, flex: true }
+  ];
+
+  /**
+   * Which lanes each position owns — the same map the server enforces with, in
+   * permissions.ts. It decides what a technician's pipeline is: pick a painter
+   * and the list is prep, paint and buff, not the whole shop.
+   */
+  var POSITION_LANES = {
+    pdr: ['pdr'],
+    body: ['body'],
+    paint: ['prep', 'paint', 'buff'],
+    ri: ['reassembly'],
+    detail: ['detail']
+  };
+
+  /** A car nobody can start. PDR alone is a complete file — a hail car pulled by
+      one tech needs nobody else. Once body or paint is on it, the car wants both:
+      body and PDR still needs a painter, PDR and paint still needs a body tech. */
+  var TRADE_LANES = ['pdr', 'body', 'paint', 'ri'];
+  function needsTech(f) {
+    var a = f.assigned || {};
+    if (!TRADE_LANES.some(function (k) { return !!a[k]; })) return true;
+    if (!a.body && !a.paint) return false;
+    return !a.body || !a.paint;
+  }
+
+  function $(id) { return document.getElementById(id); }
+  function money(c) {
+    if (c == null) return '—';
+    return '$' + (c / 100).toLocaleString('en-US',
+      { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+  /** Dollars in, cents out. The desk types dollars; the server stores cents. */
+  function toCents(v) {
+    var n = parseFloat(String(v).replace(/[^0-9.\-]/g, ''));
+    return isNaN(n) ? 0 : Math.round(n * 100);
+  }
+  /** Cents as a bare number for an input — no symbol, no thousands separator. */
+  function dollars(c) {
+    return ((Number(c) || 0) / 100).toFixed(2);
+  }
+  /** Today in the browser's own day, for the close-date default. */  function isoToday() {
+    var d = new Date(), p = function (n) { return String(n).padStart(2, '0'); };
+    return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
+  }
+  function money0(c) {
+    if (c == null) return '—';
+    return '$' + Math.round(c / 100).toLocaleString('en-US');
+  }
+  function when(iso) {
+    if (!iso) return '—';
+    var d = new Date(iso);
+    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + ' ' +
+           d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+  }
+  function shortDate(v) {
+    return v ? new Date(v).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '—';
+  }
+  var AGE = { ok: 'var(--done)', yellow: 'var(--blocked)', red: 'var(--stopped)' };
+  /* Colour was the only thing saying a file is late, and late files are the
+     board's whole point — a red-green colourblind writer could not see them.
+     A word rides along with the colour everywhere the age is shown. */
+  var AGE_WORD = { ok: '', yellow: ' due', red: ' late' };
+  var KIND = { milestone: 'var(--move)', queue: 'var(--blocked)', active: 'var(--acc)', complete: 'var(--done)' };
+
+  /* --------------------------------------------------------------- column state */
+
+  function loadCols() {
+    var saved = null;
+    try { saved = JSON.parse(localStorage.getItem(STORE) || 'null'); } catch (e) { saved = null; }
+    COLUMNS.forEach(function (c) {
+      if (saved && saved[c.k]) {
+        if (typeof saved[c.k].on === 'boolean') c.on = saved[c.k].on;
+        if (saved[c.k].w > 40) c.w = saved[c.k].w;
+      }
+      if (c.lock) c.on = true;
+    });
+    if (saved && saved.__sort) SORT = saved.__sort;
+    if (saved && saved.__view) VIEW = saved.__view;
+  }
+
+  function saveCols() {
+    var out = { __sort: SORT, __view: VIEW };
+    COLUMNS.forEach(function (c) { out[c.k] = { on: c.on, w: c.w }; });
+    try { localStorage.setItem(STORE, JSON.stringify(out)); } catch (e) { /* private mode */ }
+  }
+
+  function activeCols() {
+    return COLUMNS.filter(function (c) {
+      if (c.money && !ME.caps.money) return false;
+      return c.on;
+    });
+  }
+
+  /* ------------------------------------------------------------------- boot */
+
+  api('/api/me').then(function (me) {
+    ME = me;
+    if (!me.company) {
+      if (me.isPlatformOwner) { location.href = '/platform.html'; return null; }
+      document.body.innerHTML = '<div class="empty">Your account is not attached to a shop.</div>';
+      return null;
+    }
+    loadCols();
+    Shell.mount({ me: me, active: 'board' });
+    if (me.features.indexOf('ems') >= 0 && me.caps.acceptImports) $('importLink').hidden = false;
+    return Promise.all([
+      api('/api/config'),
+      api('/api/doc-types').catch(function () { return { types: [] }; }),
+      api('/api/sublet-services').catch(function () { return { services: [] }; }),
+      api('/api/vendors').catch(function () { return { vendors: [] }; })
+    ]);
+  }).then(function (r) {
+    if (!r) return;
+    CFG = r[0]; STATUSES = CFG.statuses; GROUPS = CFG.groups; LANES = CFG.lanes;
+    STAFF = CFG.staff || []; DOCTYPES = r[1].types;
+    if (r[2].services && r[2].services.length) SUBLET_SERVICES = r[2].services;
+    /* Sublet vendors are typed, not picked — but the shop's own list is what
+       they are usually typing, so it fills the suggestions. */
+    VENDOR_NAMES = (r[3].vendors || []).map(function (v) { return v.name; });
+
+    CFG.groups.forEach(function (g) {
+      var o = document.createElement('option');
+      o.value = g.group_id; o.textContent = g.label;
+      $('fGroup').appendChild(o);
+    });
+    $('fStatus').innerHTML = '';
+    fillStatusFilter('');
+    fillTechFilter();
+    renderColPanel();
+    syncView();
+    return load();
+  }).then(function () {
+    var deep = new URLSearchParams(location.search).get('ro');
+    if (deep) openRo(Number(deep));
+  }).catch(function (e) {
+    if (e.message === 'signed out') return;
+    console.error(e);
+    // A blank board and a broken board look the same, so say which it is.
+    var em = $('empty');
+    if (em) {
+      em.innerHTML = 'The board could not load.<br>' +
+        '<span class="sub">' + esc(e.message) + '</span><br><br>' +
+        'If this is right after a deploy, the database is probably a migration behind — ' +
+        'run <code>npm run build &amp;&amp; npm run migrate</code> on the server.';
+      em.hidden = false;
+    }
+  });
+
+  /**
+   * Everyone, one technician, or the files that still need one. Grouped by
+   * position so the list reads as the shop is organised.
+   */
+  /** Every trade a person works. staff_positions is the truth; the old single
+      column is the fallback for a database that has not migrated yet. */
+  function tradesOf(st) {
+    if (st.position_keys && st.position_keys.length) return st.position_keys;
+    return st.position_key ? [st.position_key] : [];
+  }
+
+  function fillTechFilter() {
+    var s = $('fTech');
+    var byPos = {};
+    STAFF.forEach(function (st) {
+      tradesOf(st).forEach(function (k) {
+        if (!POSITION_LANES[k]) return;
+        (byPos[k] = byPos[k] || []).push(st);
+      });
+    });
+
+    var labels = { pdr: 'PDR', body: 'Body', paint: 'Paint', ri: 'R&I', detail: 'Detail' };
+
+    s.innerHTML = '<option value="">Everyone</option>' +
+      '<option value="none">Needs a tech</option>' +
+      Object.keys(POSITION_LANES).filter(function (k) { return byPos[k]; }).map(function (k) {
+        return '<optgroup label="' + esc(labels[k] || k) + '">' +
+          byPos[k].map(function (st) {
+            return '<option value="u' + st.user_id + ':' + k + '">' + esc(st.display_name) + '</option>';
+          }).join('') + '</optgroup>';
+      }).join('');
+
+    // A technician's own board opens on their own work — their listed trade.
+    var myTrades = (ME.positionKeys && ME.positionKeys.length)
+      ? ME.positionKeys
+      : (ME.positionKey ? [ME.positionKey] : []);
+    var myLane = myTrades.filter(function (k) { return POSITION_LANES[k]; })[0];
+    if (myLane) {
+      var mine = 'u' + ME.user.id + ':' + myLane;
+      if (s.querySelector('option[value="' + mine + '"]')) s.value = mine;
+    }
+  }
+
+  /** The picked technician, as { userId, position, lanes } — or null. */
+  /**
+   * Sublets needed — every live sublet line in the shop, under the lanes. The
+   * lane says where the car is; this says what is owed and to whom, so the desk
+   * can work the list without opening ten files. Reads the same lines the file's
+   * sublet block edits; invoiced lines drop off.
+   */
+  var SUBLETS = null;
+
+  function loadSublets() {
+    return api('/api/sublets').then(function (d) {
+      SUBLETS = d;
+      if (VIEW === 'cycle') renderSublets();
+    }).catch(function (e) {
+      if (e.message !== 'signed out') SUBLETS = { rows: [] };
+    });
+  }
+
+  var SUB_TONE = {
+    scheduled: 'var(--blocked)', out: 'var(--move)', returned: 'var(--done)'
+  };
+  var SUB_WORD = { scheduled: 'To send', out: 'At sublet', returned: 'Back' };
+
+  function renderSublets() {
+    var el = $('subletBlock');
+    if (!el) return;
+    if (!SUBLETS) { el.innerHTML = ''; return; }
+
+    var rows = SUBLETS.rows || [];
+    if (!rows.length) {
+      el.innerHTML = '<div class="subhead"><div class="subttl">Sublets needed</div>' +
+        '<div class="subnote">Nothing out and nothing waiting to go.</div></div>';
+      return;
+    }
+
+    var meta = [];
+    if (SUBLETS.needed) {
+      meta.push('<span style="color:var(--acc)">' + SUBLETS.needed + ' to send' +
+        (SUBLETS.noVendor ? ' · ' + SUBLETS.noVendor + ' with no vendor named' : '') + '</span>');
+    }
+    if (SUBLETS.out) meta.push('<span>' + SUBLETS.out + ' out</span>');
+
+    el.innerHTML =
+      '<div class="subhead">' +
+        '<div class="subttl">Sublets needed</div>' +
+        '<div class="subnote">' + rows.length + (rows.length === 1 ? ' line' : ' lines') + '</div>' +
+        '<div class="submeta">' + meta.join('') + '</div>' +
+      '</div>' +
+      '<div class="subgrid subghead"><div>Vehicle</div><div>Service · vendor</div>' +
+        '<div>State</div><div>Out · back</div><div style="text-align:right">Cost</div></div>' +
+      rows.map(function (s) {
+        var tone = SUB_TONE[s.state] || 'var(--dim)';
+        return '<div class="subgrid subrow' + (s.state === 'scheduled' ? ' needed' : '') +
+            '" data-ro="' + s.ro_id + '">' +
+          '<div style="min-width:0"><div class="subveh">' + esc(s.vehicle || '—') + '</div>' +
+            '<div class="subro">' + esc(s.ro_number) +
+            (s.status_label ? ' · ' + esc(s.status_label) : '') + '</div></div>' +
+          '<div class="subcell"><span style="color:var(--text)">' + esc(s.service) + '</span> ' +
+            esc(s.vendor || 'Vendor TBD') +
+            (s.vendor ? '' : ' <span class="subflag">name one</span>') + '</div>' +
+          '<div class="row" style="gap:8px;align-items:center">' +
+            '<div style="width:3px;height:18px;border-radius:1px;background:' + tone + '"></div>' +
+            '<span style="font:400 11px var(--font);color:' + tone + '">' +
+            (SUB_WORD[s.state] || s.state) + '</span></div>' +
+          '<div class="subnum">' + (s.out_at ? String(s.out_at).slice(5, 10) : '—') + ' · ' +
+            (s.back_at ? String(s.back_at).slice(5, 10) : '—') + '</div>' +
+          '<div class="subnum" style="text-align:right">' +
+            (s.cost_cents === undefined ? '—' : money(s.cost_cents)) + '</div>' +
+        '</div>';
+      }).join('');
+
+    Array.prototype.forEach.call(el.querySelectorAll('.subrow'), function (rowEl) {
+      rowEl.addEventListener('click', function () {
+        openRo(Number(rowEl.getAttribute('data-ro')));
+      });
+    });
+  }
+
+  function pickedTech() {
+    var v = $('fTech').value;
+    if (!v || v === 'none') return null;
+    var bits = v.slice(1).split(':');
+    return { userId: Number(bits[0]), position: bits[1], lanes: POSITION_LANES[bits[1]] || [] };
+  }
+
+  /** Statuses at Vehicle Ready or past it.
+
+     statuses.sort_order restarts at 1 in every group, so it only orders slots
+     within their own group — never across the board. Comparing it shop-wide put
+     Awaiting Approval and Working Paint in the Complete filter, because they sit
+     late in their own groups. Board position is the pair (group order, slot
+     order), which is what has to be compared. */
+  function boardPos(s) {
+    var gi = GROUPS.map(function (g) { return g.group_id; }).indexOf(s.group_id);
+    return (gi < 0 ? 999 : gi) * 1000 + Number(s.sort_order || 0);
+  }
+
+  function completeSlots() {
+    var ready = STATUSES.filter(function (s) { return /vehicle ready/i.test(s.label || ''); })[0];
+    /* No status named Vehicle Ready — a shop may have renamed it. Fall back to
+       the Ready group's last complete slot, then to kind alone. */
+    if (!ready) {
+      ready = STATUSES.filter(function (s) {
+        return s.group_id === 'ready' && s.kind === 'complete';
+      }).pop();
+    }
+    if (!ready) {
+      return STATUSES.filter(function (s) { return s.kind === 'complete'; })
+        .map(function (s) { return s.slot_id; });
+    }
+    var from = boardPos(ready);
+    return STATUSES.filter(function (s) { return boardPos(s) >= from; })
+      .map(function (s) { return s.slot_id; });
+  }
+
+  /** The Vehicle Ready slot itself. The car is finished but still here, so it
+     stays on the board and gets its own heading. */
+  function readySlot() {
+    var ready = STATUSES.filter(function (s) { return /vehicle ready/i.test(s.label || ''); })[0];
+    if (!ready) {
+      ready = STATUSES.filter(function (s) {
+        return s.group_id === 'ready' && s.kind === 'complete';
+      }).pop();
+    }
+    return ready || null;
+  }
+
+  /** The close itself rather than the delivery: a status a shop has marked
+     terminal, or one that says so in its name. Neither depends on where the
+     status sits on the board — a shop that groups its close statuses out of the
+     obvious order still gets them off the open board. A complete-kind status is
+     only treated as the close when it also sits past Vehicle Ready, because
+     complete is used mid-run too (Body Complete is not a closed file).
+
+     Picked Up, Payment Collected and Paperwork Verified are not here: the car is
+     gone but the file is still the shop's, so it keeps a place on the board. */
+  function closingSlots() {
+    var ready = readySlot();
+    var from = ready ? boardPos(ready) : Infinity;
+    return STATUSES.filter(function (s) {
+      if (Number(s.is_terminal) || /clos(e|ed|ing)/i.test(s.label || '')) return true;
+      return boardPos(s) > from && s.kind === 'complete';
+    }).map(function (s) { return s.slot_id; });
+  }
+
+  /** Picked up or gone, still open: past Vehicle Ready and not a closing slot. */
+  function deliveredSlots() {
+    var ready = readySlot();
+    if (!ready) return [];
+    var from = boardPos(ready);
+    var closing = closingSlots();
+    return STATUSES.filter(function (s) {
+      return boardPos(s) > from && closing.indexOf(s.slot_id) < 0;
+    }).map(function (s) { return s.slot_id; });
+  }
+
+  function fillStatusFilter(groupId) {
+    var s = $('fStatus');
+    s.innerHTML = '<option value="">All statuses (' + STATUSES.length + ')</option>';
+    STATUSES.filter(function (st) { return !groupId || st.group_id === groupId; })
+      .forEach(function (st) {
+        var o = document.createElement('option');
+        o.value = st.slot_id; o.textContent = st.label;
+        s.appendChild(o);
+      });
+  }
+
+  function load() {
+    loadSublets();
+    var closed = $('fClosed').checked ? '?closed=1' : '';
+    return Promise.all([api('/api/board' + closed), api('/api/board/summary')])
+      .then(function (r) {
+        FILES = r[0].files;
+        SERVER_SUMMARY = r[1];
+        render();
+      });
+  }
+
+  var SUMMARY = null;
+  /* The whole-shop figures. Kept because they carry whether this person may see
+     money at all; the strip itself is drawn from the filtered rows. */
+  var SERVER_SUMMARY = null;
+
+  function renderKpis(s) {
+    SUMMARY = s;
+    var cells = [{ v: s.inList, k: 'In list' }];
+    if (s.severityCents != null) cells.push({ v: money0(s.severityCents), k: 'Severity' });
+    cells.push(
+      { v: s.laborHours.toFixed(1), k: 'Labour hrs' },
+      { v: s.avgDays + 'd', k: 'Avg days' },
+      { v: s.onHold, k: 'On hold', tone: s.onHold ? 'var(--stopped)' : '' },
+      { v: s.stalled, k: 'Stalled > 4d', tone: s.stalled ? 'var(--blocked)' : '' },
+      { v: s.pastTarget, k: 'Past target', tone: s.pastTarget ? 'var(--stopped)' : '' }
+    );
+
+    $('kpis').innerHTML = cells.map(function (i) {
+      return '<div><div class="kpi-v"' + (i.tone ? ' style="color:' + i.tone + '"' : '') + '>' +
+        esc(i.v) + '</div><div class="kpi-k">' + esc(i.k) + '</div></div>';
+    }).join('') +
+    '<div class="kpi-tail"><div class="sub" id="sortNote"></div>' +
+    '<button class="btn" id="flipSort">Flip order</button></div>';
+
+    $('sortNote').textContent = sortNote();
+    $('flipSort').addEventListener('click', function () {
+      SORT.dir = SORT.dir === 'asc' ? 'desc' : 'asc';
+      saveCols();
+      render();
+      $('sortNote').textContent = sortNote();
+    });
+  }
+
+  function sortNote() {
+    var col = COLUMNS.filter(function (c) { return c.k === SORT.key; })[0];
+    var name = col ? col.t.toLowerCase() : SORT.key;
+    if (SORT.key === 'days') {
+      return SORT.dir === 'desc'
+        ? 'Longest in shop first · newest at the bottom'
+        : 'Newest first · longest in shop at the bottom';
+    }
+    return name + ' · ' + (SORT.dir === 'asc' ? 'ascending' : 'descending');
+  }
+
+  /* ---------------------------------------------------------------- filtering */
+
+  function filtered() {
+    var g = $('fGroup').value, st = $('fStatus').value, q = $('fSearch').value.trim().toLowerCase();
+    var tech = pickedTech();
+    var wantNone = $('fTech').value === 'none';
+    var done = $('fDone').checked ? completeSlots() : null;
+    /* A tech's printed list is a work list: a car at Vehicle Ready or gone is
+       nothing for them to do, so it stays off the sheet. On screen it is still
+       there — this only applies while printing. */
+    var drop = (PRINTING && tech && !$('fDone').checked) ? completeSlots() : null;
+
+    /* The close is off the board unless the Closed checkbox asks for it, or the
+       status filter names one of those statuses outright. Vehicle Ready and the
+       delivered statuses are not hidden — the car is finished or gone, but the
+       file is still open work. */
+    var past = closingSlots();
+    var asked = $('fClosed').checked || (st && past.indexOf(st) >= 0);
+    var hide = asked ? null : past;
+
+    var out = FILES.filter(function (f) {
+      if (g && f.group !== g) return false;
+      if (st && f.statusSlot !== st) return false;
+      if (done && done.indexOf(f.statusSlot) < 0) return false;
+      if (hide && hide.indexOf(f.statusSlot) >= 0) return false;
+      /* A closed file, however it got here. The server filters these out, but an
+         older build sends them and the board should not show them regardless. */
+      if (!asked && f.closeDate) return false;
+      if (drop && drop.indexOf(f.statusSlot) >= 0) return false;
+      if (wantNone && !needsTech(f)) return false;
+      if (tech) {
+        var ids = f.assignedIds || {};
+        var mine = Object.keys(ids).some(function (k) {
+          return String(ids[k]) === String(tech.userId);
+        });
+        if (!mine) return false;
+      }
+      /* Everything a person would type to find a car. Colour matters more than it
+         looks: on the phone a dealer says "the silver Telluride", never the RO. */
+      if (q && [f.ro, f.customer, f.vehicle, f.color, f.vin, f.plate, f.insurer, f.claimNumber]
+        .filter(Boolean).join(' ').toLowerCase().indexOf(q) < 0) return false;
+      return true;
+    });
+
+    var dir = SORT.dir === 'asc' ? 1 : -1;
+    var key = SORT.key;
+    out.sort(function (a, b) {
+      var av, bv;
+      switch (key) {
+        case 'ro': av = String(a.ro); bv = String(b.ro); break;
+        case 'customer': av = a.customer || ''; bv = b.customer || ''; break;
+        case 'vehicle': av = a.vehicle || ''; bv = b.vehicle || ''; break;
+        case 'status': av = a.status || ''; bv = b.status || ''; break;
+        case 'lane': av = a.lane || ''; bv = b.lane || ''; break;
+        case 'insurer': av = a.insurer || ''; bv = b.insurer || ''; break;
+        case 'promised': av = a.promisedAt || '9999'; bv = b.promisedAt || '9999'; break;
+        case 'opened': av = a.openedAt; bv = b.openedAt; break;
+        case 'amount': return (Number(a.amount_cents || 0) - Number(b.amount_cents || 0)) * dir;
+        case 'hours': return (a.laborHours - b.laborHours) * dir;
+        case 'parts': return (a.partsWaiting - b.partsWaiting) * dir;
+        case 'target': return ((a.targetDays || 0) - (b.targetDays || 0)) * dir;
+        default: return (a.daysInShop - b.daysInShop) * dir;
+      }
+      return String(av).localeCompare(String(bv)) * dir;
+    });
+    return out;
+  }
+
+  /* -------------------------------------------------------------- table view */
+
+  function gridTemplate() {
+    var cols = activeCols();
+    return '2px ' + cols.map(function (c) {
+      return c.flex ? 'minmax(170px,1fr)' : c.w + 'px';
+    }).join(' ') + (cols.some(function (c) { return c.flex; }) ? '' : ' 1fr');
+  }
+
+  function buildHead() {
+    var head = $('gridHead');
+    head.style.gridTemplateColumns = gridTemplate();
+    head.style.setProperty('--printcols', gridTemplate() + ' 1.7in');
+    head.innerHTML = '<div></div>' + activeCols().map(function (c) {
+      var arrow = SORT.key === c.k
+        ? '<span class="harrow">' + (SORT.dir === 'asc' ? '\u2191' : '\u2193') + '</span>' : '';
+      return '<div' + (c.num ? ' style="text-align:right"' : '') + '>' +
+        '<span class="hlabel" data-sort="' + c.k + '">' + esc(c.t) + arrow + '</span>' +
+        '<span class="hgrip" data-grip="' + c.k + '"></span></div>';
+    }).join('') + '<div class="writein"></div>';
+
+    Array.prototype.forEach.call(head.querySelectorAll('[data-sort]'), function (el) {
+      el.addEventListener('click', function () {
+        var k = el.dataset.sort;
+        if (SORT.key === k) SORT.dir = SORT.dir === 'asc' ? 'desc' : 'asc';
+        else { SORT.key = k; SORT.dir = (k === 'days' || k === 'amount' || k === 'hours') ? 'desc' : 'asc'; }
+        saveCols();
+        render();
+      });
+    });
+
+    Array.prototype.forEach.call(head.querySelectorAll('[data-grip]'), function (grip) {
+      grip.addEventListener('mousedown', function (e) { startResize(e, grip.dataset.grip, e.clientX); });
+      grip.addEventListener('touchstart', function (e) {
+        startResize(e, grip.dataset.grip, e.touches[0].clientX);
+      }, { passive: false });
+    });
+  }
+
+  function startResize(e, key, startX) {
+    e.preventDefault();
+    e.stopPropagation();
+    var col = COLUMNS.filter(function (c) { return c.k === key; })[0];
+    var startW = col.w;
+
+    function move(ev) {
+      var x = ev.touches ? ev.touches[0].clientX : ev.clientX;
+      col.w = Math.max(52, Math.round(startW + (x - startX)));
+      var t = gridTemplate();
+      $('gridHead').style.gridTemplateColumns = t;
+      Array.prototype.forEach.call(document.querySelectorAll('.gridrow'), function (r) {
+        r.style.gridTemplateColumns = t;
+      });
+    }
+    function up() {
+      document.removeEventListener('mousemove', move);
+      document.removeEventListener('mouseup', up);
+      document.removeEventListener('touchmove', move);
+      document.removeEventListener('touchend', up);
+      saveCols();
+    }
+    document.addEventListener('mousemove', move);
+    document.addEventListener('mouseup', up);
+    document.addEventListener('touchmove', move, { passive: false });
+    document.addEventListener('touchend', up);
+  }
+
+  /** MM-DD-YY, the way the shop writes dates on a file. */
+  function shopDate(v) {
+    if (!v) return '';
+    var d = new Date(v);
+    var p = function (n) { return String(n).padStart(2, '0'); };
+    return p(d.getMonth() + 1) + '-' + p(d.getDate()) + '-' + String(d.getFullYear()).slice(2);
+  }
+
+  function initials(name) {
+    if (!name) return '';
+    return String(name).split(/\s+/).map(function (w) { return w[0]; }).join('').slice(0, 2).toUpperCase();
+  }
+
+  /** The sequence pip: which status group the file is in, 01-nn. */
+  /** The row's colour: its status kind, or red once it is stalled or held. */
+  function tone(f) {
+    if (f.onHold) return 'var(--stopped)';
+    return KIND[f.kind] || 'var(--acc)';
+  }
+
+  function groupNumber(f) {
+    var i = GROUPS.map(function (g) { return g.group_id; }).indexOf(f.group);
+    return i < 0 ? '—' : String(i + 1).padStart(2, '0');
+  }
+
+  function flagsFor(f) {
+    var out = '';
+    /* A totalled car is not a repair any more. It says so first, before hold or
+       parts — nothing else on the row matters as much. */
+    if (f.totalLoss) out += '<span class="flag tlflag" title="' +
+      esc(f.totalLossNote || 'Marked a total loss') + '">Total loss</span>';
+    if (f.onHold) out += '<span class="flag" style="color:var(--stopped);border:1px solid var(--stopped)" ' +
+      'title="' + esc(f.holdReason || 'On hold') + '">Hold</span>';
+    if (f.partsWaiting) out += '<span class="flag" style="color:var(--blocked);border:1px solid var(--blocked)" ' +
+      'title="' + f.partsWaiting + ' gating part' + (f.partsWaiting === 1 ? '' : 's') + ' outstanding">Parts</span>';
+    if (f.supplementsOpen) out += '<span class="flag" style="color:var(--move);border:1px solid var(--move)" ' +
+      'title="Supplement open">Supp</span>';
+    if (f.roType === 'wholesale') out += '<span class="flag" style="color:var(--dim);border:1px solid var(--line)">WS</span>';
+    if (needsTech(f) && !f.totalLoss) out += '<span class="flag" style="color:var(--acc);border:1px solid var(--acc)" ' +
+      'title="Nobody is on this file, or it has body or paint work with the other trade missing">Needs tech</span>';
+
+    // A file that has not moved in days says so, in its own right.
+    var days = Math.floor(Number(f.hoursInStatus || 0) / 24);
+    if (days > 4 && !f.partsWaiting && !f.totalLoss) {
+      var tone = days > 9 ? 'var(--stopped)' : 'var(--blocked)';
+      out += '<span class="flag" style="color:' + tone + ';border:1px solid ' + tone +
+        '" title="No status change in ' + days + ' days">' + days + 'd in status</span>';
+    }
+    return out;
+  }
+
+  function laneLabel(key) {
+    if (!key) return '';
+    var l = LANES.filter(function (x) { return x.lane_key === key; })[0];
+    return l ? l.label : key;
+  }
+
+  function daysCell(f) {
+    var over = f.targetDays != null && f.daysInShop > f.targetDays;
+    var pct = f.targetDays ? Math.min(100, Math.round((f.daysInShop / f.targetDays) * 100)) : 0;
+    return '<div><div style="display:flex;align-items:baseline;gap:4px">' +
+      '<span style="font:500 15px/1 var(--font);font-variant-numeric:tabular-nums;color:' +
+      (over ? 'var(--stopped)' : 'var(--text)') + '">' + f.daysInShop + '</span>' +
+      '<span class="cellsub" style="margin:0">' + (f.targetDays ? 'of ' + f.targetDays : '') + '</span></div>' +
+      '<div class="track"><div class="trackfill" style="width:' + pct + '%;background:' +
+      (over ? 'var(--stopped)' : 'var(--acc)') + '"></div></div></div>';
+  }
+
+  function cellFor(c, f) {
+    switch (c.k) {
+      case 'ro':
+        return '<div><div style="display:flex;align-items:center;gap:6px">' +
+          '<span class="pip" style="color:var(--bg);background:' + tone(f) + '">' + groupNumber(f) + '</span>' +
+          '<span style="font:500 12px var(--font);font-variant-numeric:tabular-nums">' + esc(f.ro) + '</span></div>' +
+          '<div class="cellsub">in ' + shopDate(f.openedAt) + '</div></div>';
+
+      case 'vehicle':
+        return '<div style="min-width:0"><div class="cellmain" title="' + esc(f.vehicle || '') + '">' +
+          esc(f.vehicle || '—') + '</div><div class="cellsub">' +
+          esc([f.vin ? '…' + String(f.vin).slice(-8) : 'NO VIN',
+               f.plate ? (f.plateState ? f.plateState + ' ' : '') + f.plate : null,
+               f.color].filter(Boolean).join(' · ')) + '</div></div>';
+
+      case 'owner':
+        return '<div style="min-width:0"><div class="cellmain" style="color:var(--muted)">' +
+          esc(f.customer || '—') + '</div><div class="cellsub">' +
+          esc(f.phone || '—') + '</div></div>';
+
+      case 'insurance': {
+        var self = !f.insurer;
+        return '<div style="min-width:0"><div class="cellmain"' +
+          (self ? ' style="color:var(--dim)"' : '') + '>' +
+          esc(f.insurer || 'Customer Pay') + '</div><div class="cellsub">' +
+          esc(f.claimNumber || '—') + '</div></div>';
+      }
+
+      case 'desk': {
+        var who = (f.assigned && (f.assigned.sales || f.assigned.est)) || f.statusBy;
+        return '<div><span style="display:grid;place-items:center;width:24px;height:20px;border-radius:4px;' +
+          'background:var(--chip);font:500 9.5px var(--font);color:var(--muted)">' +
+          esc(initials(who) || '—') + '</span></div>';
+      }
+
+      case 'assigned': {
+        var names = Object.keys(f.assigned || {}).map(function (k) { return f.assigned[k]; }).filter(Boolean);
+        return '<div class="cellmain">' + esc(names.join(', ') || '—') + '</div>';
+      }
+
+      case 'lane': return '<div class="cellmain">' + esc(laneLabel(f.lane) || '—') + '</div>';
+
+      case 'vin': return '<div class="cellsub" style="margin:0">' + esc(f.vin || '—') + '</div>';
+
+      case 'parts': return '<div class="cellnum"' + (f.partsWaiting ? ' style="color:var(--blocked)"' : '') +
+        '>' + (f.partsWaiting || '—') + '</div>';
+
+      case 'hours': return '<div class="cellnum"' + (f.laborHours ? '' : ' style="color:var(--dim)"') +
+        '>' + (f.laborHours ? f.laborHours.toFixed(1) : '·') + '</div>';
+
+      case 'amount': return '<div class="cellnum">' +
+        (f.amount_cents === undefined ? '<span style="color:var(--dim)">••••</span>' : money(f.amount_cents)) +
+        '</div>';
+
+      case 'days': return daysCell(f);
+
+      case 'promised': return '<div class="cellmain">' + (f.promisedAt ? shopDate(f.promisedAt) : '—') + '</div>';
+
+      case 'status':
+        return '<div style="min-width:0"><div style="display:flex;align-items:center;gap:6px;min-width:0">' +
+          '<span style="font:400 11.5px var(--font);color:' + tone(f) +
+          ';white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' +
+          esc(f.status || 'No status') + '</span>' + flagsFor(f) + '</div>' +
+          '<div class="cellsub">as of ' + shopDate(f.statusSince || f.openedAt) +
+          (f.statusBy ? ' · ' + esc(f.statusBy) : '') + '</div></div>';
+
+      default: return '';
+    }
+  }
+
+  function renderTable(rows) {
+    var cols = activeCols();
+    var t = gridTemplate();
+    buildHead();
+
+    $('gridBody').innerHTML = rows.map(function (f) {
+      var edge = tone(f);
+      return '<div class="gridrow' + (f.totalLoss ? ' tlrow' : '') + '" data-id="' + f.id + '" style="grid-template-columns:' + t +
+        ';--printcols:' + t + ' 1.7in">' +
+        '<div><div class="edge" style="background:' + edge + '"></div></div>' +
+        cols.map(function (c) { return cellFor(c, f); }).join('') +
+        '<div class="writein"></div></div>';
+    }).join('') +
+    '<div class="tailrow"><div>' + rows.length + ' of ' + FILES.length + ' files</div></div>';
+
+    // The KPI band is off on a phone; the numbers that matter ride here, stuck
+    // to the top of the list.
+    var sum = SUMMARY ? '<div class="cardsum"><span><b>' + rows.length + '</b> shown</span>' +
+      '<span><b>' + SUMMARY.onHold + '</b> on hold</span>' +
+      '<span><b>' + SUMMARY.pastTarget + '</b> past target</span>' +
+      '<span><b>' + SUMMARY.avgDays + 'd</b> average</span></div>' : '';
+
+    $('cards').innerHTML = sum + rows.map(function (f) {
+      return '<button class="card" data-id="' + f.id + '">' +
+        '<div class="cardtop"><div class="cardro">' + esc(f.ro) + '</div>' +
+        '<div class="carddays" style="color:' + AGE[f.age] + '">' + f.daysInShop + 'd' +
+        (f.targetDays ? ' of ' + f.targetDays : '') + AGE_WORD[f.age] + '</div></div>' +
+        '<div class="cardveh">' + esc(f.vehicle || '—') +
+        (f.color ? ' · ' + esc(f.color) : '') + '</div>' +
+        '<div class="sub">' + esc([f.customer, f.insurer].filter(Boolean).join(' · ') || '') + '</div>' +
+        '<div class="cardline"><span style="font:500 12px var(--font);color:' + tone(f) + '">' +
+        esc(f.status || 'No status') + '</span>' +
+        flagsFor(f) + '</div></button>';
+    }).join('');
+
+    bindRows();
+  }
+
+  /* -------------------------------------------------------------- cycle view */
+
+  /**
+   * The progression strip: one segment per status group, in board order.
+   * Filled means the file has reached or passed that group; the current one is
+   * the accent; anything past it is track. That is the whole point of the
+   * cycle view — where a car is in the run, at a glance.
+   */
+  function progressionFor(f) {
+    var order = GROUPS.map(function (g) { return g.group_id; });
+    var at = order.indexOf(f.group);
+    return order.map(function (gid, i) {
+      var tone = i < at ? 'var(--done)' : i === at ? 'var(--acc)' : 'var(--whisper)';
+      var g = GROUPS.filter(function (x) { return x.group_id === gid; })[0];
+      return { tone: tone, title: (g ? g.label : gid) + (i === at ? ' — here now' : '') };
+    });
+  }
+
+  function renderCycle(rows) {
+    $('progHead').textContent = 'Progression 01–' + String(GROUPS.length).padStart(2, '0');
+
+    $('legend').innerHTML = [
+      { t: 'Done', c: 'var(--done)' },
+      { t: 'Here now', c: 'var(--acc)' },
+      { t: 'To come', c: 'var(--whisper)' },
+      { t: 'Past target', c: 'var(--stopped)' }
+    ].map(function (l) {
+      return '<div class="legitem"><div class="legswatch" style="background:' + l.c + '"></div>' +
+        esc(l.t) + '</div>';
+    }).join('') + '<div class="legitem" style="margin-left:auto">' + rows.length + ' files</div>';
+
+    // Group by lane, unlaned last, in lane order. With a technician picked the
+    // lanes they own come first and the rest follow — every lane keeps its own
+    // heading, so a printed list still reads by category.
+    var tech = pickedTech();
+    var buckets = {};
+    /* Ready and delivered cars have no production lane, and reading them as
+       “not in a production lane” hid what they actually are. They get their own
+       headings: Ready is still here to collect, Delivered is gone but open. */
+    var ready = readySlot();
+    var readyGroup = ready ? ready.group_id : null;
+    var delivered = deliveredSlots();
+    rows.forEach(function (f) {
+      var key = f.lane || '__none';
+      if (f.totalLoss) { (buckets[key] = buckets[key] || []).push(f); return; }
+      if (f.closeDate) key = '__closed';
+      else if (delivered.indexOf(f.statusSlot) >= 0) key = '__delivered';
+      else if (readyGroup && f.group === readyGroup) key = '__ready';
+      (buckets[key] = buckets[key] || []).push(f);
+    });
+
+    var order = LANES.map(function (l) { return l.lane_key; }).filter(function (k) { return buckets[k]; });
+    if (tech) {
+      order.sort(function (a, c) {
+        return (tech.lanes.indexOf(a) < 0 ? 1 : 0) - (tech.lanes.indexOf(c) < 0 ? 1 : 0);
+      });
+    }
+    if (buckets.__none) order.push('__none');
+    /* End of the run, in the order a car actually leaves. */
+    if (buckets.__ready) order.push('__ready');
+    if (buckets.__delivered) order.push('__delivered');
+    if (buckets.__closed) order.push('__closed');
+    /* Total loss is lane 00 and always first — it is not in the statuses table, so
+       it never comes through LANES, and a technician filter never reorders it. */
+    if (buckets.total_loss) order.unshift('total_loss');
+
+    if (!order.length) {
+      $('cycleBody').innerHTML = '<div class="empty">Nothing to show.</div>';
+      renderSublets();
+      return;
+    }
+
+    var n = 0;
+    $('cycleBody').innerHTML = order.map(function (key) {
+      var list = buckets[key];
+      var tl = key === 'total_loss';
+      var label = key === '__none' ? 'Not in a production lane'
+        : key === '__ready' ? 'Ready'
+        : key === '__delivered' ? 'Delivered'
+        : key === '__closed' ? 'Closed'
+        : (tl ? 'Total loss' : laneLabel(key));
+      var late = list.filter(function (f) { return variance(f) > 0; }).length;
+      /* A lane this tech does not own — their car has moved on. Said once on the
+         heading rather than by merging the lanes together. */
+      var moved = tech && key.charAt(0) !== '_' && !tl && tech.lanes.indexOf(key) < 0;
+      if (!tl) n++;
+
+      return '<div><div class="lanehead' + (tl ? ' tlhead' : '') + '">' +
+        '<div class="lanen">' + (tl ? '00' : String(n).padStart(2, '0')) + '</div>' +
+        '<div class="lanename">' + esc(label) + '</div>' +
+        '<div class="sub">' + list.length + '</div>' +
+        (moved ? '<div class="sub">moved on</div>' : '') +
+        '<div class="sub" style="margin-left:auto">' +
+        (tl ? 'off the technicians’ lists' : (late ? late + ' past target' : 'all inside target')) +
+        '</div></div>' +
+        list.map(cycleRow).join('') +
+        /* A phone cannot read a six-column row, so each lane also carries cards.
+           `.cards` is hidden above the mobile breakpoint, so only one of the two
+           is ever on screen. */
+        '<div class="cards">' + list.map(cycleCard).join('') + '</div>' +
+        '</div>';
+    }).join('');
+
+    bindRows();
+  }
+
+  function variance(f) {
+    if (f.targetDays == null) return null;
+    return f.daysInShop - f.targetDays;
+  }
+
+  /**
+   * The same file as a card, for a phone. It keeps the progression strip and the
+   * variance, because those are what the cycle view is for — the rest of the row
+   * is columns a phone has no width for.
+   */
+  function cycleCard(f) {
+    var segs = progressionFor(f);
+    var v = variance(f);
+    var over = v != null && v > 0;
+
+    return '<button class="card" data-id="' + f.id + '">' +
+      '<div class="cardtop"><div class="cardro">' + esc(f.ro) + '</div>' +
+      '<div class="carddays" style="color:' + AGE[f.age] + '">' + f.daysInShop + 'd' +
+      (f.targetDays ? ' of ' + f.targetDays : '') + AGE_WORD[f.age] + '</div></div>' +
+      '<div class="cardveh">' + esc(f.vehicle || '—') +
+      (f.color ? ' · ' + esc(f.color) : '') + '</div>' +
+      '<div class="sub">' + esc([f.customer, f.insurer].filter(Boolean).join(' · ') || '') + '</div>' +
+      '<div class="progress" style="margin-top:9px">' + segs.map(function (s) {
+        return '<div class="pseg" style="background:' + s.tone + '" title="' + esc(s.title) + '"></div>';
+      }).join('') + '</div>' +
+      '<div class="cardline"><span style="font:500 12px var(--font);color:' + tone(f) + '">' +
+      esc(f.status || 'No status') + '</span>' +
+      (v == null
+        ? ''
+        : '<span style="font:500 11px var(--font);font-variant-numeric:tabular-nums;color:' +
+          (over ? 'var(--stopped)' : 'var(--done)') + '">' +
+          (v > 0 ? '+' : '') + v + 'd</span>') +
+      flagsFor(f) + '</div></button>';
+  }
+
+  function cycleRow(f) {
+    var segs = progressionFor(f);
+    var v = variance(f);
+    var pct = f.targetDays ? Math.min(100, Math.round((f.daysInShop / f.targetDays) * 100)) : 0;
+    var over = v != null && v > 0;
+
+    return '<div class="cyclerow' + (f.totalLoss ? ' tlrow' : '') + '" data-id="' + f.id + '">' +
+      '<div style="min-width:0">' +
+      '<div class="cell" title="' + esc(f.vehicle || '') + '">' + esc(f.vehicle || '—') +
+      (f.color ? ' <span style="color:var(--dim)">· ' + esc(f.color) + '</span>' : '') + '</div>' +
+      '<div class="sub">' + esc(f.ro) + (f.customer ? ' · ' + esc(f.customer) : '') + '</div></div>' +
+
+      '<div style="min-width:0"><div class="row" style="gap:6px">' +
+      '<span class="pill"><span class="dot" style="background:' + (KIND[f.kind] || 'var(--dim)') +
+      '"></span>' + esc(f.status || 'No status') + '</span>' + flagsFor(f) + '</div>' +
+      '<div class="sub">' + esc([f.insurer, laneLabel(f.lane)].filter(Boolean).join(' · ') || '') + '</div></div>' +
+
+      '<div class="progress">' + segs.map(function (s) {
+        return '<div class="pseg" style="background:' + s.tone + '" title="' + esc(s.title) + '"></div>';
+      }).join('') + '</div>' +
+
+      '<div><div class="row" style="gap:4px;align-items:baseline">' +
+      '<span style="font:500 13px var(--font);font-variant-numeric:tabular-nums;color:' + AGE[f.age] + '">' +
+      f.daysInShop + '</span>' +
+      '<span class="sub">' + (f.targetDays ? '/ ' + f.targetDays : '') +
+      (AGE_WORD[f.age] ? '<span class="sr-only">' + AGE_WORD[f.age] + '</span>' : '') +
+      '</span></div>' +
+      '<div class="track"><div class="trackfill" style="width:' + pct + '%;background:' +
+      (over ? 'var(--stopped)' : 'var(--acc)') + '"></div></div></div>' +
+
+      '<div class="num" style="font:500 12px var(--font);color:' +
+      (v == null ? 'var(--dim)' : over ? 'var(--stopped)' : 'var(--done)') + '">' +
+      (v == null ? '—' : (v > 0 ? '+' : '') + v + 'd') + '</div>' +
+      '<div class="writein"></div></div>';
+  }
+
+  function bindRows() {
+    Array.prototype.forEach.call(document.querySelectorAll('[data-id]'), function (el) {
+      if (el.dataset.bound) return;
+      el.dataset.bound = '1';
+      el.addEventListener('click', function () { openRo(Number(el.dataset.id)); });
+    });
+  }
+
+  /* ------------------------------------------------------------------ render */
+
+  function render() {
+    var rows = filtered();
+    /* The strip describes what is on screen, not what is in the shop — filter to
+       a body tech and every number is that tech's. */
+    renderKpis(summarise(rows));
+
+    if (!rows.length) {
+      $('gridBody').innerHTML = '';
+      $('cards').innerHTML = '';
+      $('cycleBody').innerHTML = '';
+      $('empty').hidden = false;
+      syncPrintHead(0);
+      $('empty').innerHTML = FILES.length ? 'Nothing matches those filters.'
+        : 'No repair orders yet.<br>Use <strong>New RO</strong> or <strong>Check-in</strong>.';
+      return;
+    }
+    $('empty').hidden = true;
+
+    syncPrintHead(rows.length);
+    if (VIEW === 'table') renderTable(rows);
+    else renderCycle(rows);
+  }
+
+  /**
+   * The KPI strip, worked out from the rows actually showing. The server's
+   * whole-shop summary is kept only for the money capability it carries —
+   * severity stays hidden from anyone who may not see money.
+   */
+  function summarise(rows) {
+    var money = SERVER_SUMMARY ? SERVER_SUMMARY.severityCents != null : false;
+    var hold = 0, stalled = 0, past = 0, hours = 0, cents = 0, days = 0, dayed = 0;
+    var today = new Date(); today.setHours(0, 0, 0, 0);
+
+    rows.forEach(function (f) {
+      if (f.onHold) hold++;
+      /* Same definitions the server uses, so a filtered number means the same
+         thing as the unfiltered one: 96 hours in status, promised date past. */
+      if (Number(f.hoursInStatus || 0) >= 96) stalled++;
+      if (f.promisedAt && new Date(f.promisedAt) < today) past++;
+      hours += Number(f.laborHours || 0);
+      cents += Number(f.amount_cents || 0);
+      if (f.daysInShop != null) { days += Number(f.daysInShop); dayed++; }
+    });
+
+    return {
+      inList: rows.length,
+      severityCents: money ? cents : null,
+      laborHours: hours,
+      avgDays: dayed ? (days / dayed).toFixed(1) : '0.0',
+      onHold: hold,
+      stalled: stalled,
+      pastTarget: past
+    };
+  }
+
+  /**
+   * What the sheet says it is. Written on every render so printing from the
+   * browser's own menu says the same thing as the button.
+   */
+  function describeFilter(n) {
+    var bits = [];
+    var st = $('fStatus');
+    if (st.value) bits.push(st.options[st.selectedIndex].textContent);
+    var g = $('fGroup');
+    if (g.value) bits.push(g.options[g.selectedIndex].textContent);
+
+    var t = $('fTech');
+    if (t.value === 'none') bits.push('needing a tech');
+    else if (t.value) bits.push('assigned to ' + t.options[t.selectedIndex].textContent);
+
+    if ($('fDone').checked) bits.push('complete');
+    if ($('fClosed').checked) bits.push('closed files');
+    /* Say what the sheet left off, so nobody reads it as the whole picture.
+       Delivered cars are off by default now, and a tech's sheet drops Vehicle
+       Ready as well. */
+    if (!$('fClosed').checked && !st.value) {
+      bits.push(PRINTING && t.value && t.value !== 'none'
+        ? 'finished cars left off'
+        : 'closed-out files left off');
+    }
+    var q = $('fSearch').value.trim();
+    if (q) bits.push('matching “' + q + '”');
+
+    return n + ' file' + (n === 1 ? '' : 's') +
+      (bits.length ? ' · ' + bits.join(' · ') : ' · everything on the board') +
+      ' · ' + (VIEW === 'cycle' ? 'cycle view' : 'table view');
+  }
+
+  function syncPrintHead(n) {
+    $('phShop').textContent = (ME.company ? ME.company.name : 'Easy Shop') + ' — repair orders';
+    $('phWhat').textContent = describeFilter(n) + ' · printed ' +
+      new Date().toLocaleDateString('en-US',
+        { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' }) + ' ' +
+      new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+  }
+
+  function syncView() {
+    $('vTable').className = VIEW === 'table' ? 'sel' : '';
+    $('vCycle').className = VIEW === 'cycle' ? 'sel' : '';
+    $('tableView').hidden = VIEW !== 'table';
+    $('cycleView').hidden = VIEW !== 'cycle';
+    $('colBtn').hidden = VIEW !== 'table';
+  }
+
+  /* ------------------------------------------------------------ column panel */
+
+  function renderColPanel() {
+    var p = $('colPanel');
+    p.innerHTML = '<div class="colhead">Columns</div>' +
+      COLUMNS.filter(function (c) { return !c.money || ME.caps.money; }).map(function (c) {
+        return '<label class="colrow' + (c.lock ? ' locked' : '') + '">' +
+          '<input type="checkbox" data-col="' + c.k + '"' + (c.on ? ' checked' : '') +
+          (c.lock ? ' disabled' : '') + '>' +
+          '<span>' + esc(c.t) + '</span>' +
+          (c.lock ? '<span class="sub" style="margin-left:auto">always</span>' : '') + '</label>';
+      }).join('') +
+      '<div class="colrow" style="border-top:1px solid var(--whisper);margin-top:4px">' +
+      '<button class="btn btn-ghost" id="colReset" style="width:100%;padding:5px">Reset to defaults</button></div>';
+
+    Array.prototype.forEach.call(p.querySelectorAll('[data-col]'), function (cb) {
+      cb.addEventListener('change', function () {
+        var c = COLUMNS.filter(function (x) { return x.k === cb.dataset.col; })[0];
+        c.on = cb.checked;
+        saveCols();
+        render();
+      });
+    });
+
+    $('colReset').addEventListener('click', function () {
+      try { localStorage.removeItem(STORE); } catch (e) { /* ignore */ }
+      location.reload();
+    });
+  }
+
+  /* ---------------------------------------------------------------- drawer */
+
+  function openRo(id) {
+    OPEN = id;
+    /* aria-hidden="false" on a visible dialog is a no-op that reads as a fix.
+       The drawer is genuinely hidden until it opens, focus moves into it, and
+       focus goes back to whatever opened it on close. */
+    RETURN_TO = document.activeElement;
+    $('scrim').classList.add('open');
+    $('drawer').hidden = false;
+    $('drawer').classList.add('open');
+    window.setTimeout(function () {
+      var close = $('dClose');
+      if (close) close.focus({ preventScroll: true });
+    }, 0);
+    Shell.announce('Repair order open.');
+    $('dLeft').innerHTML = '<div class="empty">Loading…</div>';
+    $('dRight').innerHTML = '';
+
+    api('/api/ro/' + id).then(renderDrawer).catch(function (e) {
+      $('dLeft').innerHTML = '<div class="empty">' + esc(e.message) + '</div>';
+    });
+  }
+
+  /**
+   * What is unsaved in the modal right now. Returned as plain sentences so the
+   * guard can tell the user what they are about to lose rather than just
+   * warning them abstractly.
+   */
+  function pending() {
+    var out = [];
+    if (!OPEN) return out;
+
+    var st = $('newStatus'), note = $('newNote');
+    if (st && st.value) out.push('a status change to “' + st.options[st.selectedIndex].textContent + '”');
+    if (note && note.value.trim()) out.push('a note you have typed');
+
+    var dates = Array.prototype.slice.call(document.querySelectorAll('[data-date]'))
+      .filter(function (el) { return el.value !== el.dataset.was; });
+    if (dates.length) out.push(dates.length + ' date change' + (dates.length === 1 ? '' : 's'));
+
+    var edits = Array.prototype.slice.call(document.querySelectorAll('[data-edit]'))
+      .filter(function (el) { return el.value !== el.dataset.was; });
+    if (edits.length) out.push(edits.length + ' edit' + (edits.length === 1 ? '' : 's') +
+      ' to the customer, vehicle or insurance');
+
+    ['m_amount', 'm_deduct', 'm_hours'].forEach(function (id) {
+      var el = $(id);
+      if (el && el.value !== el.dataset.was) out.push('an edit to ' +
+        (id === 'm_amount' ? 'the amount' : id === 'm_deduct' ? 'the deductible' : 'labour hours'));
+    });
+
+    var assigns = Array.prototype.slice.call(document.querySelectorAll('[data-assign]'))
+      .filter(function (el) { return el.value !== el.dataset.was; });
+    if (assigns.length) out.push(assigns.length + ' assignment change' +
+      (assigns.length === 1 ? '' : 's'));
+
+    var promise = $('promiseText');
+    if (promise && promise.value.trim()) out.push('a promise you have typed');
+    var part = $('pDesc');
+    if (part && part.value.trim()) out.push('a part you have typed');
+
+    return out;
+  }
+
+  /** Run every pending save in order, so one failure stops the rest. */
+  function saveAll() {
+    var jobs = [];
+
+    var st = $('newStatus'), note = $('newNote');
+    if (st && (st.value || (note && note.value.trim()))) {
+      jobs.push(function () {
+        return api('/api/ro/' + OPEN + '/status', {
+          method: 'POST',
+          body: JSON.stringify({
+            slot: st.value || undefined,
+            note: note && note.value.trim() ? note.value.trim() : undefined
+          })
+        });
+      });
+    }
+
+    var dateBody = {}, dateN = 0;
+    Array.prototype.forEach.call(document.querySelectorAll('[data-date]'), function (el) {
+      if (el.value === el.dataset.was) return;
+      dateBody[el.dataset.date] = el.value || null;
+      dateN++;
+    });
+    if (dateN) jobs.push(function () {
+      return api('/api/ro/' + OPEN + '/dates', { method: 'PATCH', body: JSON.stringify(dateBody) });
+    });
+
+    var detailBody = {}, detailN = 0;
+    Array.prototype.forEach.call(document.querySelectorAll('[data-edit]'), function (el) {
+      if (el.value === el.dataset.was) return;
+      detailBody[el.dataset.edit] = el.value.trim() === '' ? null : el.value.trim();
+      detailN++;
+    });
+    if (detailN) jobs.push(function () {
+      return api('/api/ro/' + OPEN + '/details', {
+        method: 'PATCH', body: JSON.stringify(detailBody)
+      });
+    });
+
+    var moneyBody = {}, moneyN = 0;
+    var a = $('m_amount'), dd = $('m_deduct'), hr = $('m_hours');
+    if (a && a.value !== a.dataset.was) { moneyBody.amountCents = Math.round(Number(a.value || 0) * 100); moneyN++; }
+    if (dd && dd.value !== dd.dataset.was) { moneyBody.deductibleCents = Math.round(Number(dd.value || 0) * 100); moneyN++; }
+    if (hr && hr.value !== hr.dataset.was) { moneyBody.laborHours = Number(hr.value || 0); moneyN++; }
+    if (moneyN) jobs.push(function () {
+      return api('/api/ro/' + OPEN + '/money', { method: 'PATCH', body: JSON.stringify(moneyBody) });
+    });
+
+    Array.prototype.forEach.call(document.querySelectorAll('[data-assign]'), function (sel) {
+      if (sel.value === sel.dataset.was) return;
+      var name = sel.value ? sel.options[sel.selectedIndex].textContent : null;
+      jobs.push(function () {
+        return api('/api/ro/' + OPEN + '/assign/' + sel.dataset.assign, {
+          method: 'PUT',
+          body: JSON.stringify({ userId: sel.value ? Number(sel.value) : null, displayName: name })
+        });
+      });
+    });
+
+    var promise = $('promiseText');
+    if (promise && promise.value.trim()) {
+      jobs.push(function () {
+        return api('/api/ro/' + OPEN + '/promises', {
+          method: 'POST', body: JSON.stringify({ body: promise.value.trim() })
+        });
+      });
+    }
+
+    var part = $('pDesc');
+    if (part && part.value.trim()) {
+      jobs.push(function () {
+        var body = { description: part.value.trim(), qty: Number($('pQty').value) || 1 };
+        if ($('pPrice') && $('pPrice').value) body.priceCents = Math.round(Number($('pPrice').value) * 100);
+        if ($('pCost') && $('pCost').value) body.costCents = Math.round(Number($('pCost').value) * 100);
+        return api('/api/ro/' + OPEN + '/parts', { method: 'POST', body: JSON.stringify(body) });
+      });
+    }
+
+    return jobs.reduce(function (chain, job) {
+      return chain.then(job);
+    }, Promise.resolve());
+  }
+
+  /** Closing with edits in flight asks first. */
+  function tryCloseRo() {
+    var list = pending();
+    if (!list.length) return closeRo();
+
+    $('guardList').innerHTML = 'Closing now loses:<ul>' +
+      list.map(function (t) { return '<li>' + esc(t) + '</li>'; }).join('') + '</ul>';
+    $('gMsg').className = 'msg';
+    $('guard').hidden = false;
+  }
+
+  function closeRo() {
+    $('guard').hidden = true;
+    OPEN = null;
+    $('scrim').classList.remove('open');
+    $('drawer').classList.remove('open');
+    $('drawer').hidden = true;
+    if (RETURN_TO && RETURN_TO.isConnected) RETURN_TO.focus({ preventScroll: true });
+    RETURN_TO = null;
+    /* Opened off a parts line: go back to the parts list with that file still open. */
+    var qs = new URLSearchParams(location.search);
+    if (qs.get('back') === 'parts' && qs.get('ro')) {
+      location.href = '/parts.html?open=' + qs.get('ro');
+      return;
+    }
+    if (qs.get('ro')) history.replaceState(null, '', '/board.html');
+  }
+
+  function field(l, v) {
+    return '<div><div class="f-l">' + esc(l) + '</div><div class="f-v">' +
+      esc(v == null || v === '' ? '—' : v) + '</div></div>';
+  }
+  function dateValue(v) {
+    if (!v) return '';
+    var d = new Date(v);
+    if (isNaN(d.getTime())) return '';
+    return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+  }
+  function dateField(key, label, value) {
+    return '<div><label class="fl" for="d_' + key + '">' + esc(label) + '</label>' +
+      '<input type="date" id="d_' + key + '" data-date="' + key + '" ' +
+      'data-was="' + dateValue(value) + '" value="' + dateValue(value) + '" style="width:100%"></div>';
+  }
+
+  var POSITIONS = [
+    { k: 'sales', t: 'Salesperson' }, { k: 'pdr', t: 'PDR tech' }, { k: 'body', t: 'Body tech' },
+    { k: 'paint', t: 'Paint tech' }, { k: 'ri', t: 'R&I tech' }, { k: 'detail', t: 'Detail tech' }
+  ];
+
+  var VOID_REASONS = ['Duplicate', 'Opened by mistake', 'Customer never showed'];
+
+  function statusOptions(sel) {
+    return GROUPS.map(function (g) {
+      var o = STATUSES.filter(function (st) { return st.group_id === g.group_id; })
+        .map(function (st) {
+          return '<option value="' + esc(st.slot_id) + '"' +
+            (sel === st.slot_id ? ' selected' : '') + '>' + esc(st.label) + '</option>';
+        }).join('');
+      return o ? '<optgroup label="' + esc(g.label) + '">' + o + '</optgroup>' : '';
+    }).join('');
+  }
+
+  function f2(label, value, num) {
+    return '<div><div class="fl2">' + esc(label) + '</div>' +
+      '<div class="fv2' + (num ? ' num' : '') + '">' +
+      esc(value == null || value === '' ? '—' : value) + '</div></div>';
+  }
+
+  /** An editable field in one of the drawer's fact blocks. */
+  function ef(key, label, value, opts) {
+    opts = opts || {};
+    var v = value == null ? '' : String(value);
+    return '<div><label class="fl2" for="e_' + key + '">' + esc(label) + '</label>' +
+      '<input type="' + (opts.type || 'text') + '" id="e_' + key + '" data-edit="' + key + '" ' +
+      (opts.list ? 'list="' + opts.list + '" ' : '') +
+      (opts.placeholder ? 'placeholder="' + esc(opts.placeholder) + '" ' : '') +
+      'data-was="' + esc(v) + '" value="' + esc(v) + '" style="width:100%"></div>';
+  }
+
+  function esel(key, label, value, options) {
+    return '<div><label class="fl2" for="e_' + key + '">' + esc(label) + '</label>' +
+      '<select id="e_' + key + '" data-edit="' + key + '" data-was="' + esc(value || '') +
+      '" style="width:100%">' +
+      options.map(function (o) {
+        return '<option value="' + esc(o[0]) + '"' + (o[0] === value ? ' selected' : '') +
+          '>' + esc(o[1]) + '</option>';
+      }).join('') + '</select></div>';
+  }
+
+  /**
+   * Blocks used to carry their own Save. They do not any more: everything in
+   * the modal is written when it closes, through the same guard that already
+   * listed what was unsaved. The line each block used to explain itself with
+   * stays — it is the part people actually read.
+   */
+  function saveRow(id, hint) {
+    return '<div class="savehint">' + esc(hint) + '</div>';
+  }
+
+  function renderDrawer(d) {
+    var r = d.ro;
+
+    /* ---- header ---- */
+    $('dPip').textContent = groupNumber({ group: r.group_id });
+    $('dPip').style.background = KIND[r.status_kind] || 'var(--acc)';
+    $('dRo').textContent = r.ro_number;
+    $('dVeh').textContent = [r.year, r.make, r.model].filter(Boolean).join(' ');
+    $('dStatus').innerHTML = '<span class="btn btn-ghost" style="cursor:default;color:' +
+      (KIND[r.status_kind] || 'var(--acc)') + ';border-color:' +
+      (KIND[r.status_kind] || 'var(--acc)') + '">' + esc(r.status_label || 'No status') + '</span>';
+    $('dSub').textContent = daysIn(r) + ' days in shop' +
+      (r.target_days ? ' · target ' + r.target_days : '') +
+      (Number(r.voided_days) ? ' · ' + r.voided_days + ' voided' : '');
+    // Room for the sentence on a desk, not on a phone.
+    var tight = window.matchMedia('(max-width:820px)').matches;
+    $('dParts').textContent = tight ? 'Parts' : 'Open parts for this RO';
+    $('dDocs').textContent = tight
+      ? 'Docs ' + d.documents.length
+      : 'Documents ' + d.documents.length + ' file' + (d.documents.length === 1 ? '' : 's');
+    $('dParts').hidden = ME.features.indexOf('parts') < 0;
+
+    /* ---- left column: the file itself ---- */
+    var L = [];
+
+    if (r.voided_at) {
+      var v0 = (d.voids || [])[0] || {};
+      L.push('<div class="log" style="border-color:var(--stopped);margin-bottom:14px">' +
+        '<div class="row" style="gap:7px;align-items:baseline">' +
+        '<span class="flag" style="color:var(--stopped);border:1px solid var(--stopped)">voided</span>' +
+        '<span style="font:400 11px var(--font);color:var(--muted)">' +
+        esc(v0.reason || 'No reason recorded') + '</span>' +
+        '<span class="log-m" style="margin:0 0 0 auto">' + when(r.voided_at) + '</span></div>' +
+        '<div class="log-b" style="margin-top:4px;color:var(--muted)">Was RO ' +
+        esc(v0.ro_number || r.ro_number) + ', that number is free to reuse. ' +
+        (v0.voided_by_name ? 'Voided by ' + esc(v0.voided_by_name) + '. ' : '') +
+        (Number(v0.parts_flagged) ? v0.parts_flagged + ' ordered part line' +
+          (Number(v0.parts_flagged) === 1 ? '' : 's') + ' flagged for return. ' : '') +
+        'The cycle clock is stopped.</div>' +
+        (v0.note ? '<div class="log-b" style="margin-top:4px">' + esc(v0.note) + '</div>' : '') +
+        '</div>');
+    }
+
+    var canEdit = ME.caps.editRepairOrders && !r.voided_at;
+
+    L.push('<div class="sec">Customer</div>');
+    if (canEdit) {
+      L.push('<div class="fieldset">' +
+        ef('customerName', 'Name', r.customer_name) +
+        ef('customerPhone', 'Phone', r.customer_phone, { type: 'tel' }) +
+        ef('customerEmail', 'Email', r.customer_email, { type: 'email' }) +
+        '</div>' + saveRow('cust', 'Edits the client record, not just this file.'));
+    } else {
+      L.push('<div class="fieldset">' +
+        f2('Name', r.customer_name) + f2('Phone', r.customer_phone, 1) +
+        f2('Email', r.customer_email) + '</div>');
+    }
+
+    L.push('<div class="sec">Vehicle</div>');
+    if (canEdit) {
+      L.push('<div class="fieldset">' +
+        ef('year', 'Year', r.year, { type: 'number' }) +
+        ef('make', 'Make', r.make) +
+        ef('model', 'Model', r.model) +
+        ef('color', 'Colour', r.color) +
+        ef('vin', 'VIN', r.vin) +
+        ef('plate', 'Plate', r.plate) +
+        ef('plateState', 'Plate state', r.plate_state, { placeholder: 'TX' }) +
+        ef('mileage', 'Mileage', r.mileage, { type: 'number' }) +
+        '</div>' + saveRow('veh', 'Blank clears a value. Every change is logged.'));
+    } else {
+      L.push('<div class="fieldset">' +
+        f2('Year', r.year, 1) + f2('Make', r.make) + f2('Model', r.model) +
+        f2('Colour', r.color) + f2('VIN', r.vin, 1) +
+        f2('Plate', r.plate ? (r.plate_state ? r.plate_state + ' ' : '') + r.plate : null, 1) +
+        f2('Mileage', r.mileage ? Number(r.mileage).toLocaleString('en-US') : null, 1) +
+        '</div>');
+    }
+
+    L.push('<div class="sec">Insurance and loss</div>');
+    if (canEdit) {
+      L.push('<datalist id="insurerList">' +
+        (d.insurers || []).map(function (i) {
+          return '<option value="' + esc(i.name) + '"></option>';
+        }).join('') + '</datalist>');
+      L.push('<div class="fieldset">' +
+        ef('insurer', 'Carrier', r.insurer_name, { list: 'insurerList' }) +
+        ef('claimNumber', 'Claim number', r.claim_number) +
+        ef('policyNumber', 'Policy number', r.policy_number) +
+        ef('dateOfLoss', 'Date of loss', dateValue(r.date_of_loss), { type: 'date' }) +
+        ef('adjuster', 'Adjuster', r.adjuster) +
+        esel('roType', 'Type', r.ro_type, [
+          ['repair', 'Repair'], ['wholesale', 'Wholesale'], ['warranty', 'Warranty']]) +
+        '</div>' + saveRow('ins', 'A carrier not on the list is added when you save.'));
+    } else {
+      L.push('<div class="fieldset">' +
+        f2('Carrier', r.insurer_name) + f2('Claim number', r.claim_number, 1) +
+        f2('Policy number', r.policy_number, 1) +
+        f2('Date of loss', r.date_of_loss ? shopDate(r.date_of_loss) : null, 1) +
+        f2('Adjuster', r.adjuster) + f2('Type', r.ro_type) + '</div>');
+    }
+
+    L.push('<div class="sec">Targets and cycle</div>');
+    if (ME.caps.editRepairOrders) {
+      L.push('<div class="fieldset">' +
+        dateField('openedAt', 'Date in', r.opened_at) +
+        dateField('promisedAt', 'Promised delivery', r.promised_at) +
+        dateField('deliveredAt', 'Date completed', r.delivered_at) +
+        dateField('closedAt', 'Date picked up', r.closed_at) +
+        f2('Days in shop', daysIn(r), 1) +
+        f2('Variance', r.target_days ? (daysIn(r) - r.target_days > 0 ? '+' : '') +
+          (daysIn(r) - r.target_days) + 'd' : '—', 1) +
+        '</div><div class="savehint">Blank clears a date. Every change is logged.</div>');
+    } else {
+      L.push('<div class="fieldset">' +
+        f2('Date in', r.opened_at ? shopDate(r.opened_at) : null, 1) +
+        f2('Promised', r.promised_at ? shopDate(r.promised_at) : null, 1) +
+        f2('Completed', r.delivered_at ? shopDate(r.delivered_at) : null, 1) +
+        f2('Picked up', r.closed_at ? shopDate(r.closed_at) : null, 1) +
+        f2('Days in shop', daysIn(r), 1) + '</div>');
+    }
+
+    if (ME.caps.money) {
+      L.push('<div class="sec">Money</div>');
+      L.push('<div class="fieldset">' +
+        '<div><div class="fl2">Approval amount</div>' +
+        '<input type="number" step="0.01" min="0" id="m_amount" style="width:100%" value="' +
+        ((r.amount_cents || 0) / 100).toFixed(2) + '" data-was="' +
+        ((r.amount_cents || 0) / 100).toFixed(2) + '"></div>' +
+        '<div><div class="fl2">Deductible</div>' +
+        '<input type="number" step="0.01" min="0" id="m_deduct" style="width:100%" value="' +
+        ((r.deductible_cents || 0) / 100).toFixed(2) + '" data-was="' +
+        ((r.deductible_cents || 0) / 100).toFixed(2) + '"></div>' +
+        '<div><div class="fl2">Labour hours</div>' +
+        '<input type="number" step="0.1" min="0" id="m_hours" style="width:100%" value="' +
+        (Number(r.labor_hours) || 0) + '" data-was="' + (Number(r.labor_hours) || 0) + '"></div>' +
+        f2('Parts cost', money(r.parts_cost_cents), 1) +
+        f2('Sublet', money(r.sublet_cost_cents), 1) +
+        f2('Deductible status', Number(r.deductible_waived) ? 'Waived by shop' : 'Customer pays') +
+        '</div><div class="savehint">Wholesale work is priced here.</div>');
+    }
+
+    /* Assigned */
+    var openings = POSITIONS.filter(function (p) {
+      return !(d.assigned || {})[p.k];
+    }).length;
+    L.push('<div class="sec">Assigned <span class="sub" style="text-transform:none;letter-spacing:0">' +
+      (openings ? openings + ' position' + (openings === 1 ? '' : 's') + ' open' : 'all filled') +
+      '</span></div>');
+
+    if (ME.caps.editAssignments) {
+      L.push('<div class="fieldset two">' + POSITIONS.map(function (p) {
+        var cur = (d.assigned || {})[p.k] || {};
+        // Only people who work the trade — a paint tech has no business in the
+        // salesperson list. Someone who works two trades is offered in both.
+        // Whoever is on the file stays listed either way, so an old assignment
+        // is never silently dropped on save.
+        var options = STAFF.filter(function (st) {
+          return tradesOf(st).indexOf(p.k) >= 0 || String(st.user_id) === String(cur.userId);
+        });
+        return '<div><div class="fl2">' + esc(p.t) + '</div>' +
+          '<select data-assign="' + p.k + '" data-was="' + (cur.userId || '') + '" style="width:100%">' +
+          '<option value="">Unassigned</option>' +
+          options.map(function (st) {
+            var also = tradesOf(st).filter(function (k) { return k !== p.k; });
+            return '<option value="' + st.user_id + '"' +
+              (String(cur.userId) === String(st.user_id) ? ' selected' : '') + '>' +
+              esc(st.display_name) +
+              (also.length ? esc('  (also ' + also.join(', ') + ')') : '') + '</option>';
+          }).join('') + '</select></div>';
+      }).join('') + '</div>' +
+      '<div class="savehint">Every change is written to the activity log.</div>');
+    } else {
+      L.push('<div class="fieldset two">' + POSITIONS.map(function (p) {
+        return f2(p.t, ((d.assigned || {})[p.k] || {}).name);
+      }).join('') + '</div>');
+    }
+
+    /* Parts */
+    if (ME.features.indexOf('parts') >= 0) {
+      L.push('<div class="sec">Parts</div>');
+      if (!d.parts.length) L.push('<div class="sub">No parts on this file.</div>');
+      d.parts.forEach(function (p) {
+        L.push('<div class="partrow"><div><div class="log-b">' + esc(p.description) + '</div>' +
+          '<div class="log-m">' + esc(p.state) + ' · qty ' + p.qty_received + '/' + p.qty +
+          (p.vendor_name ? ' · ' + esc(p.vendor_name) : '') +
+          (p.eta ? ' · ETA ' + shopDate(p.eta) : '') +
+          (ME.caps.money && p.price_cents
+            ? ' · ' + money(p.price_cents) + (Number(p.cost_cents) ? ' / ' + money(p.cost_cents) : '')
+            : '') +
+          (p.gating ? '' : ' · not gating') + '</div></div>' +
+          (ME.caps.manageParts && p.state !== 'received'
+            ? '<button class="btn btn-ghost" data-recv="' + p.id +
+              '" style="padding:5px 9px;font-size:10.5px">Received</button>'
+            : '') + '</div>');
+      });
+      if (ME.caps.manageParts) {
+        L.push('<div class="row" style="margin-top:10px">' +
+          '<input type="text" id="pDesc" aria-label="Part description" placeholder="Part description" style="flex:1;min-width:140px">' +
+          '<input type="number" id="pQty" value="1" min="1" style="width:58px" aria-label="Quantity" title="Quantity">' +
+          (ME.caps.money
+            ? '<input type="number" id="pPrice" step="0.01" min="0" aria-label="Part price" placeholder="Price" style="width:82px">' +
+              '<input type="number" id="pCost" step="0.01" min="0" aria-label="Part cost" placeholder="Cost" style="width:82px">'
+            : '') +
+          '<button class="btn btn-ghost" id="addPart">Add</button></div>');
+      }
+    }
+
+    /* Supplements + sublet */
+    if (d.supplements && d.supplements.length) {
+      var req = d.supplements.reduce(function (a, x) { return a + Number(x.requested_cents || 0); }, 0);
+      var app = d.supplements.reduce(function (a, x) { return a + Number(x.approved_cents || 0); }, 0);
+      L.push('<div class="sec">Supplements <span class="sub" style="text-transform:none;letter-spacing:0">' +
+        (ME.caps.money ? money(req) + ' requested, ' + money(app) + ' approved' : d.supplements.length + ' on file') +
+        '</span></div>');
+      d.supplements.forEach(function (x) {
+        L.push('<div class="log"><div class="log-b">' +
+          (x.seq === 0 ? 'Original estimate' : 'Supplement ' + x.seq) + ' · ' + esc(x.state) + '</div>' +
+          '<div class="log-m">' + (ME.caps.money
+            ? 'requested ' + money(x.requested_cents) + ' · approved ' + money(x.approved_cents) + ' · ' : '') +
+          (x.sent_at ? 'sent ' + shopDate(x.sent_at) : 'not sent') +
+          (x.decided_at ? ' · decided ' + shopDate(x.decided_at) : '') + '</div></div>');
+      });
+      L.push('<div class="sub" style="margin-top:8px">The decision date is stamped when you set the ' +
+        'outcome. Supplement-to-approval time is what the cycle time report reads.</div>');
+    }
+
+    /* Sublet. A vehicle out for calibration or glass is still on the board —
+       this is the line that explains the day, so it has to be movable here. */
+    if (ME.features.indexOf('supp') >= 0) {
+      var maySub = ME.caps.manageParts && !r.voided_at;
+      var subs = d.sublets || [];
+      var subOut = subs.filter(function (x) { return x.state === 'out'; }).length;
+      var subCost = subs.reduce(function (a, x) { return a + Number(x.cost_cents || 0); }, 0);
+
+      L.push('<div class="sec">Sublet <span class="sub" style="text-transform:none;letter-spacing:0">' +
+        (subs.length
+          ? subs.length + ' on this file' + (subOut ? ', ' + subOut + ' out now' : '') +
+            (ME.caps.money && subCost ? ' · ' + money(subCost) : '')
+          : 'none on this file') + '</span></div>');
+
+      subs.forEach(function (x) {
+        L.push('<div class="log" style="display:flex;gap:10px;align-items:flex-start">' +
+          '<div style="min-width:0;flex:1">' +
+          '<div class="log-b">' + esc(x.service) + (x.vendor ? ' — ' + esc(x.vendor) : '') + '</div>' +
+          '<div class="log-m">' +
+          esc([x.out_at ? 'out ' + shopDate(x.out_at) : '',
+               x.back_at ? 'back ' + shopDate(x.back_at) : '',
+               x.po_number ? 'order ' + x.po_number : ''].filter(Boolean).join(' · ') ||
+              'no dates yet') +
+          (ME.caps.money && x.cost_cents ? ' · ' + money(x.cost_cents) : '') + '</div></div>' +
+          (maySub
+            ? '<select data-sublet="' + x.id + '" style="width:118px;flex:none">' +
+              SUBLET_STATES.map(function (s) {
+                return '<option value="' + s + '"' + (x.state === s ? ' selected' : '') + '>' +
+                  s.charAt(0).toUpperCase() + s.slice(1) + '</option>';
+              }).join('') + '</select>' +
+              '<button class="linebtn" data-subdel="' + x.id + '" title="Remove this sublet line">×</button>'
+            : '<span class="pill">' + esc(x.state) + '</span>') +
+          '</div>');
+      });
+
+      if (maySub) {
+        L.push('<div class="row" style="margin-top:10px">' +
+          '<select id="subService" style="flex:1;min-width:130px">' +
+          SUBLET_SERVICES.map(function (s) {
+            return '<option value="' + esc(s) + '">' + esc(s) + '</option>';
+          }).join('') + '</select>' +
+          '<input type="text" id="subVendor" list="vendorNames" aria-label="Sublet vendor" placeholder="Vendor" ' +
+          'style="flex:1;min-width:120px">' +
+          (ME.caps.money
+            ? '<input type="number" id="subCost" aria-label="Sublet cost" placeholder="Cost" step="0.01" style="width:96px">'
+            : '') +
+          '<button class="btn btn-ghost" id="addSublet">Add</button></div>' +
+          '<datalist id="vendorNames">' + (VENDOR_NAMES || []).map(function (n) {
+            return '<option value="' + esc(n) + '"></option>';
+          }).join('') + '</datalist>' +
+          '<div class="savehint">Scheduled while it is booked, out when it leaves, returned when it ' +
+          'is back. The dates stamp themselves.</div>');
+      } else if (subs.length) {
+        L.push('<div class="sub" style="margin-top:8px">Parts, estimators and managers move sublets.</div>');
+      }
+    }
+
+    /* Promises */
+    L.push('<div class="sec">Promises <span class="sub" style="text-transform:none;letter-spacing:0">' +
+      'work we agreed to do</span></div>');
+    if (!d.promises.length) L.push('<div class="sub">Nothing promised yet.</div>');
+    d.promises.forEach(function (p) {
+      L.push('<div class="promise' + (p.done ? ' done' : '') + '">' +
+        '<input type="checkbox" data-promise="' + p.id + '"' + (p.done ? ' checked' : '') + '>' +
+        '<div class="ptext">' + esc(p.body) + '</div></div>');
+    });
+    L.push('<div class="row" style="margin-top:10px">' +
+      '<input type="text" id="promiseText" aria-label="What was promised" placeholder="Buff headlamps, touch up rocker chip…" ' +
+      'style="flex:1;min-width:150px">' +
+      '<button class="btn btn-ghost" id="addPromise">Add</button></div>');
+
+    /* Documents and photos.
+
+       One grid and one sequence: photos first, then paperwork, each in the order
+       it was uploaded. A tile whose thumbnail is still being made is not here
+       yet — it appears on the next load, a second or two later. */
+    if (ME.features.indexOf('docs') >= 0) {
+      var ready = d.documents.filter(function (x) { return x.thumb_state !== 'pending'; });
+      var pending = d.documents.length - ready.length;
+      var tiles = ready.filter(function (x) { return x.is_image || x.is_pdf; });
+      var files = ready.filter(function (x) { return !x.is_image && !x.is_pdf; });
+      MEDIA = tiles;
+
+      L.push('<div class="sec">Photos and documents</div>');
+      if (tiles.length) {
+        L.push('<div class="photogrid">' + tiles.map(function (p, i) {
+          var failed = p.thumb_state === 'failed' || (!p.has_thumb && p.is_pdf);
+          return '<button class="photocell' + (p.is_pdf ? ' pdf' : '') + '" data-media="' + i + '" ' +
+            'title="' + esc(p.label) + '">' +
+            (failed
+              ? '<span class="glyph">' + esc(extOf(p)) + '</span>'
+              : '<img loading="lazy" src="/api/documents/' + p.id +
+                (p.has_thumb ? '?variant=thumb' : '') + '" alt=""' +
+                (p.rotation ? ' style="transform:rotate(' + p.rotation + 'deg)"' : '') + '>') +
+            (p.is_pdf ? '<span class="kind">PDF</span>' : '') +
+            (p.is_pdf && p.page_count > 1 ? '<span class="pages">' + p.page_count + 'pp</span>' : '') +
+            '</button>';
+        }).join('') + '</div>');
+      }
+      if (pending) {
+        L.push('<div class="sub" style="margin-top:8px">' + pending + ' more being prepared…</div>');
+      }
+      files.forEach(function (doc) {
+        L.push('<div class="docrow">' +
+          '<span class="flag" style="color:var(--acc2);border:1px solid var(--line)">' +
+          esc(String(doc.doc_type).replace(/_/g, ' ')) + '</span>' +
+          '<div style="flex:1;min-width:0"><div class="log-b">' + esc(doc.label) + '</div>' +
+          '<div class="log-m">' + esc(doc.uploaded_name || '') + ' · ' + when(doc.created_at) +
+          ' · ' + Photos.bytes(doc.size_bytes) + '</div></div>' +
+          '<a class="btn btn-ghost" href="/api/documents/' + doc.id + '?download=1" ' +
+          'style="padding:4px 9px;font-size:10px">Download</a>' +
+          (ME.caps.deleteDocuments
+            ? '<button class="btn btn-danger" data-del="' + doc.id +
+              '" style="padding:4px 8px;font-size:10px">×</button>'
+            : '') + '</div>');
+      });
+      L.push('<div class="row" style="margin:12px 0 8px">' +
+        '<select id="docType" style="flex:1;min-width:150px">' +
+        '<option value="">Set the type from the file — a photo, or paperwork</option>' +
+        DOCTYPES.map(function (t) {
+          return '<option value="' + esc(t.key) + '">' + esc(t.label) + '</option>';
+        }).join('') + '</select></div>');
+      L.push('<div class="dropzone" id="drop">' +
+        (ME.caps.viewPaperwork
+          ? 'Drop files here, or choose a file — photos, estimate, supplement, invoice, ' +
+            'proof of payment'
+          : 'Drop photos here, or tap to choose — damage, teardown, progress') +
+        '<input type="file" id="fileInput" multiple hidden' +
+        (ME.caps.viewPaperwork ? '' : ' accept="image/*"') + '></div>');
+    }
+
+    $('dLeft').innerHTML = L.join('');
+
+    /* ---- right column: what you do to the file ---- */
+    var R = [];
+
+    R.push('<div class="sec">Update this RO</div>');
+    R.push('<div class="stack"><select id="newStatus" style="width:100%">' +
+      '<option value="">Select a new status…</option>' + statusOptions(null) + '</select>' +
+      '<textarea id="newNote" aria-label="Note" placeholder="Add a note — call with the adjuster, customer, parts vendor…"></textarea>' +
+      '<div class="row"><button class="btn btn-solid" id="saveStatus">Add a note or pick a status</button>' +
+      '<span class="sub" style="flex:1;min-width:120px">Notifies whoever owns the status it lands in.</span>' +
+      '</div></div>');
+    R.push('<div class="msg" id="dMsg"></div>');
+    if (ME.caps.editRepairOrders) {
+      R.push('<div class="savehint">Details, dates, money and assignments on the left are saved when ' +
+        'you close this file — you are asked first, and told what changed.</div>');
+    }
+
+    var LAST = [];
+
+    /* Closing a file puts its money on the books and takes the car off the
+       production schedule. The close date is set by hand and can be moved
+       afterwards from the Closed screen — that is what books it into a month. */
+    if (d.canClose && !r.voided_at) {
+      if (r.close_date) {
+        /* Editable here as well as on the Closed screen — the close date is meant
+           to be moved, and the file is where somebody is standing when they find
+           it is wrong. Same endpoint either way. */
+        LAST.push('<div class="sec">Closed</div>');
+        LAST.push('<div class="stack">' +
+          '<div class="row" style="gap:9px;align-items:baseline">' +
+          '<span class="flag" style="color:' + (r.paid ? 'var(--done)' : 'var(--stopped)') +
+            ';border:1px solid ' + (r.paid ? 'var(--done)' : 'var(--stopped)') + '">' +
+            (r.paid ? 'paid' : 'unpaid') + '</span>' +
+          '<span style="font:400 11.5px var(--font);color:var(--muted)">Booked to ' +
+            esc(String(r.close_date).slice(0, 10)) + '</span></div>' +
+          '<span class="sub" style="text-transform:none;letter-spacing:0">Moving the date re-books ' +
+          'the file into that month and week.</span>' +
+          '<div class="row" style="gap:9px;flex-wrap:wrap">' +
+          '<label class="row" style="gap:7px;align-items:center">' +
+          '<span class="sub" style="text-transform:none;letter-spacing:0">Close date</span>' +
+          '<input type="date" id="clDate" value="' + esc(String(r.close_date).slice(0, 10)) + '"></label>' +
+          '<select id="clPaid">' +
+          '<option value="1"' + (r.paid ? ' selected' : '') + '>Paid</option>' +
+          '<option value="0"' + (r.paid ? '' : ' selected') + '>Not paid</option></select></div>' +
+          '<div class="row" style="justify-content:flex-end;gap:9px">' +
+          (d.canUnclose ? '<button class="btn" id="unClose">Reopen this file</button>' : '') +
+          '<button class="btn btn-solid" id="saveClose">Save</button></div></div>');
+      } else if ((d.closeBlockers || []).length) {
+        LAST.push('<div class="sec">Close this file</div>');
+        LAST.push('<div class="stack" style="border-color:var(--stopped)">' +
+          '<span class="sub" style="text-transform:none;letter-spacing:0;color:var(--stopped)">' +
+          ((d.closeBlockers || []).length === 1 ? 'One thing first' : 'Some things first') + '</span>' +
+          (d.closeBlockers || []).map(function (x) {
+            return '<div style="font:400 11.5px/1.45 var(--font);color:var(--text)">· ' +
+              esc(x.what) + ' <span style="color:var(--dim)">' + esc(x.where) + '</span></div>';
+          }).join('') + '</div>');
+      } else {
+        LAST.push('<div class="sec">Close this file</div>');
+        LAST.push('<div class="stack">' +
+          '<span class="sub" style="text-transform:none;letter-spacing:0">Books ' +
+          esc(money(r.amount_cents)) + ' to the close date and takes the car off the production ' +
+          'schedule. Marking it unpaid still closes it — it shows as unpaid on the closed board ' +
+          'so it can be chased.</span>' +
+          '<div class="row" style="gap:9px;flex-wrap:wrap">' +
+          '<label class="row" style="gap:7px;align-items:center">' +
+          '<span class="sub" style="text-transform:none;letter-spacing:0">Close date</span>' +
+          '<input type="date" id="clDate" value="' + esc(isoToday()) + '"></label>' +
+          '<select id="clPaid"><option value="1">Paid</option>' +
+          '<option value="0">Not paid</option></select></div>' +
+          '<div class="row" style="justify-content:flex-end">' +
+          '<button class="btn btn-solid" id="doClose">Close RO ' + esc(r.ro_number) +
+          '</button></div></div>');
+      }
+    }
+
+    /* Total loss sits with the other end-of-road actions, above void: the car is
+       still here and still has to be handled, so it is not void \u2014 it just stops
+       being work. */
+    if (d.canTotalLoss && !r.voided_at) {
+      if (r.total_loss_at) {
+        LAST.push('<div class="sec">Total loss</div>');
+        LAST.push('<div class="stack">' +
+          '<span class="sub" style="text-transform:none;letter-spacing:0">Marked a total loss ' +
+          when(r.total_loss_at) + '. At the head of the board in lane 00, off the technicians\u2019 ' +
+          'lists, assignments untouched. No commission is paid on it \u2014 the shop\u2019s total-loss ' +
+          'amount pays instead.' +
+          (r.total_loss_note ? ' \u201c' + esc(r.total_loss_note) + '\u201d' : '') + '</span>' +
+          '<div class="row" style="justify-content:flex-end">' +
+          '<button class="btn" id="doTlUndo">Lift the total loss</button></div></div>');
+      } else {
+        LAST.push('<div class="sec">Total loss</div>');
+        LAST.push('<div class="stack">' +
+          '<span class="sub" style="text-transform:none;letter-spacing:0">Sends it to the head of ' +
+          'the board and off the technicians\u2019 lists. Assignments stay as they are, and the pay ' +
+          'ledger swaps the commission for the total-loss amount.</span>' +
+          '<input type="text" id="tlNote" aria-label="Total loss note" placeholder="Anything worth recording" style="width:100%">' +
+          '<div class="row" style="justify-content:flex-end">' +
+          '<button class="btn btn-danger" id="doTl">Mark RO ' + esc(r.ro_number) +
+          ' a total loss</button></div></div>');
+      }
+    }
+
+    /* Deductible and rental are settled here, while the car is in the shop —
+       long before anyone clicks Close. The close-out sheet then has them. */
+    if (ME.caps.editRepairOrders) {
+      LAST.push('<div class="sec">Deductible and rental</div>');
+      LAST.push('<div class="stack">' +
+        '<label class="row" style="gap:7px;align-items:center">' +
+        '<input type="checkbox" id="dedOn"' + (r.deductible_collect ? ' checked' : '') + '>' +
+        '<span class="sub" style="text-transform:none;letter-spacing:0">Collecting a deductible</span>' +
+        '</label>' +
+        '<div class="row">' +
+          '<label class="row" style="gap:7px;align-items:center">' +
+          '<span class="sub" style="text-transform:none;letter-spacing:0">Their deductible</span>' +
+          '<input id="dedOwed" style="width:100px;text-align:right" value="' +
+            esc(dollars(r.deductible_cents)) + '"></label>' +
+          '<label class="row" style="gap:7px;align-items:center">' +
+          '<span class="sub" style="text-transform:none;letter-spacing:0">We are charging</span>' +
+          '<input id="dedCharge" style="width:100px;text-align:right" value="' +
+            esc(dollars(r.deductible_charge_cents)) + '"></label>' +
+          '<button class="btn" id="dedSave">Save</button>' +
+        '</div>' +
+        '<span class="sub" style="text-transform:none;letter-spacing:0">' +
+          'Anything not collected is given away — it comes off the profit and off the commission base.' +
+        '</span>' +
+        '<div class="row" style="margin-top:4px">' +
+          '<label class="row" style="gap:7px;align-items:center">' +
+          '<span class="sub" style="text-transform:none;letter-spacing:0">Rental</span>' +
+          '<select id="rentProv"><option value="">None</option>' +
+          RENTAL_PROVIDERS.map(function (p) {
+            return '<option value="' + esc(p) + '"' +
+              (r.rental_provider === p ? ' selected' : '') + '>' + esc(p) + '</option>';
+          }).join('') + '</select></label>' +
+          '<label class="row" style="gap:7px;align-items:center">' +
+          '<input type="checkbox" id="rentCov"' + (r.rental_covered ? ' checked' : '') + '>' +
+          '<span class="sub" style="text-transform:none;letter-spacing:0">Coverage</span></label>' +
+          '<label class="row" style="gap:7px;align-items:center">' +
+          '<span class="sub" style="text-transform:none;letter-spacing:0">Cost</span>' +
+          '<input id="rentCost" style="width:100px;text-align:right" value="' +
+            esc(dollars(r.rental_cost_cents)) + '"></label>' +
+          '<button class="btn" id="rentSave">Save</button>' +
+        '</div>' +
+        '<span class="sub" style="text-transform:none;letter-spacing:0">' +
+          'A covered rental is reimbursed, so the shop carries none of it — the coverage tick is what says there is money to chase. A loaner is the shop’s own cost.' +
+        '</span>' +
+      '</div>');
+    }
+
+    /* Whether the commission is owed on this car. Not a close-time question. */
+    if (ME.caps.editPayPlans && (d.assigned || {}).sales) {
+      LAST.push('<div class="sec">Sales pay</div>');
+      LAST.push('<div class="stack">' +
+        '<label class="row" style="gap:7px;align-items:center">' +
+        '<input type="checkbox" id="commPay"' + (r.commission_payable ? ' checked' : '') + '>' +
+        '<span class="sub" style="text-transform:none;letter-spacing:0">Commission payable on this file</span>' +
+        '</label>' +
+        '<span class="sub" style="text-transform:none;letter-spacing:0">' +
+          'Off for a house deal, a re-write someone else closed, or a car nobody earns on. ' +
+          'The close-out sheet leaves the sales pay line out entirely when this is off.' +
+        '</span></div>');
+    }
+
+    if (r.voided_at && d.canVoid) {
+      LAST.push('<div class="sec">Bring it back</div>');
+      LAST.push('<div class="stack">' +
+        '<input type="text" id="vNumber" aria-label="New RO number" placeholder="New RO number — blank takes the next in sequence" ' +
+        'style="width:100%">' +
+        '<select id="vSlot" style="width:100%">' + statusOptions(r.status_slot) + '</select>' +
+        '<label class="row" style="gap:7px;align-items:center">' +
+        '<input type="checkbox" id="vParts" checked>' +
+        '<span class="sub" style="text-transform:none;letter-spacing:0">Bring the cancelled parts lines back as needed</span>' +
+        '</label>' +
+        '<div class="row"><button class="btn btn-solid" id="doReopen">Reopen this file</button>' +
+        '<span class="sub" style="flex:1;min-width:120px">Same file, new number. Documents, notes, ' +
+        'history, dates and money all come with it.</span></div></div>');
+    } else if (!r.voided_at && d.canVoid) {
+      // Last thing in the modal, hard against the right edge: voiding a file is
+      // the end of the road, not something to meet on the way in.
+      LAST.push('<div class="sec">Void this file</div>');
+      LAST.push('<div class="stack">' +
+        '<span class="sub" style="text-transform:none;letter-spacing:0">Cancels the parts, flags ' +
+        'anything already ordered for return, frees the number and takes it off the board. ' +
+        'Nobody is notified — it is in the log.</span>' +
+        '<select id="vReason" style="width:100%">' +
+        VOID_REASONS.map(function (x) {
+          return '<option value="' + esc(x) + '">' + esc(x) + '</option>';
+        }).join('') + '<option value="other">Something else — say why below</option></select>' +
+        '<input type="text" id="vNote" aria-label="Void note" placeholder="Anything worth recording" style="width:100%">' +
+        '<div class="row" style="justify-content:flex-end">' +
+        '<button class="btn btn-danger" id="doVoid">Void RO ' + esc(r.ro_number) +
+        '</button></div></div>');
+    }
+
+    R.push('<div class="sec">Notes and history</div>');
+    if (!d.notes.length) R.push('<div class="sub">Nothing recorded yet.</div>');
+    d.notes.forEach(function (n) {
+      R.push('<div class="log"><div class="row" style="gap:7px;align-items:baseline">' +
+        '<span class="flag" style="color:' +
+        (n.kind === 'auto' ? 'var(--dim)' : 'var(--acc2)') + ';border:1px solid var(--line)">' +
+        esc(n.kind === 'auto' ? 'auto' : 'note') + '</span>' +
+        '<span style="font:400 11px var(--font);color:var(--muted)">' +
+        esc(n.user_name || 'System') + '</span>' +
+        '<span class="log-m" style="margin:0 0 0 auto">' + when(n.created_at) + '</span></div>' +
+        '<div class="log-b" style="margin-top:4px' +
+        (n.kind === 'auto' ? ';color:var(--muted)' : '') + '">' + esc(n.body) + '</div></div>');
+    });
+
+    if (LAST.length) {
+      R.push('<div style="margin-top:22px;padding-top:4px;border-top:1px solid var(--whisper)"></div>');
+      R.push(LAST.join(''));
+    }
+
+    $('dRight').innerHTML = R.join('');
+    fold($('dLeft'));
+    fold($('dRight'));
+    wireDrawer();
+  }
+
+  /**
+   * Fact blocks fold away. Everything is open the first time; what someone
+   * shuts stays shut on the next file and the next session — the state is per
+   * section, not per RO. Folding never disables editing: the fields are still
+   * there, still saved on close, they are just out of the way.
+   */
+  var FOLDS = 'es_drawer_folds';
+
+  function foldState() {
+    try { return JSON.parse(localStorage.getItem(FOLDS) || '{}') || {}; } catch (e) { return {}; }
+  }
+  function setFold(key, shut) {
+    var s = foldState();
+    if (shut) s[key] = 1; else delete s[key];
+    try { localStorage.setItem(FOLDS, JSON.stringify(s)); } catch (e) { /* private mode */ }
+  }
+
+  function fold(col) {
+    if (!col) return;
+    var state = foldState();
+    var secs = Array.prototype.slice.call(col.children).filter(function (el) {
+      return el.classList && el.classList.contains('sec');
+    });
+
+    secs.forEach(function (sec) {
+      var key = (sec.textContent || '').trim().toLowerCase().split(/\s{2,}|\s·\s/)[0].slice(0, 40);
+      if (!key) return;
+
+      var body = document.createElement('div');
+      body.className = 'foldbody';
+      var node = sec.nextSibling;
+      while (node && !(node.classList && node.classList.contains('sec'))) {
+        var next = node.nextSibling;
+        body.appendChild(node);
+        node = next;
+      }
+      sec.parentNode.insertBefore(body, sec.nextSibling);
+
+      var cue = document.createElement('span');
+      cue.className = 'foldcue';
+      sec.appendChild(cue);
+      sec.classList.add('fold');
+
+      function paint(shut) {
+        body.hidden = shut;
+        sec.classList.toggle('shut', shut);
+        cue.innerHTML = (shut ? 'show' : 'hide') + ' <span class="chev">&#9662;</span>';
+      }
+      paint(!!state[key]);
+
+      sec.addEventListener('click', function () {
+        var shut = !body.hidden;
+        paint(shut);
+        setFold(key, shut);
+      });
+    });
+  }
+
+  function daysIn(r) {
+    var days = Math.floor((Date.now() - new Date(r.opened_at).getTime()) / 86400000);
+    return Math.max(days - (Number(r.voided_days) || 0), 0);
+  }
+
+  function wireDrawer() {
+    var msg = $('dMsg');
+    /* 4.1.3 — saves and errors were drawn into the page and announced nowhere,
+       so a screen reader said nothing at all when a save failed. */
+    function say(t, k) {
+      if (!msg) return;
+      msg.textContent = t;
+      msg.className = 'msg ' + k;
+      Shell.announce(t);
+    }
+    function reopen() { return load().then(function () { openRo(OPEN); Shell.refreshCount(); }); }
+
+    var ss = $('saveStatus');
+    if (ss) ss.addEventListener('click', function () {
+      var slot = $('newStatus').value, note = $('newNote').value.trim();
+      if (!slot && !note) return say('Pick a status or write a note.', 'err');
+      api('/api/ro/' + OPEN + '/status', {
+        method: 'POST', body: JSON.stringify({ slot: slot || undefined, note: note || undefined })
+      }).then(reopen).catch(function (e) { say(e.message, 'err'); });
+    });
+
+    var dc = $('doClose');
+    if (dc) dc.addEventListener('click', function () {
+      var paid = $('clPaid').value === '1';
+      var date = $('clDate').value;
+      if (!date) return say('Pick a close date.', 'err');
+      /* Owner and accounting get the sheet; everyone else closes straight through,
+         because for them there is no sheet to show. */
+      if (ME.caps.viewPayPlans) return openCloseout(OPEN, date, paid);
+      dc.disabled = true;
+      api('/api/ro/' + OPEN + '/close', {
+        method: 'POST', body: JSON.stringify({ paid: paid, closeDate: date })
+      }).then(function () {
+        dc.disabled = false;
+        say('Closed and booked to ' + date + '.', 'ok');
+        closeRo();
+        load();
+      }).catch(function (e) {
+        dc.disabled = false;
+        say(e.message, 'err');
+      });
+    });
+
+    var ds = $('dedSave');
+    if (ds) ds.addEventListener('click', function () {
+      api('/api/ro/' + OPEN + '/deductible', {
+        method: 'PATCH',
+        body: JSON.stringify({
+          cents: toCents($('dedOwed').value),
+          collect: $('dedOn').checked,
+          chargeCents: toCents($('dedCharge').value)
+        })
+      }).then(function (res) {
+        say(res.givenCents
+          ? dollars(res.givenCents) + ' of the deductible is not being collected.'
+          : 'Deductible saved.', 'ok');
+        return reopen();
+      }).catch(function (e) { say(e.message, 'err'); });
+    });
+
+    var rs = $('rentSave');
+    if (rs) rs.addEventListener('click', function () {
+      api('/api/ro/' + OPEN + '/rental', {
+        method: 'PATCH',
+        body: JSON.stringify({
+          provider: $('rentProv').value || null,
+          covered: $('rentCov').checked,
+          costCents: toCents($('rentCost').value)
+        })
+      }).then(function (res) {
+        say(res.carriedCents
+          ? 'Saved. The shop carries ' + dollars(res.carriedCents) + '.'
+          : 'Saved. Covered, so there is reimbursement to chase.', 'ok');
+        return reopen();
+      }).catch(function (e) { say(e.message, 'err'); });
+    });
+
+    var cp = $('commPay');
+    if (cp) cp.addEventListener('change', function () {
+      api('/api/ro/' + OPEN + '/commission-payable', {
+        method: 'PATCH', body: JSON.stringify({ payable: cp.checked })
+      }).then(function (res) {
+        say(res.payable ? 'Commission payable on this file.' : 'No commission on this file.', 'ok');
+      }).catch(function (e) { say(e.message, 'err'); });
+    });
+
+    var sc = $('saveClose');
+    if (sc) sc.addEventListener('click', function () {
+      var date = $('clDate').value;
+      if (!date) return say('Pick a close date.', 'err');
+      sc.disabled = true;
+      api('/api/ro/' + OPEN + '/close', {
+        method: 'PATCH',
+        body: JSON.stringify({ closeDate: date, paid: $('clPaid').value === '1' })
+      }).then(function () {
+        sc.disabled = false;
+        say('Saved. Booked to ' + date + '.', 'ok');
+        return reopen();
+      }).catch(function (e) {
+        sc.disabled = false;
+        say(e.message, 'err');
+      });
+    });
+
+    var uc = $('unClose');
+    if (uc) uc.addEventListener('click', function () {
+      if (!confirm('Reopen this file? It comes off the books and goes back on the production schedule.')) return;
+      uc.disabled = true;
+      api('/api/ro/' + OPEN + '/close', { method: 'DELETE' })
+        .then(function () {
+          uc.disabled = false;
+          say('Reopened. Back on the board.', 'ok');
+          return reopen();
+        })
+        .catch(function (e) { uc.disabled = false; say(e.message, 'err'); });
+    });
+
+    var dtl = $('doTl');
+    if (dtl) dtl.addEventListener('click', function () {
+      if (!confirm('Mark this a total loss? It goes to the head of the board and off the ' +
+        'technicians’ lists. No commission is paid on it.')) return;
+      api('/api/ro/' + OPEN + '/total-loss', {
+        method: 'POST', body: JSON.stringify({ note: $('tlNote').value.trim() || undefined })
+      }).then(function (res) {
+        closeRo();
+        return load().then(function () {
+          if (res.partsOnOrder) {
+            alert(res.partsOnOrder + ' part line' + (res.partsOnOrder === 1 ? '' : 's') +
+              ' are still on order on this file. Nothing was cancelled — the parts desk decides.');
+          }
+        });
+      }).catch(function (e) { say(e.message, 'err'); });
+    });
+
+    var dtu = $('doTlUndo');
+    if (dtu) dtu.addEventListener('click', function () {
+      api('/api/ro/' + OPEN + '/total-loss', { method: 'DELETE' })
+        .then(function () { closeRo(); return load(); })
+        .catch(function (e) { say(e.message, 'err'); });
+    });
+
+    var dv = $('doVoid');
+    if (dv) dv.addEventListener('click', function () {
+      var pick = $('vReason').value;
+      var note = $('vNote').value.trim();
+      var reason = pick === 'other' ? note : pick;
+      if (!reason) return say('Say why it is being voided.', 'err');
+      if (!confirm('Void this file? Parts already ordered get flagged for return, the number goes ' +
+        'back in the pool, and it comes off the board.')) return;
+
+      api('/api/ro/' + OPEN + '/void', {
+        method: 'POST', body: JSON.stringify({ reason: reason, note: note || undefined })
+      }).then(function (res) {
+        closeRo();
+        return load().then(function () {
+          Shell.refreshCount();
+          if (res.partsFlagged) {
+            alert(res.partsFlagged + ' ordered part line' + (res.partsFlagged === 1 ? '' : 's') +
+              ' flagged for return. They are on the returns list on the parts screen.');
+          }
+        });
+      }).catch(function (e) { say(e.message, 'err'); });
+    });
+
+    var dr = $('doReopen');
+    if (dr) dr.addEventListener('click', function () {
+      api('/api/ro/' + OPEN + '/reopen', {
+        method: 'POST',
+        body: JSON.stringify({
+          slot: $('vSlot').value,
+          roNumber: $('vNumber').value.trim() || undefined,
+          restoreParts: $('vParts').checked
+        })
+      }).then(reopen).catch(function (e) { say(e.message, 'err'); });
+    });
+
+    var ap = $('addPromise');    if (ap) ap.addEventListener('click', function () {
+      var body = $('promiseText').value.trim();
+      if (!body) return say('Write what was promised.', 'err');
+      api('/api/ro/' + OPEN + '/promises', { method: 'POST', body: JSON.stringify({ body: body }) })
+        .then(reopen).catch(function (e) { say(e.message, 'err'); });
+    });
+
+    Array.prototype.forEach.call(document.querySelectorAll('[data-promise]'), function (cb) {
+      cb.addEventListener('change', function () {
+        api('/api/promises/' + cb.dataset.promise, {
+          method: 'PATCH', body: JSON.stringify({ done: cb.checked })
+        }).then(reopen).catch(function (e) { say(e.message, 'err'); });
+      });
+    });
+
+    /* ------------------------------------------------------------- sublet */
+
+    var asb = $('addSublet');
+    if (asb) asb.addEventListener('click', function () {
+      var cost = $('subCost');
+      api('/api/ro/' + OPEN + '/sublets', {
+        method: 'POST',
+        body: JSON.stringify({
+          service: $('subService').value,
+          vendor: $('subVendor').value.trim() || undefined,
+          costCents: cost && cost.value ? Math.round(Number(cost.value) * 100) : undefined
+        })
+      }).then(reopen).catch(function (e) { say(e.message, 'err'); });
+    });
+
+    Array.prototype.forEach.call(document.querySelectorAll('[data-sublet]'), function (sel) {
+      sel.addEventListener('change', function () {
+        api('/api/sublets/' + sel.dataset.sublet, {
+          method: 'PATCH', body: JSON.stringify({ state: sel.value })
+        }).then(reopen).catch(function (e) { say(e.message, 'err'); });
+      });
+    });
+
+    Array.prototype.forEach.call(document.querySelectorAll('[data-subdel]'), function (b) {
+      b.addEventListener('click', function () {
+        api('/api/sublets/' + b.dataset.subdel, { method: 'DELETE' })
+          .then(reopen).catch(function (e) { say(e.message, 'err'); });
+      });
+    });
+
+    var an = $('addNote');
+    if (an) an.addEventListener('click', function () {
+      var body = $('quickNote').value.trim();
+      if (!body) return say('The note is empty.', 'err');
+      api('/api/ro/' + OPEN + '/notes', { method: 'POST', body: JSON.stringify({ body: body }) })
+        .then(reopen).catch(function (e) { say(e.message, 'err'); });
+    });
+
+    var add = $('addPart');
+    if (add) add.addEventListener('click', function () {
+      var desc = $('pDesc').value.trim();
+      if (!desc) return say('Part needs a description.', 'err');
+      var body = { description: desc, qty: Number($('pQty').value) || 1 };
+      if ($('pPrice') && $('pPrice').value) body.priceCents = Math.round(Number($('pPrice').value) * 100);
+      if ($('pCost') && $('pCost').value) body.costCents = Math.round(Number($('pCost').value) * 100);
+
+      api('/api/ro/' + OPEN + '/parts', { method: 'POST', body: JSON.stringify(body) })
+        .then(reopen).catch(function (e) { say(e.message, 'err'); });
+    });
+
+    Array.prototype.forEach.call(document.querySelectorAll('[data-recv]'), function (b) {
+      b.addEventListener('click', function () {
+        api('/api/parts/' + b.dataset.recv, { method: 'PATCH', body: JSON.stringify({ state: 'received' }) })
+          .then(reopen).catch(function (e) { say(e.message, 'err'); });
+      });
+    });
+
+    Array.prototype.forEach.call(document.querySelectorAll('[data-del]'), function (b) {
+      b.addEventListener('click', function () {
+        if (!confirm('Delete this document?')) return;
+        api('/api/documents/' + b.dataset.del, { method: 'DELETE' })
+          .then(reopen).catch(function (e) { say(e.message, 'err'); });
+      });
+    });
+
+    Array.prototype.forEach.call(document.querySelectorAll('[data-media]'), function (el) {
+      el.addEventListener('click', function () { showMedia(Number(el.dataset.media)); });
+    });
+
+    var drop = $('drop'), input = $('fileInput');
+    if (drop) {
+      drop.addEventListener('click', function () { input.click(); });
+      input.addEventListener('change', function () { upload(input.files); });
+      ['dragenter', 'dragover'].forEach(function (ev) {
+        drop.addEventListener(ev, function (e) { e.preventDefault(); drop.classList.add('hot'); });
+      });
+      ['dragleave', 'drop'].forEach(function (ev) {
+        drop.addEventListener(ev, function (e) { e.preventDefault(); drop.classList.remove('hot'); });
+      });
+      drop.addEventListener('drop', function (e) {
+        if (e.dataTransfer && e.dataTransfer.files.length) upload(e.dataTransfer.files);
+      });
+    }
+
+    function upload(files) {
+      if (!files || !files.length) return;
+      var n = files.length;
+      drop.textContent = 'Preparing ' + n + ' file' + (n === 1 ? '' : 's') + '…';
+
+      Photos.prepareAll(files).then(function (items) {
+        var fd = new FormData();
+        if ($('docType').value) fd.append('docType', $('docType').value);
+        var before = 0, after = 0;
+        items.forEach(function (it, i) {
+          Photos.appendTo(fd, i, it.file, it.prepared);
+          if (!it.prepared.passthrough) {
+            before += it.prepared.originalBytes || 0;
+            after += it.prepared.bytes || 0;
+          }
+        });
+        drop.textContent = 'Uploading' + (before
+          ? ' · ' + Photos.bytes(before) + ' → ' + Photos.bytes(after) : '') + '…';
+
+        return fetch('/api/ro/' + OPEN + '/documents', { method: 'POST', body: fd })
+          .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+          .then(function (res) {
+            if (!res.ok) {
+              say(res.j.error, 'err');
+              drop.textContent = 'Drop files here, or tap to choose';
+              return;
+            }
+            /* Tiles do not appear until their thumbnail is made, so the toast is
+               what tells the person it worked. */
+            var got = (res.j.documents || []).length;
+            say(got + ' file' + (got === 1 ? '' : 's') + ' uploaded' +
+              (res.j.pending ? ' · preparing thumbnails' : '') +
+              (res.j.rejected && res.j.rejected.length
+                ? ' · ' + res.j.rejected.length + ' skipped, photos only' : ''), 'ok');
+            openRo(OPEN);
+            /* Come back for the ones still being made. */
+            if (res.j.pending) {
+              var tries = 0;
+              var poll = setInterval(function () {
+                if (++tries > 6 || OPEN == null) return clearInterval(poll);
+                openRo(OPEN);
+              }, 2500);
+            }
+          });
+      }).catch(function () {
+        say('Upload failed.', 'err');
+        drop.textContent = 'Drop files here, or tap to choose';
+      });
+    }
+  }
+
+  /* -------------------------------------------------------------- the viewer */
+
+  /** The extension, for a tile we could not render. */
+  function extOf(m) {
+    var n = String(m.label || '');
+    var dot = n.lastIndexOf('.');
+    if (dot > 0 && n.length - dot <= 6) return n.slice(dot + 1);
+    return m.is_pdf ? 'pdf' : (m.source_mime || m.mime_type || 'file').split('/').pop();
+  }
+
+  /**
+   * One modal over one sequence — photos first, then paperwork. The side arrows
+   * always move between documents; a multi-page PDF gets its own page arrows in
+   * the bar, so turning a page never walks off the file you are reading.
+   */
+  function showMedia(i, page) {
+    if (!MEDIA.length) return;
+    LBAT = (i + MEDIA.length) % MEDIA.length;
+    LBPAGE = page || 1;
+    var m = MEDIA[LBAT];
+    var pdf = !!m.is_pdf;
+    var pages = Number(m.page_count || 1);
+
+    $('lightbox').classList.remove('zoom');
+    $('lbImg').style.transform = (!pdf && m.rotation) ? 'rotate(' + m.rotation + 'deg)' : '';
+    $('lbImg').src = pdf
+      ? '/api/documents/' + m.id + '?page=' + LBPAGE
+      : '/api/documents/' + m.id;
+
+    $('lbMeta').textContent = (LBAT + 1) + ' of ' + MEDIA.length + ' · ' + m.label +
+      (pdf
+        ? (pages ? ' · ' + pages + ' page' + (pages === 1 ? '' : 's') : '')
+        : (m.width ? ' · ' + m.width + '×' + m.height : '')) +
+      ' · ' + Photos.bytes(m.size_bytes) +
+      (m.source_mime ? ' · from ' + String(m.source_mime).split('/').pop().toUpperCase() : '');
+
+    /* Page controls belong to the PDF; rotate belongs to a photo. */
+    var many = pdf && pages > 1;
+    $('lbPagePrev').hidden = !many;
+    $('lbPageNext').hidden = !many;
+    $('lbPage').hidden = !many;
+    if (many) $('lbPage').textContent = 'page ' + LBPAGE + ' of ' + pages;
+    $('lbPagePrev').disabled = LBPAGE <= 1;
+    $('lbPageNext').disabled = LBPAGE >= pages;
+    $('lbRotate').hidden = pdf || !ME.caps.editRepairOrders;
+
+    $('lbDownload').href = '/api/documents/' + m.id + '?download=1';
+    $('lbDownload').setAttribute('download', m.label || (pdf ? 'document.pdf' : 'photo.jpg'));
+    $('lbTab').href = '/api/documents/' + m.id;
+
+    $('lbBack').disabled = MEDIA.length < 2;
+    $('lbFwd').disabled = MEDIA.length < 2;
+    $('lightbox').hidden = false;
+  }
+
+  function hidePhoto() {
+    $('lightbox').hidden = true;
+    $('lightbox').classList.remove('zoom');
+    $('lbImg').removeAttribute('src');
+  }
+
+  function turnPage(step) {
+    var m = MEDIA[LBAT];
+    var pages = Number(m.page_count || 1);
+    var next = LBPAGE + step;
+    if (next < 1 || next > pages) return;
+    showMedia(LBAT, next);
+  }
+
+  $('lbClose').addEventListener('click', hidePhoto);
+  $('lbPrev').addEventListener('click', function () { showMedia(LBAT - 1); });
+  $('lbNext').addEventListener('click', function () { showMedia(LBAT + 1); });
+  $('lbBack').addEventListener('click', function () { showMedia(LBAT - 1); });
+  $('lbFwd').addEventListener('click', function () { showMedia(LBAT + 1); });
+  $('lbPagePrev').addEventListener('click', function () { turnPage(-1); });
+  $('lbPageNext').addEventListener('click', function () { turnPage(1); });
+
+  $('lbZoom').addEventListener('click', function () {
+    $('lightbox').classList.toggle('zoom');
+    $('lbZoom').textContent = $('lightbox').classList.contains('zoom') ? 'Fit to window' : 'Zoom to fill';
+  });
+  $('lbFrame').addEventListener('click', function () { $('lbZoom').click(); });
+
+  /* Rotation is saved on the record and turned on display — the file on disk
+     stays as the camera wrote it. */
+  $('lbRotate').addEventListener('click', function () {
+    var m = MEDIA[LBAT];
+    api('/api/documents/' + m.id + '/rotate', { method: 'PATCH', body: JSON.stringify({ turn: 90 }) })
+      .then(function (r) {
+        m.rotation = r.rotation;
+        $('lbImg').style.transform = r.rotation ? 'rotate(' + r.rotation + 'deg)' : '';
+        var cell = document.querySelector('[data-media="' + LBAT + '"] img');
+        if (cell) cell.style.transform = r.rotation ? 'rotate(' + r.rotation + 'deg)' : '';
+      }).catch(function (e) {
+        var m = $('dMsg');
+        if (m) { m.textContent = e.message; m.className = 'msg err'; }
+      });
+  });
+
+  $('lightbox').addEventListener('click', function (e) { if (e.target.id === 'lightbox') hidePhoto(); });
+
+  /* ---------------------------------------------------------------- wiring */
+
+  $('vTable').addEventListener('click', function () { VIEW = 'table'; saveCols(); syncView(); render(); });
+  $('vCycle').addEventListener('click', function () { VIEW = 'cycle'; saveCols(); syncView(); render(); });
+
+  $('colBtn').addEventListener('click', function (e) {
+    e.stopPropagation();
+    $('colPanel').hidden = !$('colPanel').hidden;
+  });
+  document.addEventListener('click', function (e) {
+    var p = $('colPanel');
+    if (!p.hidden && !p.contains(e.target) && e.target.id !== 'colBtn') p.hidden = true;
+  });
+
+  function on(id, ev, fn) {
+    var el = $(id);
+    if (el) el.addEventListener(ev, fn);
+  }
+
+  on('fGroup', 'change', function () { fillStatusFilter(this.value); render(); });
+  on('fStatus', 'change', render);
+  on('fSearch', 'input', render);
+  on('fTech', 'change', render);
+  on('fDone', 'change', render);
+  on('fClosed', 'change', function () { load(); });
+  on('fPrint', 'click', function () { window.print(); });
+
+  /* Ctrl+P and the toolbar button both come through here, so the sheet is built
+     the same way either way. */
+  window.addEventListener('beforeprint', function () { PRINTING = true; render(); });
+  window.addEventListener('afterprint', function () { PRINTING = false; render(); });
+  on('refresh', 'click', function () { load(); });
+  on('scrim', 'click', tryCloseRo);
+  on('dClose', 'click', tryCloseRo);
+
+  on('gKeep', 'click', function () { $('guard').hidden = true; });
+  on('gDiscard', 'click', closeRo);
+  on('gSave', 'click', function () {
+    var btn = $('gSave');
+    btn.disabled = true;
+    $('gMsg').textContent = 'Saving…';
+    $('gMsg').className = 'msg ok';
+
+    saveAll().then(function () {
+      btn.disabled = false;
+      closeRo();
+      return load().then(function () { Shell.refreshCount(); });
+    }).catch(function (e) {
+      btn.disabled = false;
+      $('gMsg').textContent = e.message + ' — nothing after that point was saved.';
+      $('gMsg').className = 'msg err';
+    });
+  });
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') {
+      if (!$('lightbox').hidden) hidePhoto();
+      else if ($('colPanel') && !$('colPanel').hidden) $('colPanel').hidden = true;
+      else if (!$('guard').hidden) $('guard').hidden = true;
+      else tryCloseRo();
+    }
+    if (!$('lightbox').hidden) {
+      var m = MEDIA[LBAT] || {};
+      /* Up and down turn the pages of a PDF; left and right change document. */
+      if (e.key === 'ArrowLeft') showMedia(LBAT - 1);
+      if (e.key === 'ArrowRight') showMedia(LBAT + 1);
+      if (m.is_pdf && e.key === 'ArrowUp') turnPage(-1);
+      if (m.is_pdf && e.key === 'ArrowDown') turnPage(1);
+    }
+  });
+  on('newRo', 'click', function () { location.href = '/new-ro.html'; });
+  on('dDocs', 'click', function () {
+    var drop = $('drop');
+    if (!drop) return;
+    // The block may be folded away; open it before scrolling to it.
+    var body = drop.closest('.foldbody');
+    if (body && body.hidden) {
+      var sec = body.previousElementSibling;
+      if (sec && sec.classList.contains('sec')) sec.click();
+    }
+    $('dLeft').scrollTop = drop.offsetTop - 60;
+  });
+  /* ------------------------------------------------------- close-out sheet
+   *
+   * What the shop made on the car, shown as the file is closed. Owner and
+   * accounting only. The arithmetic is the server's — the sheet posts what the
+   * desk punched in and renders the answer it gets back, so a browser that
+   * should not have these figures never receives the pieces they are made of.
+   */
+
+  function coSay(text, kind) {
+    var m = $('coMsg');
+    m.className = 'msg ' + (kind || '');
+    m.textContent = text || '';
+  }
+
+  function coClose() {
+    $('coScrim').hidden = true;
+    $('coSheet').hidden = true;
+    CO = null;
+  }
+
+  function openCloseout(roId, date, paid) {
+    api('/api/ro/' + roId + '/closeout').then(function (d) {
+      CO = {
+        roId: roId, date: date, paid: paid,
+        labour: (d.labour || []).map(function (e) { return Object.assign({}, e); }),
+        data: d, profit: d.profit
+      };
+      $('coTitle').textContent = 'Closing RO ' + d.roNumber;
+      $('coSub').textContent = 'Booked to ' + date + ' · marked ' + (paid ? 'paid' : 'not paid');
+      $('coScrim').hidden = false;
+      $('coSheet').hidden = false;
+      coSay('');
+      coRender();
+    }).catch(function (e) {
+      /* No sheet for this person. Closing still works — it is the figures that
+         are withheld, not the ability to do the job. */
+      if (/owner|permitted/i.test(e.message)) {
+        api('/api/ro/' + roId + '/close', {
+          method: 'POST', body: JSON.stringify({ paid: paid, closeDate: date })
+        }).then(function () { say('Closed and booked to ' + date + '.', 'ok'); closeRo(); load(); })
+          .catch(function (err) { say(err.message, 'err'); });
+        return;
+      }
+      say(e.message, 'err');
+    });
+  }
+
+  /** Ask the server what this adds up to. Debounced; typing is not a decision. */
+  var coTimer = null;
+  function coPreview() {
+    if (coTimer) clearTimeout(coTimer);
+    coTimer = setTimeout(function () {
+      if (!CO) return;
+      api('/api/ro/' + CO.roId + '/closeout/preview', {
+        method: 'POST',
+        body: JSON.stringify({
+          labour: CO.labour,
+          materialsFlatCents: CO.materialsFlatCents,
+          rentalCostCents: CO.rentalCostCents
+        })
+      }).then(function (res) {
+        if (!CO) return;
+        CO.profit = res.profit;
+        CO.labour = res.labour.map(function (e, i) {
+          /* Keep the display fields the sheet renders from; the server only
+             returns the figures it needs. */
+          return Object.assign({}, CO.labour[i], e);
+        });
+        coRender();
+      }).catch(function (e) { coSay(e.message, 'err'); });
+    }, 260);
+  }
+
+  function coRender() {
+    if (!CO) return;
+    var d = CO.data, p = CO.profit || { lines: [] };
+    var out = [];
+
+    out.push('<div class="cosec">Labour</div>');
+    if (!CO.labour.length) {
+      out.push('<div class="conote warn">Nobody is assigned to this car, so there is no labour on it. ' +
+        'Assign a tech on the file if that is wrong.</div>');
+    } else {
+      out.push('<div class="cosub">Hours at their rate, a flat dollar, or the estimate’s own hours. ' +
+        'PDR can take a share of the job instead.</div>');
+      out.push('<div class="labhead">' +
+        '<div>Tech</div><div class="hide-sm">Trade</div><div>Basis</div>' +
+        '<div style="text-align:right">Figure</div>' +
+        '<div class="hide-sm" style="text-align:right">Rate</div>' +
+        '<div style="text-align:right">Cost</div></div>');
+
+      CO.labour.forEach(function (e, i) {
+        var pct = e.basis === 'pct';
+        var ems = e.basis === 'ems';
+        var flat = e.basis === 'flat';
+        var noRate = !pct && !flat && !e.rateCents;
+        var shown = flat ? dollars(e.hours) : (pct ? e.ratePct : e.hours);
+
+        out.push('<div class="labrow">' +
+          '<div class="who">' + esc(e.displayName || 'Unassigned') + '</div>' +
+          '<div class="tr hide-sm">' + esc(e.label) + '</div>' +
+          '<div><div class="segsm">' +
+            (e.canPct
+              ? '<button class="' + (flat ? 'on' : '') + '" data-b="flat" data-i="' + i + '">$</button>' +
+                '<button class="' + (pct ? 'on' : '') + '" data-b="pct" data-i="' + i + '">%</button>'
+              : '<button class="' + (e.basis === 'hours' ? 'on' : '') + '" data-b="hours" data-i="' + i + '">Hours</button>' +
+                '<button class="' + (flat ? 'on' : '') + '" data-b="flat" data-i="' + i + '">$</button>' +
+                '<button class="' + (ems ? 'on' : '') + '" data-b="ems" data-i="' + i + '">EMS</button>') +
+          '</div></div>' +
+          '<div style="display:flex;justify-content:flex-end;align-items:center;gap:6px">' +
+            (flat ? '<span class="tr">$</span>' : '') +
+            '<input class="' + (flat ? 'wide' : '') + '" data-v="' + i + '" value="' + esc(String(shown)) +
+              '"' + (ems ? ' disabled' : '') + '>' +
+            (pct ? '<span class="tr">%</span>' : '') +
+            (ems ? '<span class="tr">' + (e.emsHours > 0 ? 'pulled' : 'nothing to pull') + '</span>' : '') +
+          '</div>' +
+          '<div class="rt hide-sm' + (noRate ? ' none' : '') + '">' +
+            (pct || flat ? '—' : (e.rateCents ? money(e.rateCents) + '/hr' : 'none set')) + '</div>' +
+          '<div class="ct">' + money(coCostOf(e)) + '</div>' +
+        '</div>');
+
+        if (pct) {
+          out.push('<div class="pdrline"><span>' +
+            (e.pctAfterCosts
+              ? 'A share of what is left once parts, sublet, rental, materials and the other techs are paid.'
+              : 'A share of the approval amount, before any cost comes out.') +
+            '</span><div class="spacer"></div><div class="segsm">' +
+            '<button class="' + (e.pctAfterCosts ? '' : 'on') + '" data-pdr="before" data-i="' + i + '">Before costs</button>' +
+            '<button class="' + (e.pctAfterCosts ? 'on' : '') + '" data-pdr="after" data-i="' + i + '">After costs</button>' +
+            '</div></div>');
+        }
+      });
+    }
+
+    /* Paint materials: hours × the shop rate, or a figure by hand when the
+       painter is on a flat dollar and there are no hours to work from. */
+    var paint = CO.labour.filter(function (e) { return e.positionKey === 'paint'; })[0];
+    if (paint) {
+      var ph = paint.basis === 'flat' ? 0 : Number(paint.hours) || 0;
+      var mline = (p.lines || []).filter(function (l) { return l.key === 'materials'; })[0];
+      out.push('<div class="cosec">Paint materials</div>');
+      out.push('<div class="onerow"><div>' +
+        (ph > 0 ? ph + ' paint hours at the shop rate' : 'No paint hours — enter a figure') + '</div>' +
+        '<div>' + (ph > 0 ? '' :
+          '<span class="tr">$</span> <input id="coMat" value="' +
+          esc(dollars(CO.materialsFlatCents == null ? d.materialsFlatCents : CO.materialsFlatCents)) + '">') +
+        '</div><div class="ct">' + money(mline ? mline.cents : 0) + '</div></div>');
+    }
+
+    /* Rental: the price is the only thing this screen may touch. */
+    var rline = (p.lines || []).filter(function (l) { return l.key === 'rental'; })[0];
+    out.push('<div class="cosec">Rental</div>');
+    out.push('<div class="onerow"><div>' +
+      (d.rental.provider
+        ? esc(d.rental.provider) + (d.rental.covered ? ' — covered' : ' — not covered') +
+          '. Provider and coverage are set on the file.'
+        : 'No rental on this file.') + '</div>' +
+      '<div><span class="tr">$</span> <input id="coRent" value="' +
+        esc(dollars(CO.rentalCostCents == null ? d.rental.costCents : CO.rentalCostCents)) + '"></div>' +
+      '<div class="ct">' + money(rline ? rline.cents : 0) + '</div></div>');
+
+    out.push('<div class="cosec">What we made</div><div class="plines">');
+    out.push('<div class="pline"><div><div class="l top">Approval</div>' +
+      '<div class="n">What the insurer approved</div></div>' +
+      '<div class="v top">' + money(p.approvalCents) + '</div></div>');
+    (p.lines || []).forEach(function (l) {
+      out.push('<div class="pline"><div><div class="l">' + esc(l.label) + '</div>' +
+        '<div class="n">' + esc(l.note) + '</div></div>' +
+        '<div class="v' + (l.cents ? '' : ' zero') + '">− ' + money(l.cents) + '</div></div>');
+    });
+    out.push('<div class="profrow"><div>' +
+      '<div style="font:500 13px var(--font)">Profit</div>' +
+      '<div class="n" style="font:400 10px var(--font);color:var(--dim);margin-top:3px">' +
+        'Percentage is of the approval amount' + (p.thin ? ' — thin for this shop' : '') + '</div></div>' +
+      '<div style="display:flex;align-items:baseline;gap:12px">' +
+      '<div class="pc' + (p.thin ? ' thin' : '') + '">' + (p.profitPct || 0).toFixed(1) + '%</div>' +
+      '<div class="big' + (p.profitCents < 0 ? ' bad' : '') + '">' + money(p.profitCents) + '</div>' +
+      '</div></div></div>');
+
+    $('coBody').innerHTML = out.join('');
+    coWire();
+  }
+
+  /** What a row costs, for the row's own display. The total is the server's. */
+  function coCostOf(e) {
+    if (e.basis === 'pct') {
+      var l = ((CO.profit || {}).lines || []).filter(function (x) { return x.key === 'pdr'; })[0];
+      return l ? l.cents : 0;
+    }
+    if (e.basis === 'flat') return Math.round(Number(e.hours) || 0);
+    return Math.round((Number(e.hours) || 0) * (Number(e.rateCents) || 0));
+  }
+
+  function coWire() {
+    Array.prototype.forEach.call($('coBody').querySelectorAll('.segsm button[data-b]'), function (b) {
+      b.addEventListener('click', function () {
+        var e = CO.labour[Number(b.dataset.i)];
+        var was = e.basis;
+        e.basis = b.dataset.b;
+        /* Switching to hours or EMS means the figure was a dollar amount and is
+           now hours — carry across what makes sense rather than a wrong number. */
+        if (e.basis === 'ems') e.hours = e.emsHours || 0;
+        else if (e.basis === 'flat' && was !== 'flat') e.hours = coCostOf({ basis: was, hours: e.hours, rateCents: e.rateCents });
+        else if (was === 'flat' && e.basis === 'hours') e.hours = 0;
+        if (e.basis === 'pct' && !e.ratePct) e.ratePct = e.ratePctOnFile || 0;
+        if (e.basis !== 'flat' && !e.rateCents) e.rateCents = e.rateOnFile || 0;
+        coRender();
+        coPreview();
+      });
+    });
+
+    Array.prototype.forEach.call($('coBody').querySelectorAll('.segsm button[data-pdr]'), function (b) {
+      b.addEventListener('click', function () {
+        CO.labour[Number(b.dataset.i)].pctAfterCosts = b.dataset.pdr === 'after';
+        coRender();
+        coPreview();
+      });
+    });
+
+    Array.prototype.forEach.call($('coBody').querySelectorAll('input[data-v]'), function (inp) {
+      inp.addEventListener('change', function () {
+        var e = CO.labour[Number(inp.dataset.v)];
+        if (e.basis === 'pct') e.ratePct = parseFloat(inp.value) || 0;
+        else if (e.basis === 'flat') e.hours = toCents(inp.value);
+        else e.hours = parseFloat(inp.value) || 0;
+        coPreview();
+      });
+    });
+
+    var m = $('coMat');
+    if (m) m.addEventListener('change', function () {
+      CO.materialsFlatCents = toCents(m.value);
+      coPreview();
+    });
+    var rn = $('coRent');
+    if (rn) rn.addEventListener('change', function () {
+      CO.rentalCostCents = toCents(rn.value);
+      coPreview();
+    });
+  }
+
+  $('coX').addEventListener('click', coClose);
+  $('coCancel').addEventListener('click', coClose);
+  $('coScrim').addEventListener('click', coClose);
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && CO) coClose(); });
+
+  $('coDo').addEventListener('click', function () {
+    if (!CO) return;
+    var btn = this;
+    btn.disabled = true;
+    api('/api/ro/' + CO.roId + '/close', {
+      method: 'POST',
+      body: JSON.stringify({
+        paid: CO.paid, closeDate: CO.date, labour: CO.labour
+      })
+    }).then(function (res) {
+      btn.disabled = false;
+      var when = CO.date;
+      var made = res.profit ? ' Made ' + money(res.profit.profitCents) +
+        ' at ' + res.profit.profitPct.toFixed(1) + '%.' : '';
+      coClose();
+      say('Closed and booked to ' + when + '.' + made, 'ok');
+      closeRo();
+      load();
+    }).catch(function (e) {
+      btn.disabled = false;
+      coSay(e.message, 'err');
+    });
+  });
+
+})();
+</script>
+</body>
+</html>

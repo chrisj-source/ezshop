@@ -1,0 +1,385 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1c2740">
+<title>Messages — Easy Shop</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/shell.css?v=7">
+<style>
+  #main { flex:1; min-height:0; display:flex; flex-direction:column; }
+  .titlerow { display:flex; align-items:flex-end; gap:22px; padding:16px 18px 0; flex:none; }
+  .titlerow h1 { font:500 18px var(--font); margin:0; }
+  .titlemeta { font:400 11.5px var(--font); color:var(--dim); margin-top:4px; }
+
+  .ctrls { display:flex; align-items:center; gap:9px; padding:14px 18px 12px; flex:none; flex-wrap:wrap; }
+  .tabs { display:flex; border:1px solid var(--line); border-radius:5px; overflow:hidden; }
+  .tabs button {
+    font:400 11.5px var(--font); color:var(--dim); background:transparent; border:none;
+    border-right:1px solid var(--line); padding:6px 13px;
+  }
+  .tabs button:last-child { border-right:none; }
+  .tabs button.sel { background:var(--chip); color:var(--acc); font-weight:500; }
+  .search {
+    background:var(--surf); border:1px solid var(--line); border-radius:5px; color:var(--text);
+    font:400 11.5px var(--font); padding:6px 10px; width:240px;
+  }
+  .linkbtn { font:400 11.5px var(--font); color:var(--dim); background:none; border:none; padding:6px 4px; }
+  .linkbtn:hover { color:var(--acc); }
+  .dangerbtn {
+    font:500 11.5px var(--font); color:var(--stopped); background:transparent;
+    border:1px solid var(--stopped); border-radius:4px; padding:5px 11px;
+  }
+  .ghost2 {
+    font:400 11.5px var(--font); color:var(--muted); background:transparent;
+    border:1px solid var(--line); border-radius:4px; padding:5px 11px;
+  }
+  .selbar {
+    display:flex; align-items:center; gap:10px; margin:0 18px 10px; padding:9px 13px;
+    background:var(--chip); border-radius:6px; flex:none;
+  }
+  .selbar .n { font:500 11.5px var(--font); }
+
+  .cols { display:grid; grid-template-columns:minmax(0,1fr) 420px; flex:1; min-height:0; }
+  .list { border-top:1px solid var(--line); border-right:1px solid var(--whisper); overflow-y:auto; min-height:0; }
+  .lhead {
+    display:grid; grid-template-columns:20px minmax(0,1fr) 150px 96px 54px; gap:12px;
+    align-items:center; padding:8px 18px; border-bottom:1px solid var(--whisper);
+    font:600 8.5px var(--font); letter-spacing:.12em; text-transform:uppercase; color:var(--dim);
+  }
+  .row {
+    display:grid; grid-template-columns:20px minmax(0,1fr) 150px 96px 54px; gap:12px;
+    align-items:center; padding:11px 18px; border-bottom:1px solid var(--whisper); cursor:pointer;
+  }
+  .row:hover { background:var(--whisper); }
+  .row.sel { background:var(--whisper); box-shadow:inset 2px 0 0 var(--acc); }
+  .row .t { display:flex; align-items:center; gap:8px; min-width:0; }
+  .row .dot { width:6px; height:6px; border-radius:50%; background:var(--acc); flex:none; }
+  .row.read .dot { background:transparent; }
+  .row .ev {
+    font:600 8.5px var(--font); letter-spacing:.08em; text-transform:uppercase; color:var(--acc2);
+    flex:none;
+  }
+  .row .ti { font:500 12.5px var(--font); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .row.read .ti { font-weight:400; color:var(--muted); }
+  .row .b {
+    font:400 11.5px var(--font); color:var(--dim); margin-top:3px; margin-left:14px;
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  }
+  .row .cell { font:400 11.5px var(--font); color:var(--muted); }
+  .row .cell.dim { color:var(--dim); }
+  .tick {
+    width:16px; height:16px; border-radius:4px; border:1px solid var(--line); background:transparent;
+    display:grid; place-items:center; font:600 9px var(--font); color:transparent; padding:0;
+  }
+  .tick.on { background:var(--acc); border-color:var(--acc); color:var(--bg); }
+  .del {
+    font:400 10px var(--font); color:var(--dim); background:transparent;
+    border:1px solid var(--line); border-radius:4px; padding:3px 7px;
+  }
+  .del:hover { color:var(--stopped); border-color:var(--stopped); }
+
+  .side { border-top:1px solid var(--line); background:var(--surf); overflow-y:auto; min-height:0; padding:16px 18px 24px; }
+  .side h2 { font:500 16px var(--font); margin:9px 0 0; }
+  .side .sub { font:400 11.5px var(--font); color:var(--dim); }
+  .side .bodytext { font:400 13px/1.6 var(--font); color:var(--muted); margin-top:9px; text-wrap:pretty; }
+  .sechead {
+    font:600 8.5px var(--font); letter-spacing:.12em; text-transform:uppercase; color:var(--acc2);
+    margin:18px 0 8px; padding-bottom:7px; border-bottom:1px solid var(--whisper);
+  }
+  .filecard { padding:12px 14px; background:var(--chip); border-radius:6px; }
+  .filecard .n { font:500 13.5px var(--font); }
+  .filecard .v { font:400 12px var(--font); color:var(--muted); margin-top:3px; }
+  .drow { display:flex; align-items:center; gap:10px; padding:8px 0; border-bottom:1px solid var(--whisper); }
+  .drow .pip { width:5px; height:5px; border-radius:50%; background:var(--line); flex:none; }
+  .drow .pip.on { background:var(--done); }
+  .drow .ch { width:70px; font:500 11.5px var(--font); }
+  .drow .ad { flex:1; font:400 11.5px var(--font); color:var(--dim); }
+  .drow .st { font:400 11px var(--font); color:var(--muted); }
+  .foot { font:400 10.5px/1.55 var(--font); color:var(--dim); margin-top:10px; }
+  .actions { display:flex; gap:8px; margin-top:12px; }
+  .primary {
+    font:500 11.5px var(--font); color:var(--acc); background:transparent;
+    border:1px solid var(--acc); border-radius:4px; padding:6px 12px;
+  }
+  .empty { padding:60px 18px; text-align:center; font:400 12.5px var(--font); color:var(--dim); }
+  .msg { font:400 11.5px var(--font); color:var(--stopped); }
+  .msg.ok { color:var(--acc2); }
+
+  @media (max-width:1100px) { .cols { grid-template-columns:1fr; } .side { display:none; } }
+  @media (max-width:760px) {
+    .lhead { display:none; }
+    .row { grid-template-columns:20px minmax(0,1fr) 44px; }
+    .row .hide-sm { display:none; }
+    .search { width:100%; }
+  }
+</style>
+</head>
+<body>
+
+<div class="bar">
+  <div class="brand"><div class="mark">ES</div><div class="word">Easy Shop</div></div>
+  <div class="vr"></div>
+  <div class="co" id="coName">—</div>
+  <div id="nav"></div>
+  <div class="spacer"></div>
+  <div id="bell"></div>
+  <div class="who" id="who">—</div>
+  <button class="ghostbtn" id="signout">Sign out</button>
+</div>
+<div class="hairline"></div>
+
+<div class="titlerow">
+  <div>
+    <h1>Messages</h1>
+    <div class="titlemeta" id="headmeta">Loading…</div>
+  </div>
+</div>
+
+<div class="ctrls">
+  <div class="tabs" id="tabs"></div>
+  <input class="search" id="q" placeholder="Search messages">
+  <button class="linkbtn" id="markAllBtn">Mark all read</button>
+  <button class="linkbtn" id="delOld">Delete everything read</button>
+  <span class="msg" id="msg"></span>
+</div>
+
+<div id="selbar"></div>
+<div id="main"></div>
+
+<script src="/shell.js?v=8"></script>
+<script>
+(function () {
+  var api = Shell.api, esc = Shell.esc, when = Shell.when;
+  var ME = null, FILTER = 'new', DATA = null, SEL = null, PICKED = {}, DETAIL = null, Q = '';
+
+  function $(id) { return document.getElementById(id); }
+  function say(text, ok) {
+    var m = $('msg');
+    m.className = 'msg' + (ok ? ' ok' : '');
+    m.textContent = text || '';
+    if (text) setTimeout(function () { if (m.textContent === text) m.textContent = ''; }, 6000);
+  }
+  function pickedIds() {
+    return Object.keys(PICKED).filter(function (k) { return PICKED[k]; }).map(Number);
+  }
+
+  api('/api/me').then(function (me) {
+    ME = me;
+    Shell.mount({ me: me, active: 'messages' });
+    return load();
+  }).catch(function (e) { if (e.message !== 'signed out') console.error(e); });
+
+  function load() {
+    var qs = '?filter=' + FILTER + (Q ? '&q=' + encodeURIComponent(Q) : '');
+    return api('/api/inbox' + qs).then(function (d) {
+      DATA = d;
+      if (SEL && !d.items.some(function (i) { return i.id === SEL; })) SEL = null;
+      if (!SEL && d.items.length) SEL = d.items[0].id;
+      renderTabs();
+      renderHead();
+      render();
+      return SEL ? loadDetail(SEL) : null;
+    });
+  }
+
+  function renderHead() {
+    $('headmeta').textContent = ME.user.name +
+      (ME.roleLabel ? ' · ' + ME.roleLabel : '') +
+      ' · everything addressed to you · ' + DATA.unread + ' new, ' + DATA.old + ' read';
+  }
+
+  function renderTabs() {
+    var tabs = [['new', 'New', DATA.unread], ['old', 'Old', DATA.old], ['all', 'All', DATA.total]];
+    $('tabs').innerHTML = tabs.map(function (t) {
+      return '<button data-f="' + t[0] + '" class="' + (FILTER === t[0] ? 'sel' : '') + '">' +
+        esc(t[1]) + ' <span style="opacity:.7">' + t[2] + '</span></button>';
+    }).join('');
+    Array.prototype.forEach.call($('tabs').querySelectorAll('button'), function (b) {
+      b.addEventListener('click', function () {
+        FILTER = b.dataset.f; PICKED = {}; load();
+      });
+    });
+  }
+
+  function renderSelbar() {
+    var ids = pickedIds();
+    if (!ids.length) { $('selbar').innerHTML = ''; return; }
+    $('selbar').innerHTML = '<div class="selbar">' +
+      '<div class="n">' + ids.length + ' message' + (ids.length === 1 ? '' : 's') + ' selected</div>' +
+      '<div style="margin-left:auto;display:flex;gap:8px">' +
+      '<button class="ghost2" id="selRead">Mark read</button>' +
+      '<button class="dangerbtn" id="selDel">Delete ' + ids.length + '</button>' +
+      '<button class="linkbtn" id="selClear">Cancel</button></div></div>';
+
+    $('selRead').addEventListener('click', function () {
+      Promise.all(ids.map(function (id) {
+        return api('/api/inbox/' + id + '/read', { method: 'POST', body: JSON.stringify({ read: true }) });
+      })).then(function () { PICKED = {}; Shell.refreshCount(); return load(); });
+    });
+    $('selDel').addEventListener('click', function () { del(ids); });
+    $('selClear').addEventListener('click', function () { PICKED = {}; render(); });
+  }
+
+  function del(ids) {
+    api('/api/inbox/delete', { method: 'POST', body: JSON.stringify({ ids: ids }) })
+      .then(function (r) {
+        PICKED = {};
+        if (ids.indexOf(SEL) >= 0) { SEL = null; DETAIL = null; }
+        say(r.deleted + ' deleted from your list. The record stays.', true);
+        Shell.refreshCount();
+        return load();
+      }).catch(function (e) { say(e.message); });
+  }
+
+  function render() {
+    renderSelbar();
+    var h = ['<div class="cols"><div class="list">' +
+      '<div class="lhead"><div></div><div>Message</div><div class="hide-sm">File</div>' +
+      '<div class="hide-sm">When</div><div></div></div>'];
+
+    if (!DATA.items.length) {
+      h.push('<div class="empty">' +
+        (FILTER === 'new' ? 'Nothing new. You are caught up.'
+          : FILTER === 'old' ? 'Nothing read yet.' : 'No messages.') + '</div>');
+    }
+
+    DATA.items.forEach(function (n) {
+      var file = n.ro_number ? 'RO ' + n.ro_number : (n.lead_number ? 'Lead ' + n.lead_number : '—');
+      h.push('<div class="row' + (n.read_at ? ' read' : '') + (n.id === SEL ? ' sel' : '') +
+        '" data-id="' + n.id + '">' +
+        '<button class="tick' + (PICKED[n.id] ? ' on' : '') + '" data-pick="' + n.id + '">✓</button>' +
+        '<div><div class="t"><div class="dot"></div>' +
+        '<div class="ev">' + esc(eventLabel(n.event_key)) + '</div>' +
+        '<div class="ti">' + esc(n.title) + '</div></div>' +
+        '<div class="b">' + esc(n.body || '') + '</div></div>' +
+        '<div class="cell hide-sm">' + esc(file) + '</div>' +
+        '<div class="cell dim hide-sm">' + when(n.created_at) + '</div>' +
+        '<div style="text-align:right"><button class="del" data-del="' + n.id + '">Del</button></div>' +
+        '</div>');
+    });
+
+    h.push('</div><div class="side" id="side"></div></div>');
+    $('main').innerHTML = h.join('');
+
+    Array.prototype.forEach.call($('main').querySelectorAll('[data-pick]'), function (b) {
+      b.addEventListener('click', function (e) {
+        e.stopPropagation();
+        var id = b.dataset.pick;
+        PICKED[id] = !PICKED[id];
+        render();
+      });
+    });
+    Array.prototype.forEach.call($('main').querySelectorAll('[data-del]'), function (b) {
+      b.addEventListener('click', function (e) { e.stopPropagation(); del([Number(b.dataset.del)]); });
+    });
+    Array.prototype.forEach.call($('main').querySelectorAll('.row'), function (row) {
+      row.addEventListener('click', function () {
+        SEL = Number(row.dataset.id);
+        var n = DATA.items.filter(function (i) { return i.id === SEL; })[0];
+        if (n && !n.read_at) {
+          api('/api/inbox/' + SEL + '/read', { method: 'POST', body: JSON.stringify({ read: true }) })
+            .then(function () { Shell.refreshCount(); return load(); });
+          return;
+        }
+        render();
+        loadDetail(SEL);
+      });
+    });
+
+    renderSide();
+  }
+
+  /* The event key is how the router names the thing that happened; this is what
+     a person calls it. Anything unmapped shows its own key rather than nothing. */
+  var EVENTS = {
+    'parts.arrived': 'Parts', 'parts.late': 'Parts', 'parts.return_open': 'Parts',
+    'parts.ordered': 'Parts', 'status.change': 'Status', 'estimate.approved': 'Approval',
+    'lead.stale': 'Lead', 'lead.new': 'Lead', 'ro.total_loss': 'Total loss',
+    'ro.voided': 'Void', 'pay.period_closed': 'Payroll', 'rental.long': 'Rental',
+    'ro.closed': 'Closed', 'appointment.booked': 'Schedule'
+  };
+  function eventLabel(k) { return EVENTS[k] || String(k || '').split('.')[0] || 'Message'; }
+
+  function loadDetail(id) {
+    return api('/api/inbox/' + id).then(function (d) {
+      DETAIL = d;
+      renderSide();
+    }).catch(function () { DETAIL = null; renderSide(); });
+  }
+
+  function renderSide() {
+    var side = $('side');
+    if (!side) return;
+    if (!SEL || !DETAIL || DETAIL.message.id !== SEL) {
+      side.innerHTML = '<div class="empty">Pick a message to read it.</div>';
+      return;
+    }
+    var m = DETAIL.message;
+    var file = m.ro_number ? 'RO ' + m.ro_number : (m.lead_number ? 'Lead ' + m.lead_number : null);
+
+    var h = ['<div style="display:flex;align-items:center;gap:10px">' +
+      '<div class="ev" style="font:600 8.5px var(--font);letter-spacing:.08em;text-transform:uppercase;color:var(--acc2)">' +
+      esc(eventLabel(m.event_key)) + '</div>' +
+      '<div class="sub">' + esc(new Date(m.created_at).toLocaleString()) + ' · ' +
+      (m.read_at ? 'read' : 'new') + '</div>' +
+      '<div style="margin-left:auto;display:flex;gap:7px">' +
+      '<button class="ghost2" id="flip">' + (m.read_at ? 'Mark unread' : 'Mark read') + '</button>' +
+      '<button class="dangerbtn" id="delOne">Delete</button></div></div>',
+      '<h2>' + esc(m.title) + '</h2>',
+      '<div class="bodytext">' + esc(m.body || '') + '</div>'];
+
+    if (file) {
+      h.push('<div class="sechead">File</div>' +
+        '<div class="filecard"><div class="n">' + esc(file) + '</div>' +
+        '<div class="v">Everything that needs doing is done in the file.</div>' +
+        '<div class="actions"><button class="primary" id="openFile">Open the file</button></div></div>');
+    }
+
+    h.push('<div class="sechead">Delivery</div>');
+    DETAIL.deliveries.forEach(function (d) {
+      var on = d.state === 'sent' || d.state === 'pending';
+      h.push('<div class="drow"><div class="pip' + (on ? ' on' : '') + '"></div>' +
+        '<div class="ch">' + esc(d.channel === 'app' ? 'In-app' : d.channel === 'sms' ? 'SMS' : 'Email') + '</div>' +
+        '<div class="ad">' + esc(d.address || (d.state === 'off' ? 'not switched on' : '—')) + '</div>' +
+        '<div class="st">' + esc(d.state === 'off' ? 'Off' : d.state) + '</div></div>');
+    });
+    h.push('<div class="foot">This message is stored against you, not against the event — so email and ' +
+      'SMS become further deliveries on this same row when the shop switches them on.</div>');
+
+    side.innerHTML = h.join('');
+
+    $('flip').addEventListener('click', function () {
+      api('/api/inbox/' + SEL + '/read', {
+        method: 'POST', body: JSON.stringify({ read: !m.read_at })
+      }).then(function () { Shell.refreshCount(); return load(); });
+    });
+    $('delOne').addEventListener('click', function () { del([SEL]); });
+    var of = $('openFile');
+    if (of) of.addEventListener('click', function () {
+      location.href = m.ro_id ? '/board.html?ro=' + m.ro_id : '/leads.html?lead=' + m.lead_id;
+    });
+  }
+
+  $('q').addEventListener('input', function () {
+    Q = this.value;
+    clearTimeout(window.__qt);
+    window.__qt = setTimeout(load, 250);
+  });
+  $('markAllBtn').addEventListener('click', function () {
+    api('/api/inbox/mark-all', { method: 'POST', body: JSON.stringify({ read: true }) })
+      .then(function () { Shell.refreshCount(); return load(); });
+  });
+  $('delOld').addEventListener('click', function () {
+    api('/api/inbox/delete', { method: 'POST', body: JSON.stringify({ all: 'old' }) })
+      .then(function (r) {
+        say(r.deleted + ' read message' + (r.deleted === 1 ? '' : 's') + ' cleared from your list.', true);
+        SEL = null; DETAIL = null;
+        return load();
+      }).catch(function (e) { say(e.message); });
+  });
+})();
+</script>
+</body>
+</html>

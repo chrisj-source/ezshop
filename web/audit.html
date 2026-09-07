@@ -1,0 +1,387 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1c2740">
+<title>Audit log — Easy Shop</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/shell.css?v=7">
+<style>
+  #main { flex:1; min-height:0; display:flex; flex-direction:column; }
+  .adminbar { display:flex; align-items:center; gap:18px; padding:12px 18px 0; flex:none; flex-wrap:wrap; }
+  .atab {
+    font:500 11.5px var(--font); padding:0 0 9px; background:none; border:none;
+    color:var(--dim); border-bottom:2px solid transparent; text-decoration:none;
+  }
+  .atab:hover { color:var(--muted); }
+  .atab.sel { color:var(--text); border-bottom-color:var(--acc); }
+  .abarline { height:1px; background:var(--line); flex:none; }
+
+  .titlerow { display:flex; align-items:flex-end; gap:22px; padding:16px 18px 0; flex:none; flex-wrap:wrap; }
+  .titlerow h1 { font:500 18px var(--font); margin:0; }
+  .titlemeta { font:400 11.5px var(--font); color:var(--dim); margin-top:4px; }
+  .appendonly { margin-left:auto; font:400 11px var(--font); color:var(--dim); }
+
+  .ctrls { display:flex; align-items:center; gap:9px; padding:15px 18px 12px; flex:none; flex-wrap:wrap; }
+  .search {
+    background:var(--surf); border:1px solid var(--line); border-radius:5px; color:var(--text);
+    font:400 11.5px var(--font); padding:7px 10px; width:280px;
+  }
+  .pick {
+    background:var(--surf); border:1px solid var(--line); border-radius:5px; color:var(--text);
+    font:400 11.5px var(--font); padding:7px 10px;
+  }
+  .sensbtn {
+    font:400 11.5px var(--font); color:var(--dim); background:transparent;
+    border:1px solid var(--line); border-radius:5px; padding:7px 11px;
+  }
+  .sensbtn.on { color:var(--stopped); border-color:var(--stopped); background:rgba(224,138,138,.1); font-weight:500; }
+  .linkbtn { font:400 11.5px var(--font); color:var(--dim); background:none; border:none; padding:7px 4px; }
+  .linkbtn:hover { color:var(--acc); }
+
+  .cols {
+    display:grid; grid-template-columns:82px 156px 116px 118px minmax(0,1fr) 104px 26px;
+    gap:12px; padding:0 18px 8px; flex:none;
+    font:600 8.5px var(--font); letter-spacing:.12em; text-transform:uppercase; color:var(--dim);
+  }
+  .scroll { flex:1; min-height:0; overflow-y:auto; border-top:1px solid var(--line); }
+  .row {
+    display:grid; grid-template-columns:82px 156px 116px 118px minmax(0,1fr) 104px 26px;
+    gap:12px; align-items:center; padding:10px 18px; border-bottom:1px solid var(--whisper);
+    cursor:pointer;
+  }
+  .row:hover { background:var(--whisper); }
+  .row.sens { background:rgba(224,138,138,.07); box-shadow:inset 2px 0 0 var(--stopped); }
+  .row.open { background:var(--whisper); }
+  .cell { font:400 11.5px var(--font); font-variant-numeric:tabular-nums; color:var(--muted); }
+  .cell.dim { color:var(--dim); }
+  .who .n { font:400 12px var(--font); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .who .r { font:400 10px var(--font); color:var(--dim); }
+  .area { font:600 9.5px var(--font); letter-spacing:.07em; text-transform:uppercase; }
+  .label { font:400 12px var(--font); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .note { font:400 11px var(--font); color:var(--muted); }
+  .note.none { color:var(--dim); opacity:.75; }
+  .caret { font:400 12px var(--font); color:var(--dim); text-align:center; }
+
+  .panel { padding:16px 18px 20px; background:var(--surf); border-bottom:1px solid var(--line); }
+  .panel.sens { box-shadow:inset 2px 0 0 var(--stopped); }
+  .pgrid { display:grid; grid-template-columns:minmax(0,1fr) 340px; gap:26px; }
+  .sechead {
+    font:600 8.5px var(--font); letter-spacing:.12em; text-transform:uppercase; color:var(--acc2);
+    padding-bottom:7px; border-bottom:1px solid var(--whisper);
+  }
+  .chead, .crow {
+    display:grid; grid-template-columns:190px minmax(0,1fr) 16px minmax(0,1fr); gap:10px; align-items:center;
+  }
+  .chead { padding:9px 0 0; font:600 8px var(--font); letter-spacing:.1em; text-transform:uppercase; color:var(--dim); }
+  .crow { height:34px; border-top:1px solid var(--whisper); }
+  .cf { font:400 11.5px var(--font); color:var(--muted); }
+  .cfrom { font:400 12px var(--font); color:var(--dim); text-decoration:line-through; }
+  .carrow { font:400 11px var(--font); color:var(--dim); }
+  .cto { font:500 12px var(--font); }
+  .notebody { margin-top:9px; font:400 12px/1.55 var(--font); }
+  .notebody.none { color:var(--dim); font-style:italic; }
+  .mrow { display:flex; gap:12px; padding:7px 0; border-bottom:1px solid var(--whisper); }
+  .mk { width:104px; flex:none; font:400 10.5px var(--font); letter-spacing:.05em; text-transform:uppercase; color:var(--dim); }
+  .mv { font:400 11.5px var(--font); min-width:0; word-break:break-word; }
+  .pactions { display:flex; gap:8px; margin-top:12px; flex-wrap:wrap; }
+  .primary {
+    font:500 11.5px var(--font); color:var(--acc); background:transparent;
+    border:1px solid var(--acc); border-radius:4px; padding:6px 11px;
+  }
+  .ghost2 {
+    font:400 11.5px var(--font); color:var(--muted); background:transparent;
+    border:1px solid var(--line); border-radius:4px; padding:6px 11px;
+  }
+  .foot {
+    display:flex; align-items:center; gap:14px; padding:11px 18px; border-top:1px solid var(--line);
+    font:400 11px var(--font); color:var(--dim); flex:none; flex-wrap:wrap;
+  }
+  .empty { padding:70px 18px; text-align:center; font:400 12.5px var(--font); color:var(--dim); }
+  .more { padding:14px 18px 30px; text-align:center; }
+
+  @media (max-width:1180px) {
+    .cols, .row { grid-template-columns:76px 130px 104px minmax(0,1fr) 84px 26px; }
+    .cols .hide-md, .row .hide-md { display:none; }
+    .pgrid { grid-template-columns:1fr; }
+  }
+  @media (max-width:760px) {
+    .cols { display:none; }
+    .row { grid-template-columns:minmax(0,1fr) 26px; }
+    .row .hide-sm { display:none; }
+    .search { width:100%; }
+  }
+</style>
+</head>
+<body>
+
+<div class="bar">
+  <div class="brand"><div class="mark">ES</div><div class="word">Easy Shop</div></div>
+  <div class="vr"></div>
+  <div class="co" id="coName">—</div>
+  <div id="nav"></div>
+  <div class="spacer"></div>
+  <div id="bell"></div>
+  <div class="who" id="who">—</div>
+  <button class="ghostbtn" id="signout">Sign out</button>
+</div>
+<div class="hairline"></div>
+
+<div class="adminbar" id="tabs"></div>
+<div class="abarline"></div>
+
+<div class="titlerow">
+  <div>
+    <h1>Audit log</h1>
+    <div class="titlemeta" id="headmeta">Loading…</div>
+  </div>
+  <div class="appendonly">Append only · nothing here can be edited or deleted</div>
+</div>
+
+<div class="ctrls">
+  <input class="search" id="q" placeholder="Search a file, a person, a field, a value">
+  <select class="pick" id="who2"></select>
+  <select class="pick" id="area"></select>
+  <select class="pick" id="span"></select>
+  <button class="sensbtn" id="sens">Sensitive only</button>
+  <button class="linkbtn" id="clear" hidden>Clear filters</button>
+</div>
+
+<div class="cols">
+  <div>Time</div><div class="hide-sm">Person</div><div class="hide-md">Area</div>
+  <div class="hide-sm">File</div><div>What changed</div><div class="hide-md">Note</div><div></div>
+</div>
+
+<div id="main"></div>
+
+<script src="/shell.js?v=8"></script>
+<script>
+(function () {
+  var api = Shell.api, esc = Shell.esc;
+  var ME = null, DATA = null, OPEN = null, ITEMS = [], NEXT = null;
+  var F = { q: '', who: '', area: '', span: 'today', sensitive: false };
+
+  function $(id) { return document.getElementById(id); }
+
+  var AREA_TONE = {
+    'Repair order': 'var(--muted)', 'Parts': 'var(--acc2)', 'Money': 'var(--stopped)',
+    'Documents': 'var(--blocked)', 'Lead': 'var(--done)', 'Void / delete': 'var(--stopped)',
+    'Permissions': 'var(--stopped)', 'Messages': 'var(--muted)', 'Setup': 'var(--muted)',
+    'Payroll': 'var(--stopped)'
+  };
+
+  var TABS = [
+    { t: 'Statuses', href: '/admin.html?tab=statuses' },
+    { t: 'Lanes and gates', href: '/admin.html?tab=lanes' },
+    { t: 'Notification groups', href: '/admin.html?tab=notify' },
+    { t: 'People', href: '/admin.html?tab=people' },
+    { t: 'Vendors', href: '/admin.html?tab=vendors' },
+    { t: 'Shop settings', href: '/admin.html?tab=settings' },
+    { t: 'Storage', href: '/admin.html?tab=storage' },
+    { t: 'Payroll', href: '/payroll.html' },
+    { t: 'Audit log', href: '/audit.html', sel: true },
+    { t: 'Roles &amp; permissions', href: '/permissions.html' },
+    { t: 'Sales pay', href: '/pay.html' }
+  ];
+
+  function hhmm(iso) {
+    var d = new Date(iso);
+    return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }).toLowerCase();
+  }
+  function dayTime(iso) {
+    var d = new Date(iso), now = new Date();
+    var sameDay = d.toDateString() === now.toDateString();
+    return sameDay ? hhmm(iso)
+      : d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + ' ' + hhmm(iso);
+  }
+
+  api('/api/me').then(function (me) {
+    ME = me;
+    Shell.mount({ me: me, active: 'admin' });
+    $('tabs').innerHTML = TABS.map(function (t) {
+      return '<a class="atab' + (t.sel ? ' sel' : '') + '" href="' + t.href + '">' + t.t + '</a>';
+    }).join('');
+    renderPicks();
+    return load(true);
+  }).catch(function (e) { if (e.message !== 'signed out') console.error(e); });
+
+  function renderPicks() {
+    $('span').innerHTML = [['today', 'Today'], ['7', 'Last 7 days'], ['30', 'Last 30 days'],
+      ['year', 'This year'], ['all', 'Everything']]
+      .map(function (o) {
+        return '<option value="' + o[0] + '"' + (F.span === o[0] ? ' selected' : '') + '>' + o[1] + '</option>';
+      }).join('');
+    $('span').addEventListener('change', function () { F.span = this.value; load(true); });
+    $('who2').addEventListener('change', function () { F.who = this.value; load(true); });
+    $('area').addEventListener('change', function () { F.area = this.value; load(true); });
+    $('q').addEventListener('input', function () {
+      F.q = this.value;
+      clearTimeout(window.__t);
+      window.__t = setTimeout(function () { load(true); }, 250);
+    });
+    $('sens').addEventListener('click', function () {
+      F.sensitive = !F.sensitive;
+      this.className = 'sensbtn' + (F.sensitive ? ' on' : '');
+      load(true);
+    });
+    $('clear').addEventListener('click', function () {
+      F = { q: '', who: '', area: '', span: 'today', sensitive: false };
+      $('q').value = '';
+      $('sens').className = 'sensbtn';
+      renderPicks();
+      load(true);
+    });
+  }
+
+  function fillPeople() {
+    $('who2').innerHTML = '<option value="">Everyone</option>' +
+      DATA.people.map(function (p) {
+        return '<option value="' + esc(p.name) + '"' + (F.who === p.name ? ' selected' : '') + '>' +
+          esc(p.name) + '</option>';
+      }).join('');
+    $('area').innerHTML = '<option value="">All areas</option>' +
+      DATA.areas.map(function (a) {
+        return '<option value="' + esc(a) + '"' + (F.area === a ? ' selected' : '') + '>' + esc(a) + '</option>';
+      }).join('');
+  }
+
+  function load(reset) {
+    var qs = '?span=' + F.span +
+      (F.who ? '&who=' + encodeURIComponent(F.who) : '') +
+      (F.area ? '&area=' + encodeURIComponent(F.area) : '') +
+      (F.q ? '&q=' + encodeURIComponent(F.q) : '') +
+      (F.sensitive ? '&sensitive=1' : '') +
+      (!reset && NEXT ? '&before=' + NEXT : '');
+
+    return api('/api/audit' + qs).then(function (d) {
+      DATA = d;
+      ITEMS = reset ? d.items : ITEMS.concat(d.items);
+      NEXT = d.nextBefore;
+      if (reset) OPEN = ITEMS.length ? ITEMS[0].id : null;
+      fillPeople();
+      renderHead();
+      render();
+    }).catch(function (e) {
+      $('main').innerHTML = '<div class="empty">' + esc(e.message) + '</div>';
+    });
+  }
+
+  function renderHead() {
+    var d = new Date();
+    $('headmeta').textContent =
+      d.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }) +
+      ' · ' + DATA.total + ' entries in this view · ' + DATA.silentCount +
+      ' of them came with no note · ' + DATA.sensitiveCount + ' sensitive';
+    $('clear').hidden = !(F.q || F.who || F.area || F.sensitive || F.span !== 'today');
+    $('sens').innerHTML = 'Sensitive only <span style="opacity:.7">' + DATA.sensitiveCount + '</span>';
+  }
+
+  function render() {
+    if (!ITEMS.length) {
+      $('main').innerHTML = '<div class="scroll"><div class="empty">Nothing matches that.</div></div>';
+      return;
+    }
+
+    var h = ['<div class="scroll">'];
+    ITEMS.forEach(function (e) {
+      var open = e.id === OPEN;
+      h.push('<div class="row' + (e.sensitive ? ' sens' : '') + (open ? ' open' : '') +
+        '" data-id="' + e.id + '">' +
+        '<div class="cell">' + esc(dayTime(e.when)) + '</div>' +
+        '<div class="who hide-sm"><div class="n">' + esc(e.who) + '</div>' +
+        '<div class="r">' + esc(e.role || '') + '</div></div>' +
+        '<div class="area hide-md" style="color:' + (AREA_TONE[e.area] || 'var(--muted)') + '">' +
+        esc(e.area || '') + '</div>' +
+        '<div class="cell hide-sm">' + esc(e.file || '—') + '</div>' +
+        '<div class="label">' + esc(e.label || e.action) + '</div>' +
+        '<div class="note hide-md' + (e.note ? '' : ' none') + '">' + (e.note ? 'Note' : 'No note') + '</div>' +
+        '<div class="caret">' + (open ? '–' : '+') + '</div></div>');
+
+      if (open) h.push(panel(e));
+    });
+
+    if (NEXT) h.push('<div class="more"><button class="ghost2" id="more">Load older entries</button></div>');
+    h.push('</div>');
+
+    $('main').innerHTML = h.join('') + footer();
+
+    Array.prototype.forEach.call($('main').querySelectorAll('.row'), function (row) {
+      row.addEventListener('click', function () {
+        var id = Number(row.dataset.id);
+        OPEN = OPEN === id ? null : id;
+        render();
+      });
+    });
+    var m = $('more');
+    if (m) m.addEventListener('click', function () { load(false); });
+    Array.prototype.forEach.call($('main').querySelectorAll('[data-person]'), function (b) {
+      b.addEventListener('click', function (ev) {
+        ev.stopPropagation();
+        F.who = b.dataset.person;
+        renderPicks(); load(true);
+      });
+    });
+    Array.prototype.forEach.call($('main').querySelectorAll('[data-ro]'), function (b) {
+      b.addEventListener('click', function (ev) {
+        ev.stopPropagation();
+        location.href = '/board.html?ro=' + b.dataset.ro;
+      });
+    });
+  }
+
+  function panel(e) {
+    var h = ['<div class="panel' + (e.sensitive ? ' sens' : '') + '"><div class="pgrid"><div>' +
+      '<div class="sechead">The change</div>'];
+
+    if (e.changes.length) {
+      h.push('<div class="chead"><div>Field</div><div>Was</div><div></div><div>Now</div></div>');
+      e.changes.forEach(function (c) {
+        h.push('<div class="crow"><div class="cf">' + esc(c.field) + '</div>' +
+          '<div class="cfrom">' + esc(c.from === null ? '—' : c.from) + '</div>' +
+          '<div class="carrow">→</div>' +
+          '<div class="cto">' + esc(c.to === null ? '—' : c.to) + '</div></div>');
+      });
+    } else {
+      h.push('<div class="notebody none">No field-level record on this entry — ' +
+        'it predates the log carrying before and after.</div>');
+    }
+
+    h.push('<div class="sechead" style="margin-top:14px">Note left with it</div>' +
+      '<div class="notebody' + (e.note ? '' : ' none') + '">' +
+      esc(e.note || 'Nothing was written with this change.') + '</div></div><div>' +
+      '<div class="sechead">Record</div>');
+
+    [['Entry', '#' + e.id],
+     ['Event', e.action],
+     ['When', new Date(e.when).toLocaleString()],
+     ['Person', e.who + (e.role ? ' · ' + e.role + ' at the time' : '')],
+     ['Record', e.entity + (e.entityId ? ' #' + e.entityId : '')],
+     ['Source', (e.source || 'web') + (e.client ? ' · ' + e.client : '')],
+     ['Sensitive', e.sensitive ? 'Yes — money, delete or permission change' : 'No']
+    ].forEach(function (r) {
+      h.push('<div class="mrow"><div class="mk">' + esc(r[0]) + '</div>' +
+        '<div class="mv">' + esc(r[1]) + '</div></div>');
+    });
+
+    h.push('<div class="pactions">' +
+      (e.roId ? '<button class="primary" data-ro="' + e.roId + '">Open ' + esc(e.file || 'the file') + '</button>' : '') +
+      '<button class="ghost2" data-person="' + esc(e.who) + '">Everything this person did</button>' +
+      '</div></div></div></div>');
+    return h.join('');
+  }
+
+  function footer() {
+    return '<div class="foot"><div>' + ITEMS.length + ' shown of ' + DATA.total +
+      ' · ' + spanLabel() + '</div>' +
+      '<div style="margin-left:auto">Owner and whoever the shop gives the audit tick to. ' +
+      'Nothing here is ever edited or removed.</div></div>';
+  }
+  function spanLabel() {
+    return { today: 'today', '7': 'last 7 days', '30': 'last 30 days',
+      year: 'this year', all: 'everything' }[F.span];
+  }
+})();
+</script>
+</body>
+</html>

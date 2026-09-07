@@ -1,0 +1,774 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1c2740">
+<title>Leads — Easy Shop</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/shell.css?v=7">
+<style>
+  /* Title block: heading left, response clock and the action on the right. */
+  .titlerow { display:flex; align-items:flex-end; gap:22px; padding:16px 18px 0; flex:none; }
+  .titlerow h1 { font:500 18px var(--font); margin:0; }
+  .titlemeta { font:400 11.5px var(--font); color:var(--dim); margin-top:4px; }
+  .clocklbl {
+    font:600 8.5px var(--font); letter-spacing:.12em; text-transform:uppercase; color:var(--acc2);
+  }
+  .clocknote { font:400 11.5px var(--font); color:var(--muted); }
+
+  /* KPIs here carry a caption under the label, unlike the board's band. */
+  .leadkpis { display:flex; gap:26px; padding:16px 18px 14px; flex:none; flex-wrap:wrap; }
+  .lk-v { font:500 19px/1 var(--font); font-variant-numeric:tabular-nums; }
+  .lk-k {
+    font:400 9.5px var(--font); letter-spacing:.06em; text-transform:uppercase;
+    color:var(--dim); margin-top:3px;
+  }
+  .lk-n { font:400 10px var(--font); color:var(--dim); margin-top:2px; }
+
+  /* State tabs with counts. */
+  .tabrow { display:flex; align-items:center; gap:8px; padding:0 18px 12px; flex:none; flex-wrap:wrap; }
+  .statetab {
+    display:flex; align-items:center; gap:6px; font:400 11px var(--font);
+    padding:5px 10px; border-radius:4px; background:transparent;
+    border:1px solid var(--line); color:var(--muted);
+  }
+  .statetab.sel { color:var(--text); background:var(--chip); border-color:var(--acc); }
+  .statetab .c { font:400 10px var(--font); font-variant-numeric:tabular-nums; color:var(--dim); }
+  .tabdiv { width:1px; height:16px; background:var(--line); margin:0 4px; }
+
+  /* Split: list left, detail panel pinned right. */
+  .split { flex:1; min-height:0; display:grid; grid-template-columns:1fr 356px; }
+  .listcol { overflow-y:auto; padding:0 0 20px; }
+  .leadgrid {
+    display:grid; grid-template-columns:3px 1.6fr 1.35fr 1fr .9fr 1fr 62px;
+    gap:13px; align-items:center; padding:0 18px;
+  }
+  .leadhead { height:26px; background:var(--surf); position:sticky; top:0; z-index:2; }
+  .leadhead > div {
+    font:600 8.5px var(--font); letter-spacing:.12em; text-transform:uppercase; color:var(--acc2);
+  }
+  .leadrow { height:46px; border-bottom:1px solid var(--whisper); cursor:pointer; }
+  .leadrow:hover { background:var(--whisper); }
+  .leadrow.sel { background:var(--whisper); }
+  .ledge { width:3px; height:24px; border-radius:1px; }
+  .lname {
+    font:500 12px var(--font); color:var(--text);
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  }
+  .lsub {
+    font:400 10px var(--font); color:var(--dim);
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  }
+  .lcell {
+    font:400 11px var(--font); color:var(--muted);
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  }
+  .lstate {
+    justify-self:start; max-width:100%; box-sizing:border-box; white-space:nowrap;
+    overflow:hidden; text-overflow:ellipsis;
+    font:500 8.5px var(--font); letter-spacing:.09em; text-transform:uppercase;
+    padding:3px 7px; border-radius:3px;
+  }
+  .lage { font:400 11px var(--font); font-variant-numeric:tabular-nums; color:var(--dim); }
+  .lage.stale { color:var(--stopped); }
+
+  /* Follow-up marks. Due is the only one that shouts. */
+  .ftag {
+    font:500 9px var(--font); letter-spacing:.06em; text-transform:uppercase;
+    padding:3px 6px; border-radius:3px; white-space:nowrap; flex:none;
+  }
+  .ftag.due { color:var(--stopped); border:1px solid var(--stopped); }
+  .ftag.booked { color:var(--done); border:1px solid var(--done); }
+  .ftag.held { color:var(--dim); border:1px solid var(--line); }
+
+  .detcol {
+    border-left:1px solid var(--whisper); overflow-y:auto;
+    background:var(--surf); padding:15px 16px;
+  }
+  .dethead {
+    font:600 8.5px var(--font); letter-spacing:.12em; text-transform:uppercase; color:var(--acc2);
+    padding-bottom:9px; border-bottom:1px solid var(--whisper);
+  }
+  .detname { font:500 14px var(--font); margin:12px 0 2px; }
+  .detsub { font:400 11px var(--font); color:var(--dim); margin-bottom:13px; }
+  .detrow {
+    display:grid; grid-template-columns:104px 1fr; gap:10px; align-items:baseline;
+    padding:6px 0; border-bottom:1px solid var(--whisper);
+  }
+  .detk { font:400 10px var(--font); letter-spacing:.04em; color:var(--dim); }
+  .detv { font:400 11.5px/1.5 var(--font); color:var(--text); }
+  .detlbl {
+    font:600 8.5px var(--font); letter-spacing:.12em; text-transform:uppercase;
+    color:var(--acc2); margin-bottom:6px;
+  }
+  .detsel {
+    width:100%; box-sizing:border-box; appearance:none; background:transparent;
+    border:1px solid var(--line); border-radius:4px; color:var(--text);
+    font:400 11.5px var(--font); padding:8px 10px; cursor:pointer;
+  }
+  .winbtn {
+    display:block; width:100%; margin-top:14px; text-align:center; cursor:pointer;
+    font:500 12px var(--font); color:var(--bg); background:var(--acc);
+    border:1px solid var(--acc); border-radius:5px; padding:10px;
+  }
+  .winbtn:hover { background:var(--acc2); border-color:var(--acc2); }
+  /* Back out of the mobile detail panel. Hidden on desktop, where the panel is pinned. */
+  .detback {
+    display:none; align-items:center; gap:7px; cursor:pointer;
+    background:transparent; border:1px solid var(--line); border-radius:5px;
+    color:var(--muted); font:400 12px var(--font); padding:9px 12px; margin-bottom:10px;
+  }
+  .detback:active { background:var(--whisper); }
+  .logline { padding:8px 0; border-bottom:1px solid var(--whisper); }
+  .logb { font:400 11px/1.5 var(--font); }
+  .logm { font:400 9.5px var(--font); color:var(--dim); margin-top:2px; }
+
+  @media (max-width:980px) {
+    .split { grid-template-columns:1fr; }
+    .detcol { border-left:none; border-top:1px solid var(--line); }
+    .leadgrid { grid-template-columns:3px 1.5fr 1fr 70px 54px; }
+    .leadgrid > .hide-sm, .leadrow > .hide-sm { display:none; }
+    .titlerow { flex-wrap:wrap; }
+  }
+
+  /* Call and text, beside the number. Big enough to hit on a phone. */
+  .ctc {
+    font:400 10px var(--font); padding:4px 9px; border-radius:3px; text-decoration:none;
+    background:transparent; border:1px solid var(--line); color:var(--muted); white-space:nowrap;
+  }
+  .ctc:hover { border-color:var(--acc); color:var(--text); }
+  @media (max-width:760px) {
+    .ctc { min-height:44px; display:inline-flex; align-items:center; padding:0 14px; font-size:11.5px; }
+  }
+
+  /* Phones: the detail panel is a full screen, not a squeezed row under the list.
+     Stacked, it was short enough that Save sat below its own scroll. */
+  @media (max-width:760px) {
+    .detcol {
+      display:none; position:fixed; inset:0; z-index:45; border-top:none;
+      padding:calc(var(--safe-t) + 12px) 15px calc(24px + var(--safe-b));
+      -webkit-overflow-scrolling:touch;
+    }
+    .detcol.open { display:block; }
+    .detback { display:flex; }
+    .detsel { font-size:16px; min-height:44px; }
+    .winbtn { min-height:46px; font-size:14px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="bar">
+  <div class="brand"><div class="mark">ES</div><div class="word">Easy Shop</div></div>
+  <div class="vr"></div>
+  <div class="co" id="coName">—</div>
+  <div id="nav"></div>
+  <div class="spacer"></div>
+  <div id="bell"></div>
+  <div class="who" id="who">—</div>
+  <button class="ghostbtn" id="signout">Sign out</button>
+</div>
+<div class="hairline"></div>
+
+<div class="titlerow">
+  <div>
+    <h1>Leads</h1>
+    <div class="titlemeta" id="headmeta">Loading…</div>
+  </div>
+  <div style="margin-left:auto;display:flex;align-items:center;gap:9px">
+    <div class="clocklbl">Response clock</div>
+    <div class="clocknote">a lead unanswered past a day turns red</div>
+    <button class="ghostbtn" id="showDeleted">Show deleted</button>
+    <button class="btn" id="newLead">New lead</button>
+  </div>
+</div>
+
+<div class="leadkpis" id="kpis"></div>
+
+<div class="tabrow" id="tabs"></div>
+
+<div class="split">
+  <div class="listcol">
+    <div class="leadgrid leadhead">
+      <div></div>
+      <div>Customer</div>
+      <div>Vehicle</div>
+      <div class="hide-sm">Source</div>
+      <div class="hide-sm">Owner</div>
+      <div>State</div>
+      <div>Age</div>
+    </div>
+    <div id="list"></div>
+  </div>
+  <div class="detcol" id="detCol">
+    <button class="detback" id="detBack">Back to leads</button>
+    <div class="dethead" id="detHead">Lead</div>
+    <div id="detBody"></div>
+  </div>
+</div>
+
+<script src="/shell.js?v=8"></script>
+<script>
+(function () {
+  var api = Shell.api, esc = Shell.esc;
+  var ME = null, META = null, LEADS = [], STAFF = [], SEL = null, TAB = 'working', SRC = 'All sources';
+  var ADDING = false, DELETED = false;
+
+  var TONE = {
+    'new': 'var(--acc)', contacted: 'var(--move)', estimate_sent: 'var(--move)',
+    appraisal_booked: 'var(--blocked)', won: 'var(--done)', lost: 'var(--stopped)'
+  };
+
+  function $(id) { return document.getElementById(id); }
+  function label(k) {
+    return (META.states.filter(function (s) { return s.key === k; })[0] || {}).label || k;
+  }
+  function stamp(v) {
+    if (!v) return '—';
+    var d = new Date(v);
+    var p = function (n) { return String(n).padStart(2, '0'); };
+    return p(d.getMonth() + 1) + '-' + p(d.getDate()) + '-' + String(d.getFullYear()).slice(2) + ' ' +
+      d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+  }
+  /**
+   * Age in calendar days, which is what a person means by it. Elapsed hours
+   * over 24 called a lead taken at 4pm yesterday "today" the next morning.
+   */
+  function ageText(days) {
+    var d = Number(days || 0);
+    return d <= 0 ? 'today' : d === 1 ? 'yesterday' : d + 'd';
+  }
+
+  /**
+   * The follow-up tag. Only three states are worth a mark on the row: it is due,
+   * it is booked (which is why it is not due), or it is being held. A lead
+   * quietly inside its window says nothing.
+   */
+  function followTag(l) {
+    if (l.needs_followup) {
+      return '<span class="ftag due" title="Quiet for ' + l.quiet_days +
+        ' days and nothing on the calendar">Follow up</span>';
+    }
+    if (l.followup_reason === 'booked') {
+      return '<span class="ftag booked" title="Booked ' + stamp(l.next_appointment) +
+        '">Booked</span>';
+    }
+    if (l.followup_reason === 'held') {
+      return '<span class="ftag held" title="Held until ' +
+        esc(String(l.followup_snooze_until || '')) + '">Held</span>';
+    }
+    return '';
+  }
+
+  api('/api/me').then(function (me) {
+    ME = me;
+    if (!me.company) { location.href = '/'; return null; }
+    if (me.features.indexOf('leads') < 0) {
+      document.body.innerHTML = '<div class="empty">Leads is not switched on for this shop.</div>';
+      return null;
+    }
+    Shell.mount({ me: me, active: 'leads' });
+    return api('/api/lead-meta');
+  }).then(function (m) {
+    if (!m) return;
+    META = m;
+    return load();
+  }).catch(function (e) { if (e.message !== 'signed out') console.error(e); });
+
+  function load() {
+    return api('/api/leads?settled=1' + (DELETED ? '&deleted=1' : '')).then(function (d) {
+      LEADS = d.leads;
+      STAFF = d.staff;
+      renderKpis(d.summary);
+      renderTabs();
+      render();
+      renderDetail();
+    });
+  }
+
+  function counts() {
+    var open = LEADS.filter(function (l) { return l.state !== 'won' && l.state !== 'lost'; });
+    return {
+      working: open.length,
+      'new': LEADS.filter(function (l) { return l.state === 'new'; }).length,
+      followup: LEADS.filter(function (l) { return l.needs_followup; }).length,
+      won: LEADS.filter(function (l) { return l.state === 'won'; }).length,
+      lost: LEADS.filter(function (l) { return l.state === 'lost'; }).length,
+      all: LEADS.length
+    };
+  }
+
+  function renderKpis(s) {
+    var c = counts();
+    var settled = c.won + c.lost;
+    $('kpis').innerHTML = [
+      { v: s.unanswered, k: 'Unanswered', n: 'nobody has replied yet',
+        tone: s.unanswered ? 'var(--stopped)' : '' },
+      { v: s.avgReplyHours == null ? '—' : s.avgReplyHours + ' hr', k: 'Avg first reply',
+        n: 'across answered leads' },
+      { v: s.closeRate == null ? '—' : s.closeRate + '%', k: 'Close rate',
+        n: c.won + ' won of ' + settled + ' settled' },
+      { v: LEADS.filter(function (l) {
+          return l.source === 'scheduler' || l.source === 'sales app';
+        }).length, k: 'Raised by the system', n: 'calendar and sales app' }
+    ].map(function (i) {
+      return '<div><div class="lk-v"' + (i.tone ? ' style="color:' + i.tone + '"' : '') + '>' +
+        esc(i.v) + '</div><div class="lk-k">' + esc(i.k) + '</div>' +
+        '<div class="lk-n">' + esc(i.n) + '</div></div>';
+    }).join('');
+  }
+
+  function renderTabs() {
+    var c = counts();
+    var tabs = [
+      { k: 'working', t: 'Working', c: c.working },
+      { k: 'new', t: 'New', c: c['new'] },
+      { k: 'followup', t: 'Follow up', c: c.followup },
+      { k: 'won', t: 'Won', c: c.won },
+      { k: 'lost', t: 'Lost', c: c.lost },
+      { k: 'all', t: 'All', c: c.all }
+    ];
+
+    $('tabs').innerHTML = tabs.map(function (t) {
+      return '<button class="statetab' + (t.k === TAB ? ' sel' : '') + '" data-tab="' + t.k + '">' +
+        esc(t.t) + '<span class="c">' + t.c + '</span></button>';
+    }).join('') +
+    '<div class="tabdiv"></div>' +
+    '<select id="fSrc"><option>All sources</option>' +
+    META.sources.map(function (s) {
+      return '<option value="' + esc(s) + '"' + (s === SRC ? ' selected' : '') + '>' + esc(s) + '</option>';
+    }).join('') + '</select>' +
+    '<input type="search" id="fSearch" placeholder="Name, phone, vehicle" style="margin-left:4px">';
+
+    Array.prototype.forEach.call($('tabs').querySelectorAll('[data-tab]'), function (b) {
+      b.addEventListener('click', function () { TAB = b.dataset.tab; renderTabs(); render(); });
+    });
+    $('fSrc').addEventListener('change', function () { SRC = this.value; render(); });
+    $('fSearch').addEventListener('input', render);
+  }
+
+  function filtered() {
+    var q = ($('fSearch') ? $('fSearch').value : '').trim().toLowerCase();
+    return LEADS.filter(function (l) {
+      if (TAB === 'working' && (l.state === 'won' || l.state === 'lost')) return false;
+      if (TAB === 'followup' && !l.needs_followup) return false;
+      if (TAB === 'new' && l.state !== 'new') return false;
+      if (TAB === 'won' && l.state !== 'won') return false;
+      if (TAB === 'lost' && l.state !== 'lost') return false;
+      if (SRC !== 'All sources' && l.source !== SRC) return false;
+      if (q && [l.lead_number, l.first_name, l.last_name, l.phone, l.vehicle_text]
+        .join(' ').toLowerCase().indexOf(q) < 0) return false;
+      return true;
+    });
+  }
+
+  function render() {
+    var rows = filtered();
+    var c = counts();
+    var never = LEADS.filter(function (l) {
+      return !l.first_reply_at && l.state !== 'won' && l.state !== 'lost';
+    }).length;
+
+    $('headmeta').textContent = LEADS.length + ' lead' + (LEADS.length === 1 ? '' : 's') +
+      ' · ' + c.working + ' still working · ' + never + ' never answered' +
+      (c.followup ? ' · ' + c.followup + ' to chase' : '');
+
+    if (!rows.length) {
+      $('list').innerHTML = '<div style="font:400 11.5px var(--font);color:var(--dim);padding:16px 18px">' +
+        (LEADS.length ? 'Nothing in this filter.'
+          : 'No leads yet. They arrive from the scheduler, the sales app, or New lead.') + '</div>';
+      return;
+    }
+
+    $('list').innerHTML = rows.map(function (l) {
+      var name = [l.last_name, l.first_name].filter(Boolean).join(', ') || 'Unnamed';
+      var tone = TONE[l.state] || 'var(--dim)';
+      var stale = !l.first_reply_at && l.state !== 'won' && l.state !== 'lost' && l.age_hours >= 24;
+      return '<div class="leadgrid leadrow' + (SEL === l.id ? ' sel' : '') + '" data-id="' + l.id + '">' +
+        '<div class="ledge" style="background:' + (l.needs_followup ? 'var(--stopped)' : tone) + '"></div>' +
+        '<div style="min-width:0"><div class="lname">' + esc(name) + '</div>' +
+        '<div class="lsub">' + esc(l.damage_note || l.lead_number) + '</div></div>' +
+        '<div class="lcell">' + esc(l.vehicle_text || '—') + '</div>' +
+        '<div class="lcell hide-sm">' + esc(l.source) + '</div>' +
+        '<div class="lcell hide-sm">' + esc(l.owner_name || '—') + '</div>' +
+        '<div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap">' +
+        '<div class="lstate" style="color:' + tone + ';border:1px solid ' + tone + '">' +
+        esc(label(l.state)) + '</div>' + followTag(l) + '</div>' +
+        '<div class="lage' + (stale ? ' stale' : '') + '">' + esc(ageText(l.age_days)) + '</div></div>';
+    }).join('');
+
+    Array.prototype.forEach.call($('list').querySelectorAll('[data-id]'), function (el) {
+      el.addEventListener('click', function () {
+        SEL = Number(el.dataset.id);
+        ADDING = false;
+        render();
+        renderDetail();
+      });
+    });
+  }
+
+  /* ---------------------------------------------------------------- detail */
+
+  function syncPanel() {
+    $('detCol').classList.toggle('open', ADDING || SEL != null);
+  }
+
+  function renderDetail() {
+    syncPanel();
+    if (ADDING) return renderNew();
+
+    var l = LEADS.filter(function (x) { return x.id === SEL; })[0];
+    if (!l) {
+      $('detHead').textContent = 'Lead';
+      $('detBody').innerHTML = '<div style="font:400 11.5px/1.6 var(--font);color:var(--dim);' +
+        'padding:14px 0">Pick a lead to work it. The panel stays open so you can move down the ' +
+        'list without losing your place.</div>';
+      return;
+    }
+
+    $('detHead').textContent = 'Lead ' + l.lead_number;
+    $('detBody').innerHTML = '<div style="font:400 11.5px var(--font);color:var(--dim);padding:14px 0">Loading…</div>';
+
+    api('/api/leads/' + l.id).then(function (d) {
+      var lead = d.lead;
+      var name = [lead.first_name, lead.last_name].filter(Boolean).join(' ') || 'Unnamed';
+      var digits = String(lead.phone || '').replace(/[^0-9]/g, '');
+      var phoneText = digits.length === 10
+        ? '(' + digits.slice(0, 3) + ') ' + digits.slice(3, 6) + '-' + digits.slice(6)
+        : digits.length === 11 && digits[0] === '1'
+          ? '(' + digits.slice(1, 4) + ') ' + digits.slice(4, 7) + '-' + digits.slice(7)
+          : String(lead.phone || '');
+      var h = [];
+
+      h.push('<div class="detname">' + esc(name) + '</div>');
+      h.push('<div class="detsub">' + esc(lead.vehicle_text || '') + '</div>');
+
+      /* The number is the point of a lead — you ring the person. It reads as a
+         number, and it dials and texts on a phone rather than being copied out. */
+      h.push('<div class="detrow"><div class="detk">phone</div><div class="detv">' +
+        (digits
+          ? '<a href="tel:' + esc(digits) + '" style="font:500 15px var(--font);color:var(--text);' +
+            'text-decoration:none;border-bottom:1px dashed var(--acc)">' + esc(phoneText) + '</a>' +
+            '<span style="display:inline-flex;gap:8px;margin-left:10px">' +
+            '<a href="tel:' + esc(digits) + '" class="ctc">call</a>' +
+            '</span>'
+          : 'no number — ask for one when you reach them') +
+        '</div></div>');
+
+      [['received', stamp(lead.received_at)],
+       ['source', lead.source],
+       ['damage', lead.damage_note || '—'],
+       ['first reply', lead.first_reply_at ? stamp(lead.first_reply_at) : 'no reply yet'],
+       ['age', ageText(lead.age_days)],
+       ['last chased', lead.last_followup_at ? stamp(lead.last_followup_at) : 'never']
+      ].forEach(function (r) {
+        h.push('<div class="detrow"><div class="detk">' + esc(r[0]) + '</div>' +
+          '<div class="detv">' + esc(r[1]) + '</div></div>');
+      });
+
+      h.push('<div class="detrow"><div class="detk">email</div><div class="detv">' +
+        (lead.email
+          ? '<a href="mailto:' + esc(lead.email) + '" style="color:var(--text);text-decoration:none;' +
+            'border-bottom:1px dashed var(--acc)">' + esc(lead.email) + '</a>'
+          : '—') +
+        '</div></div>');
+
+      /* Follow-up sits above the editable fields: it is the thing the row was
+         shouting about, so it should be the first thing to hand. */
+      var appts = (d.appointments || []).filter(function (a) { return !a.cancelled_at; });
+      var nextAppt = appts.filter(function (a) { return new Date(a.starts_at) >= new Date(); })[0];
+      var cfgDays = (d.followup && d.followup.days) || 3;
+
+      h.push('<div style="margin-top:14px;padding:11px;border:1px solid ' +
+        (lead.needs_followup ? 'var(--stopped)' : 'var(--line)') + ';border-radius:5px">');
+      h.push('<div style="display:flex;align-items:baseline;gap:8px">' +
+        '<div class="detlbl" style="margin:0">Follow-up</div>' +
+        '<div style="font:400 10.5px var(--font);color:' +
+        (lead.needs_followup ? 'var(--stopped)' : 'var(--dim)') + '">' +
+        (lead.needs_followup
+          ? 'due — quiet ' + lead.quiet_days + ' days, nothing booked'
+          : nextAppt
+            ? 'booked ' + stamp(nextAppt.starts_at)
+            : lead.followup_reason === 'held'
+              ? 'held until ' + esc(String(lead.followup_snooze_until || ''))
+              : (lead.state === 'won' || lead.state === 'lost')
+                ? 'settled'
+                : 'due in ' + lead.followup_due_in + ' day' + (lead.followup_due_in === 1 ? '' : 's')) +
+        '</div></div>');
+
+      if (lead.state !== 'won' && lead.state !== 'lost') {
+        h.push('<div class="row" style="margin-top:9px;gap:7px;flex-wrap:wrap">' +
+          '<select class="detsel" id="fHow" style="width:auto;min-width:104px">' +
+          ['Called', 'Texted', 'Emailed', 'Spoke in person'].map(function (x) {
+            return '<option value="' + x + '">' + x + '</option>';
+          }).join('') + '</select>' +
+          '<button class="btn btn-ghost" id="fDone">Followed up</button>' +
+          '<button class="btn btn-ghost" id="fBook">Book…</button></div>');
+        h.push('<div style="font:400 10px/1.5 var(--font);color:var(--dim);margin-top:7px">' +
+          'Marking it chased holds the flag for ' + cfgDays + ' day' + (cfgDays === 1 ? '' : 's') +
+          '. Booking anything on the calendar holds it until the appointment passes.</div>');
+
+        h.push('<div id="bookBox" hidden style="margin-top:10px;padding-top:10px;' +
+          'border-top:1px solid var(--whisper)">' +
+          '<div class="row" style="gap:7px;flex-wrap:wrap">' +
+          '<input type="datetime-local" id="bWhen" style="flex:1;min-width:172px">' +
+          '<select class="detsel" id="bKind" style="width:auto;min-width:98px">' +
+          [['estimate', 'Estimate'], ['drop', 'Drop off'], ['appraiser', 'Appraiser']].map(function (k) {
+            return '<option value="' + k[0] + '">' + k[1] + '</option>';
+          }).join('') + '</select>' +
+          '<button class="btn btn-solid" id="bSave">Add to calendar</button></div></div>');
+      }
+
+      if (appts.length) {
+        h.push('<div style="margin-top:10px;display:flex;flex-direction:column;gap:4px">');
+        appts.forEach(function (a) {
+          h.push('<div style="font:400 10.5px var(--font);color:var(--muted)">' +
+            esc(a.kind) + ' · ' + stamp(a.starts_at) + '</div>');
+        });
+        h.push('</div>');
+      }
+      h.push('</div>');
+
+      h.push('<div style="margin-top:14px;display:flex;flex-direction:column;gap:10px">');
+      h.push('<div><div class="detlbl">State</div><select class="detsel" id="dState">' +
+        META.states.map(function (s) {
+          return '<option value="' + s.key + '"' + (s.key === lead.state ? ' selected' : '') + '>' +
+            esc(s.label) + '</option>';
+        }).join('') + '</select></div>');
+      h.push('<div><div class="detlbl">Owner</div><select class="detsel" id="dOwner">' +
+        '<option value="">Unassigned</option>' +
+        STAFF.map(function (s) {
+          return '<option value="' + s.id + '"' +
+            (String(lead.owner_user_id) === String(s.id) ? ' selected' : '') + '>' +
+            esc(s.name) + '</option>';
+        }).join('') + '</select></div>');
+
+      if (lead.state === 'lost') {
+        h.push('<div><div class="detlbl">Lost because</div><select class="detsel" id="dLost">' +
+          '<option value="">Not recorded</option>' +
+          META.lostReasons.map(function (r) {
+            return '<option value="' + esc(r) + '"' + (r === lead.lost_reason ? ' selected' : '') + '>' +
+              esc(r) + '</option>';
+          }).join('') + '</select></div>');
+      }
+      h.push('</div>');
+
+      h.push('<div class="msg" id="dMsg"></div>');
+
+      if (lead.ro_id) {
+        h.push('<div style="margin-top:13px;border:1px solid var(--acc);border-radius:6px;padding:11px 12px">' +
+          '<div class="detlbl">Repair order</div>' +
+          '<div style="font:500 13px var(--font);font-variant-numeric:tabular-nums">' +
+          esc(lead.ro_number || '') + '</div>' +
+          '<div style="font:400 10.5px/1.5 var(--font);color:var(--dim);margin-top:4px">' +
+          'This lead is on the board. <a href="/board.html?ro=' + lead.ro_id + '">Open the file</a>.' +
+          '</div></div>');
+      } else if (ME.caps.editRepairOrders) {
+        h.push('<div style="margin-top:14px"><div class="detlbl">Convert</div>' +
+          '<input id="convRo" placeholder="RO number" class="detsel" style="margin-bottom:8px">' +
+          '<input id="convVin" placeholder="VIN — optional" class="detsel">' +
+          '<button class="winbtn" id="convert">Convert to repair order</button></div>');
+      }
+
+      h.push('<div style="margin-top:16px"><div class="detlbl">Activity</div>');
+      h.push('<div style="display:flex;gap:7px;margin-bottom:8px">' +
+        '<input id="noteBody" placeholder="Called, left a voicemail" class="detsel" style="flex:1">' +
+        '<button class="btn btn-ghost" id="addNote" style="white-space:nowrap">Log</button></div>');
+
+      if (!d.events.length) {
+        h.push('<div style="font:400 10.5px var(--font);color:var(--dim)">Nothing yet.</div>');
+      }
+      d.events.forEach(function (e) {
+        h.push('<div class="logline"><div class="logb"' +
+          (e.kind === 'auto' ? ' style="color:var(--muted)"' : '') + '>' + esc(e.body) + '</div>' +
+          '<div class="logm">' + esc(e.user_name || 'system') + ' · ' + stamp(e.created_at) + '</div></div>');
+      });
+      h.push('</div>');
+
+      /* Deleting is soft, like a void: off the list and out of the response
+         clock, with the record and its history kept. A converted lead belongs to
+         an RO and can only be marked lost. */
+      if (ME.caps.manageLeads) {
+        if (lead.deleted_at) {
+          h.push('<div style="margin-top:18px;padding-top:14px;border-top:1px solid var(--line)">' +
+            '<div style="font:400 11px/1.5 var(--font);color:var(--dim);margin-bottom:9px">' +
+            'Deleted ' + esc(stamp(lead.deleted_at)) +
+            (lead.delete_reason ? ' — ' + esc(lead.delete_reason) : '') + '.</div>' +
+            '<button class="winbtn" id="restoreLead">Restore this lead</button></div>');
+        } else if (!lead.ro_id) {
+          h.push('<div style="margin-top:18px;padding-top:14px;border-top:1px solid var(--line);text-align:right">' +
+            '<button class="ghostbtn" id="delLead" style="color:var(--stopped);border-color:var(--line)">' +
+            'Delete lead</button></div>');
+        }
+      }
+
+      $('detBody').innerHTML = h.join('');
+      wireDetail(lead);
+    }).catch(function (e) {
+      $('detBody').innerHTML = '<div class="msg err" style="display:block">' + esc(e.message) + '</div>';
+    });
+  }
+
+  function wireDetail(lead) {
+    var msg = $('dMsg');
+    function say(t, k) { msg.textContent = t; msg.className = 'msg ' + k; }
+
+    /* Follow-up. Chasing it resets the clock; booking holds it until the
+       appointment has been and gone. */
+    var fd = $('fDone');
+    if (fd) fd.addEventListener('click', function () {
+      api('/api/leads/' + lead.id + '/followup', {
+        method: 'POST', body: JSON.stringify({ how: $('fHow').value })
+      }).then(load).catch(function (e) { say(e.message, 'err'); });
+    });
+
+    var fb = $('fBook');
+    if (fb) fb.addEventListener('click', function () {
+      var box = $('bookBox');
+      box.hidden = !box.hidden;
+      if (!box.hidden) $('bWhen').focus();
+    });
+
+    var bs = $('bSave');
+    if (bs) bs.addEventListener('click', function () {
+      if (!$('bWhen').value) return say('Pick a date and time.', 'err');
+      api('/api/leads/' + lead.id + '/appointment', {
+        method: 'POST',
+        body: JSON.stringify({ startsAt: $('bWhen').value.replace('T', ' ') + ':00', kind: $('bKind').value })
+      }).then(load).catch(function (e) { say(e.message, 'err'); });
+    });
+
+    $('dState').addEventListener('change', function () {
+      api('/api/leads/' + lead.id, { method: 'PATCH', body: JSON.stringify({ state: this.value }) })
+        .then(load).catch(function (e) { say(e.message, 'err'); });
+    });
+
+    $('dOwner').addEventListener('change', function () {
+      api('/api/leads/' + lead.id, {
+        method: 'PATCH',
+        body: JSON.stringify({ ownerUserId: this.value ? Number(this.value) : null })
+      }).then(load).catch(function (e) { say(e.message, 'err'); });
+    });
+
+    var lost = $('dLost');
+    if (lost) lost.addEventListener('change', function () {
+      api('/api/leads/' + lead.id, { method: 'PATCH', body: JSON.stringify({ lostReason: this.value }) })
+        .then(load).catch(function (e) { say(e.message, 'err'); });
+    });
+
+    var conv = $('convert');
+    if (conv) conv.addEventListener('click', function () {
+      var ro = $('convRo').value.trim();
+      if (!ro) return say('An RO number is required.', 'err');
+      api('/api/leads/' + lead.id + '/convert', {
+        method: 'POST',
+        body: JSON.stringify({ roNumber: ro, vin: $('convVin').value.trim() || undefined })
+      }).then(function (r) { location.href = '/board.html?ro=' + r.roId; })
+        .catch(function (e) { say(e.message, 'err'); });
+    });
+
+    var del = $('delLead');
+    if (del) del.addEventListener('click', function () {
+      var reason = window.prompt(
+        'Delete lead ' + lead.lead_number + '?\n\n' +
+        'It comes off the list and out of the response clock. The record, its notes ' +
+        'and its history stay, and it can be restored from Show deleted.\n\n' +
+        'Reason — Duplicate, Test, Opened by mistake:', 'Duplicate');
+      if (reason === null) return;
+      api('/api/leads/' + lead.id, { method: 'DELETE', body: JSON.stringify({ reason: reason }) })
+        .then(function () { SEL = null; return load(); })
+        .catch(function (e) { say(e.message, 'err'); });
+    });
+
+    var res = $('restoreLead');
+    if (res) res.addEventListener('click', function () {
+      api('/api/leads/' + lead.id + '/restore', { method: 'POST' })
+        .then(function () { return load(); })
+        .catch(function (e) { say(e.message, 'err'); });
+    });
+
+    $('addNote').addEventListener('click', function () {
+      var body = $('noteBody').value.trim();
+      if (!body) return say('The note is empty.', 'err');
+      api('/api/leads/' + lead.id + '/notes', { method: 'POST', body: JSON.stringify({ body: body }) })
+        .then(load).catch(function (e) { say(e.message, 'err'); });
+    });
+  }
+
+  /* ------------------------------------------------------------------- new */
+
+  function renderNew() {
+    $('detHead').textContent = 'New lead';
+    $('detBody').innerHTML =
+      '<div style="font:400 11px/1.5 var(--font);color:var(--muted);margin:12px 0 14px">' +
+      'Whatever you have. A phone number and a name is enough — the rest can be filled in when ' +
+      'you call them back.</div>' +
+      '<div style="display:flex;flex-direction:column;gap:10px">' +
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:9px">' +
+      '<div><div class="detlbl">First name</div><input id="nFirst" class="detsel"></div>' +
+      '<div><div class="detlbl">Last name</div><input id="nLast" class="detsel"></div></div>' +
+      '<div><div class="detlbl">Phone</div><input id="nPhone" class="detsel" placeholder="(972) 555-0100"></div>' +
+      '<div><div class="detlbl">Vehicle</div><input id="nVehicle" class="detsel" placeholder="2022 Honda CR-V EX"></div>' +
+      '<div><div class="detlbl">What is wrong</div><input id="nNote" class="detsel" placeholder="Hail on the roof and hood"></div>' +
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:9px">' +
+      '<div><div class="detlbl">Source</div><select id="nSource" class="detsel">' +
+      META.sources.map(function (s) { return '<option value="' + esc(s) + '">' + esc(s) + '</option>'; }).join('') +
+      '</select></div>' +
+      '<div><div class="detlbl">Owner</div><select id="nOwner" class="detsel">' +
+      '<option value="">Unassigned</option>' +
+      STAFF.map(function (s) { return '<option value="' + s.id + '">' + esc(s.name) + '</option>'; }).join('') +
+      '</select></div></div></div>' +
+      '<div class="msg" id="nMsg"></div>' +
+      '<button class="winbtn" id="saveLead">Save lead</button>' +
+      '<div style="text-align:center;margin-top:9px">' +
+      '<button class="btn btn-ghost" id="cancelLead">Cancel</button></div>';
+
+    $('cancelLead').addEventListener('click', function () { ADDING = false; renderDetail(); });
+
+    $('saveLead').addEventListener('click', function () {
+      var msg = $('nMsg');
+      var body = {
+        firstName: $('nFirst').value.trim() || undefined,
+        lastName: $('nLast').value.trim() || undefined,
+        phone: $('nPhone').value.trim() || undefined,
+        vehicleText: $('nVehicle').value.trim() || undefined,
+        damageNote: $('nNote').value.trim() || undefined,
+        source: $('nSource').value,
+        ownerUserId: $('nOwner').value ? Number($('nOwner').value) : undefined
+      };
+      api('/api/leads', { method: 'POST', body: JSON.stringify(body) })
+        .then(function (r) { ADDING = false; SEL = r.id; return load(); })
+        .catch(function (e) { msg.textContent = e.message; msg.className = 'msg err'; });
+    });
+  }
+
+  $('detBack').addEventListener('click', function () {
+    ADDING = false;
+    SEL = null;
+    render();
+    renderDetail();
+  });
+
+  /* Deleted leads are off the list by default. The toggle is how one is found
+     and restored; it is not a filter anybody works from. */
+  $('showDeleted').addEventListener('click', function () {
+    DELETED = !DELETED;
+    this.textContent = DELETED ? 'Hide deleted' : 'Show deleted';
+    this.style.color = DELETED ? 'var(--acc)' : '';
+    this.style.borderColor = DELETED ? 'var(--acc)' : '';
+    SEL = null;
+    ADDING = false;
+    load();
+  });
+
+  $('newLead').addEventListener('click', function () {
+    ADDING = true;
+    SEL = null;
+    render();
+    renderDetail();
+  });
+})();
+</script>
+</body>
+</html>
