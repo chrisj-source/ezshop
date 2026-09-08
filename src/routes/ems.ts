@@ -186,7 +186,7 @@ export async function registerEms(app: FastifyInstance): Promise<void> {
          supplement_seq, total_cents, line_count,
          matched_ro_id, match_confidence, state, storage_key)
       VALUES ('upload', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-              ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
+              ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
       [clip(est.estimatingSystem, 32), clip(est.envelopeName, 190), clip(est.roNumber, 32),
        clip(est.claimNumber, 64),
        clip(est.insurer, 190), clip(est.policyNumber, 64),
