@@ -132,13 +132,34 @@ const PREVIEWABLE = new Map<string, string>([
 ]);
 
 /**
- * Estimate file sets, which arrive through the EMS route rather than as
- * documents — different list, and never served back to a browser at all.
+ * Estimate file sets arrive through the EMS route, not as documents, and the two
+ * are not the same question.
+ *
+ * The document allowlist above exists because those files come back out of the
+ * server and into a browser. Estimate files never do: they are parsed on arrival
+ * and read off disk by the parser alone, so there is no inline-render path to
+ * defend.
+ *
+ * An allowlist was the wrong shape here regardless of length. A real Audatex set
+ * is `.AD1 .AD2 .DBT .ENV .LIN .PFH .PFL .PFM .PFO .PFP .PFT .STL .TTL .VEH
+ * .VEN`; CCC and Mitchell each emit their own, supplements bump the digits, and
+ * the writers add files between releases. Every fixed list falls behind the next
+ * estimating-system update and the shop is the one who finds out, mid-import.
+ *
+ * So the rule is inverted: take the set, and refuse only what a browser could be
+ * made to execute if it ever did get served. That list is short and it does not
+ * grow. `extensionOf` has already forced lowercase alphanumeric and a maximum of
+ * eight characters before anything reaches here.
  */
-export const EMS_EXT = new Set(['ad1', 'env', 'emf', 'dat', 'ems', 'mdb', 'txt', 'zip']);
+const EMS_EXT_DENIED = new Set([
+  'html', 'htm', 'xhtml', 'shtml', 'svg', 'js', 'mjs', 'jsx',
+  'php', 'phtml', 'asp', 'aspx', 'jsp', 'cgi', 'pl', 'py', 'rb', 'sh',
+  'exe', 'dll', 'bat', 'cmd', 'com', 'scr', 'msi', 'ps1', 'vbs', 'jar', 'hta'
+]);
 
 export function emsExtAllowed(ext: string): boolean {
-  return EMS_EXT.has((ext ?? '').toLowerCase());
+  const e = (ext ?? '').toLowerCase();
+  return e.length > 0 && !EMS_EXT_DENIED.has(e);
 }
 
 export function extAllowed(ext: string): boolean {

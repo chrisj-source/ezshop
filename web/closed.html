@@ -84,7 +84,7 @@
   .kpi .v { font:500 21px/1.2 var(--font); font-variant-numeric:tabular-nums; margin-top:5px; }
   .kpi .n { font:400 10px var(--font); color:var(--dim); margin-top:3px; }
 
-  .rgrid { display:grid; grid-template-columns:1fr 76px 124px 124px 124px 100px; column-gap:14px; align-items:center; padding:0 18px; }
+  .rgrid { display:grid; grid-template-columns:1fr 76px 116px 116px 116px 116px 100px; column-gap:14px; align-items:center; padding:0 18px; }
   .rhead { height:28px; background:var(--surf); position:sticky; top:0; z-index:2; }
   .rhead > div { font:600 8.5px var(--font); letter-spacing:.12em; text-transform:uppercase; color:var(--acc2); }
   .rrow { height:40px; border-bottom:1px solid var(--whisper); }
@@ -207,6 +207,10 @@
   function usd(cents) {
     if (cents === null || cents === undefined) return '—';
     return '$' + (Number(cents) / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+  /** Wholesale is its own payer, not a flavour of cash. */
+  function payLabel(t) {
+    return t === 'cash' ? 'Cash-pay' : t === 'wholesale' ? 'Wholesale' : 'Insurance';
   }
   function usd0(cents) {
     if (cents === null || cents === undefined) return '—';
@@ -353,7 +357,7 @@
         (r.colour ? '<div class="csub">' + esc(r.colour) + '</div>' : '') + '</div>' +
       '<div class="ccell hide-sm">' + esc(r.customer || '—') + '</div>' +
       '<div class="ccell hide-md">' + esc(r.salesperson || 'Unassigned') + '</div>' +
-      '<div class="ccell hide-sm">' + (r.pay_type === 'cash' ? 'Cash-pay' : 'Insurance') + '</div>' +
+      '<div class="ccell hide-sm">' + payLabel(r.pay_type) + '</div>' +
       '<div class="cnum hide-md">' + short(r.opened_at) + '</div>' +
       /* The day the car actually left — not the close date, which is a bookkeeping
          decision and can be moved. */
@@ -445,7 +449,7 @@
     var rows = REPORT.rows.map(function (r) {
       var k = REPORT.cut === 'month' ? monthName(r.k)
         : REPORT.cut === 'week' ? 'w/c ' + short(r.k)
-        : REPORT.cut === 'type' ? (r.k === 'cash' ? 'Cash-pay' : 'Insurance')
+        : REPORT.cut === 'type' ? payLabel(r.k)
         : r.k;
       var un = Number(r.unpaid_cents || 0);
       return '<div class="rgrid rrow">' +
@@ -453,6 +457,7 @@
         '<div class="rn">' + r.files + '</div>' +
         '<div class="rn hide-sm">' + usd0(r.insurance_cents) + '</div>' +
         '<div class="rn hide-sm">' + usd0(r.cash_cents) + '</div>' +
+        '<div class="rn hide-sm">' + usd0(r.wholesale_cents) + '</div>' +
         '<div class="rt">' + usd0(r.total_cents) + '</div>' +
         '<div class="rn ' + (un ? 'un' : 'zero') + '">' + usd0(un) + '</div>' +
       '</div>';
@@ -464,6 +469,7 @@
         '<div style="text-align:right">Files</div>' +
         '<div class="hide-sm" style="text-align:right">Insurance</div>' +
         '<div class="hide-sm" style="text-align:right">Cash-pay</div>' +
+        '<div class="hide-sm" style="text-align:right">Wholesale</div>' +
         '<div style="text-align:right">Closed total</div>' +
         '<div style="text-align:right">Unpaid</div>' +
       '</div>' +
@@ -473,6 +479,7 @@
         '<div class="rn">' + t.files + '</div>' +
         '<div class="rn hide-sm">' + usd0(t.insuranceCents) + '</div>' +
         '<div class="rn hide-sm">' + usd0(t.cashCents) + '</div>' +
+        '<div class="rn hide-sm">' + usd0(t.wholesaleCents) + '</div>' +
         '<div class="rt acc">' + usd0(t.totalCents) + '</div>' +
         '<div class="rn un">' + usd0(t.unpaidCents) + '</div>' +
       '</div>' : '') +

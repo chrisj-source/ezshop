@@ -14,6 +14,7 @@ interface BoardRow extends RowDataPacket {
   rental_cost_cents: number; voided_days: number;
   total_loss_at: Date | null; total_loss_note: string | null;
   customer_name: string | null; customer_phone: string | null; insurer_name: string | null;
+  client_kind: 'retail' | 'wholesale' | 'insurance' | null;
   vin: string | null; year: number | null; make: string | null; model: string | null;
   color: string | null; plate: string | null; plate_state: string | null; status_by: string | null;
   status_label: string | null; customer_label: string | null; group_id: string | null;
@@ -64,7 +65,7 @@ export async function registerBoard(app: FastifyInstance): Promise<void> {
         r.id, r.ro_number, r.status_slot, r.status_since, r.on_hold, r.hold_reason, r.hold_owner,
         r.claim_number, r.repair_path, r.ro_type, r.opened_at, r.promised_at, r.target_days,
         r.amount_cents, r.labor_hours,
-        c.name AS customer_name, c.phone AS customer_phone,
+        c.name AS customer_name, c.phone AS customer_phone, c.kind AS client_kind,
         ins.name AS insurer_name,
         v.vin, v.year, v.make, v.model, v.color, v.plate, v.plate_state,
         s.label AS status_label, s.customer_label, s.group_id, s.lane_key, s.kind,
@@ -157,6 +158,9 @@ export async function registerBoard(app: FastifyInstance): Promise<void> {
         customer: r.customer_name,
         phone: r.customer_phone,
         insurer: r.insurer_name,
+        /* Who is paying. A wholesale client is not a customer paying out of
+           pocket, and the board said Customer Pay for both. */
+        clientKind: r.client_kind,
         claimNumber: r.claim_number,
         statusSince: r.status_since,
         vehicle: [r.year, r.make, r.model].filter(Boolean).join(' ') || null,

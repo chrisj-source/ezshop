@@ -52,8 +52,17 @@ function isDate(v: unknown): v is string {
   return typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v);
 }
 
-/** Cash-pay is the absence of an insurer, which is how the rest of the app reads it. */
-const PAY_TYPE = `IF(r.insurer_client_id IS NULL, 'cash', 'insurance')`;
+/**
+ * Who is paying. Cash-pay is the absence of an insurer, which is how the rest of
+ * the app reads it — but a wholesale account is not somebody paying out of
+ * pocket, and lumping the two together made every dealer car read "Cash-pay".
+ * Read off the client rather than a join, so it works in the row list and in the
+ * grouped report alike.
+ */
+const PAY_TYPE = `IF(r.insurer_client_id IS NULL,
+  IF((SELECT k.kind FROM clients k WHERE k.id = r.client_id) = 'wholesale', 'wholesale', 'cash'),
+  'insurance')`;
+const IS_WHOLESALE = `(SELECT k.kind FROM clients k WHERE k.id = r.client_id) = 'wholesale'`;
 
 export async function registerClosed(app: FastifyInstance): Promise<void> {
 
@@ -398,7 +407,10 @@ export async function registerClosed(app: FastifyInstance): Promise<void> {
              COUNT(*) AS files,
              SUM(r.amount_cents) AS total_cents,
              SUM(IF(r.insurer_client_id IS NULL, 0, r.amount_cents)) AS insurance_cents,
-             SUM(IF(r.insurer_client_id IS NULL, r.amount_cents, 0)) AS cash_cents,
+             /* Cash-pay is retail only now; wholesale is its own column, so the
+                three add up to the total instead of hiding dealer work in cash. */
+             SUM(IF(r.insurer_client_id IS NULL AND NOT ${IS_WHOLESALE}, r.amount_cents, 0)) AS cash_cents,
+             SUM(IF(r.insurer_client_id IS NULL AND ${IS_WHOLESALE}, r.amount_cents, 0)) AS wholesale_cents,
              SUM(IF(r.paid = 0, r.amount_cents, 0)) AS unpaid_cents,
              SUM(IF(r.paid = 0, 1, 0)) AS unpaid_files,
              ROUND(AVG(GREATEST(DATEDIFF(COALESCE(r.delivered_at, r.closed_at, r.close_date), DATE(r.opened_at)) - r.voided_days, 0))) AS avg_days,
@@ -423,6 +435,7 @@ export async function registerClosed(app: FastifyInstance): Promise<void> {
         totalCents: sum('total_cents'),
         insuranceCents: sum('insurance_cents'),
         cashCents: sum('cash_cents'),
+        wholesaleCents: sum('wholesale_cents'),
         unpaidCents: sum('unpaid_cents'),
         unpaidFiles: sum('unpaid_files')
       },

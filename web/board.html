@@ -922,6 +922,12 @@
     });
   }
 
+  /** Who is paying, when it is not an insurer. A wholesale client is a dealer or
+     an auction with terms, not somebody paying out of pocket, so it says so. */
+  function payer(f) {
+    return f.clientKind === 'wholesale' ? 'Wholesale' : 'Customer Pay';
+  }
+
   function pickedTech() {
     var v = $('fTech').value;
     if (!v || v === 'none') return null;
@@ -1293,7 +1299,7 @@
         var self = !f.insurer;
         return '<div style="min-width:0"><div class="cellmain"' +
           (self ? ' style="color:var(--dim)"' : '') + '>' +
-          esc(f.insurer || 'Customer Pay') + '</div><div class="cellsub">' +
+          esc(f.insurer || payer(f)) + '</div><div class="cellsub">' +
           esc(f.claimNumber || '—') + '</div></div>';
       }
 
@@ -1368,7 +1374,8 @@
         (f.targetDays ? ' of ' + f.targetDays : '') + AGE_WORD[f.age] + '</div></div>' +
         '<div class="cardveh">' + esc(f.vehicle || '—') +
         (f.color ? ' · ' + esc(f.color) : '') + '</div>' +
-        '<div class="sub">' + esc([f.customer, f.insurer].filter(Boolean).join(' · ') || '') + '</div>' +
+        '<div class="sub">' + esc([f.customer, f.insurer || (f.clientKind === 'wholesale' ? 'Wholesale' : null)]
+        .filter(Boolean).join(' · ') || '') + '</div>' +
         '<div class="cardline"><span style="font:500 12px var(--font);color:' + tone(f) + '">' +
         esc(f.status || 'No status') + '</span>' +
         flagsFor(f) + '</div></button>';
@@ -1504,7 +1511,8 @@
       (f.targetDays ? ' of ' + f.targetDays : '') + AGE_WORD[f.age] + '</div></div>' +
       '<div class="cardveh">' + esc(f.vehicle || '—') +
       (f.color ? ' · ' + esc(f.color) : '') + '</div>' +
-      '<div class="sub">' + esc([f.customer, f.insurer].filter(Boolean).join(' · ') || '') + '</div>' +
+      '<div class="sub">' + esc([f.customer, f.insurer || (f.clientKind === 'wholesale' ? 'Wholesale' : null)]
+        .filter(Boolean).join(' · ') || '') + '</div>' +
       '<div class="progress" style="margin-top:9px">' + segs.map(function (s) {
         return '<div class="pseg" style="background:' + s.tone + '" title="' + esc(s.title) + '"></div>';
       }).join('') + '</div>' +
@@ -2311,8 +2319,11 @@
     R.push('<div class="sec">Update this RO</div>');
     R.push('<div class="stack"><select id="newStatus" style="width:100%">' +
       '<option value="">Select a new status…</option>' + statusOptions(null) + '</select>' +
-      '<textarea id="newNote" aria-label="Note" placeholder="Add a note — call with the adjuster, customer, parts vendor…"></textarea>' +
-      '<div class="row"><button class="btn btn-solid" id="saveStatus">Add a note or pick a status</button>' +
+      (d.canAddNotes
+        ? '<textarea id="newNote" aria-label="Note" placeholder="Add a note — call with the adjuster, customer, parts vendor…"></textarea>'
+        : '') +
+      '<div class="row"><button class="btn btn-solid" id="saveStatus">' +
+      (d.canAddNotes ? 'Add a note or pick a status' : 'Pick a status') + '</button>' +
       '<span class="sub" style="flex:1;min-width:120px">Notifies whoever owns the status it lands in.</span>' +
       '</div></div>');
     R.push('<div class="msg" id="dMsg"></div>');
@@ -2497,6 +2508,7 @@
         '</button></div></div>');
     }
 
+    if (d.canReadNotes) {
     R.push('<div class="sec">Notes and history</div>');
     if (!d.notes.length) R.push('<div class="sub">Nothing recorded yet.</div>');
     d.notes.forEach(function (n) {
@@ -2510,6 +2522,7 @@
         '<div class="log-b" style="margin-top:4px' +
         (n.kind === 'auto' ? ';color:var(--muted)' : '') + '">' + esc(n.body) + '</div></div>');
     });
+    }
 
     if (LAST.length) {
       R.push('<div style="margin-top:22px;padding-top:4px;border-top:1px solid var(--whisper)"></div>');
@@ -2599,8 +2612,10 @@
 
     var ss = $('saveStatus');
     if (ss) ss.addEventListener('click', function () {
-      var slot = $('newStatus').value, note = $('newNote').value.trim();
-      if (!slot && !note) return say('Pick a status or write a note.', 'err');
+      var slot = $('newStatus').value;
+      var nn = $('newNote');
+      var note = nn ? nn.value.trim() : '';
+      if (!slot && !note) return say(nn ? 'Pick a status or write a note.' : 'Pick a status.', 'err');
       api('/api/ro/' + OPEN + '/status', {
         method: 'POST', body: JSON.stringify({ slot: slot || undefined, note: note || undefined })
       }).then(reopen).catch(function (e) { say(e.message, 'err'); });

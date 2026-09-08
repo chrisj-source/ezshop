@@ -98,8 +98,13 @@ export async function registerRepairOrders(app: FastifyInstance): Promise<void> 
     return {
       ro: scrubMoney(ro as Record<string, unknown>, ctx.caps),
       assigned: assignedMap,
-      notes,
-      history,
+      /* The notes block is one permission covering both lists: notes and status
+         history are the same running record, and splitting them would let a
+         role read half a conversation. */
+      notes: ctx.caps.viewNotes ? notes : [],
+      history: ctx.caps.viewNotes ? history : [],
+      canReadNotes: ctx.caps.viewNotes,
+      canAddNotes: ctx.caps.addNotes,
       promises,
       supplements: ctx.caps.money ? supplements : supplements.map(s => scrubMoney(s as Record<string, unknown>, ctx.caps)),
       sublets: sublets.map(s => scrubMoney(s as Record<string, unknown>, ctx.caps)),
@@ -187,7 +192,8 @@ export async function registerRepairOrders(app: FastifyInstance): Promise<void> 
         );
       }
 
-      if (note && note.trim()) {
+      /* A note ridden in on a status change is still a note. */
+      if (note && note.trim() && ctx.caps.addNotes) {
         await c.query(
           `INSERT INTO ro_notes (ro_id, kind, body, user_id, user_name) VALUES (?, 'note', ?, ?, ?)`,
           [id, note.trim(), ctx.user.id, ctx.user.name]
@@ -237,6 +243,7 @@ export async function registerRepairOrders(app: FastifyInstance): Promise<void> 
     const id = Number((req.params as { id: string }).id);
     const { body } = req.body as { body?: string };
     if (!body || !body.trim()) return reply.code(400).send({ error: 'Note is empty' });
+    if (!ctx.caps.addNotes) return reply.code(403).send({ error: 'Not permitted to add notes' });
     if (!await mayTouch(ctx, id)) return reply.code(403).send({ error: 'Not your file' });
 
     const r = await texec(ctx.company!.id,

@@ -694,12 +694,16 @@
    * is inconsistent on VIN labels, so ZXing does the work everywhere — it
    * reads Code 39, Code 128, Data Matrix, PDF417 and QR.
    *
-   * Two CDNs because a shop's wifi blocking one should not kill check-in.
+   * Served from this box, not a CDN. It used to load from jsdelivr with unpkg
+   * behind it, on the theory that a shop's wifi blocking one should not kill
+   * check-in — and then the security pass set `script-src 'self'`, which blocks
+   * both. Scanning stopped working and the page had no way to say why.
+   *
+   * Vendoring it fixes that in the direction that keeps the header strict: a
+   * shop's wifi cannot block a file that comes off the same server as the page,
+   * and no third-party script runs on the one screen a shop's customers touch.
    */
-  var ZXING_URLS = [
-    'https://cdn.jsdelivr.net/npm/@zxing/library@0.21.3/umd/index.min.js',
-    'https://unpkg.com/@zxing/library@0.21.3/umd/index.min.js'
-  ];
+  var ZXING_URLS = ['/vendor/zxing-0.21.3.min.js'];
 
   function loadZXing() {
     if (ZXING) return Promise.resolve(ZXING);

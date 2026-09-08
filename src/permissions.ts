@@ -72,6 +72,7 @@ export const CAP_DEFS: CapDef[] = [
   { key: 'commission',    label: 'Commission',                 section: 'Money',    see: 'commissionMoney' },
 
   { key: 'sees_all',      label: 'Sees files on the board',    section: 'Files',    see: 'seesRepairOrders' },
+  { key: 'notes',         label: 'Notes and history on a file', section: 'Files',   see: 'viewNotes',        change: 'addNotes' },
   { key: 'edit_ro',       label: 'Create and edit repair orders', section: 'Files', see: 'editRepairOrders' },
   { key: 'any_status',    label: 'Move a file to any status',  section: 'Files',    see: 'anyStatus' },
   { key: 'total_loss',    label: 'Mark a total loss',          section: 'Files',    see: 'markTotalLoss' },
@@ -113,6 +114,11 @@ export interface Caps {
   commissionMoney: boolean;
   /* files */
   seesRepairOrders: boolean;
+  /** The notes and history block on a file. Its own tick because it is the one
+      part of a file that is a running conversation rather than a field: a shop
+      may want the floor reading it, or may not. */
+  viewNotes: boolean;
+  addNotes: boolean;
   /** Every file, not only their own. Derived: sees files AND not own-only. */
   seesAllRepairOrders: boolean;
   /** True when every role held is own-only. Narrows leads, files and reports. */
@@ -154,7 +160,7 @@ export interface Caps {
 
 const CAPS_FIELDS: Array<keyof Caps> = [
   'money', 'editMoney', 'partsMoney', 'editPartsMoney', 'labourMoney', 'editLabourMoney',
-  'commissionMoney', 'seesRepairOrders', 'seesAllRepairOrders', 'ownWorkOnly',
+  'commissionMoney', 'seesRepairOrders', 'viewNotes', 'addNotes', 'seesAllRepairOrders', 'ownWorkOnly',
   'editRepairOrders', 'anyStatus', 'markTotalLoss', 'voidRepairOrders', 'closeRepairOrders',
   'uncloseRepairOrders', 'manageWholesaleClients', 'viewLeads', 'manageLeads', 'deleteLeads', 'viewPaperwork',
   'uploadPaperwork', 'deleteDocuments', 'acceptImports', 'editAssignments', 'manageParts',
@@ -221,19 +227,21 @@ const LEGACY: Record<string, Array<[string, 0 | 1, 0 | 1]>> = {
   accounting: [['ro_totals', 1, 1], ['parts_money', 1, 0], ['labour_money', 1, 0], ['commission', 1, 1],
     ['sees_all', 1, 0], ['close_ro', 1, 1], ['unclose', 1, 1], ['wholesale_clients', 1, 1],
     ['leads', 1, 0], ['paperwork', 1, 1],
-    ['reports', 1, 1], ['money_reports', 1, 0], ['pay_plans', 1, 1]],
+    ['reports', 1, 1], ['money_reports', 1, 0], ['pay_plans', 1, 1], ['notes', 1, 1]],
   estimator: [['ro_totals', 1, 1], ['parts_money', 1, 1], ['labour_money', 1, 1], ['commission', 1, 0],
     ['sees_all', 1, 0], ['edit_ro', 1, 1], ['any_status', 1, 1], ['total_loss', 1, 1], ['close_ro', 1, 0],
     ['leads', 1, 1], ['del_lead', 1, 1], ['paperwork', 1, 1], ['del_doc', 1, 1], ['imports', 1, 1],
-    ['assign', 1, 1], ['parts', 1, 1], ['sublet', 1, 1], ['reports', 1, 0], ['money_reports', 1, 0]],
+    ['assign', 1, 1], ['parts', 1, 1], ['sublet', 1, 1], ['reports', 1, 0], ['money_reports', 1, 0],
+    ['notes', 1, 1]],
   production_manager: [['labour_money', 1, 0], ['sees_all', 1, 0], ['edit_ro', 1, 1], ['any_status', 1, 1],
     ['total_loss', 1, 0], ['paperwork', 1, 1], ['imports', 1, 1], ['assign', 1, 1], ['parts', 1, 1],
-    ['sublet', 1, 1], ['reports', 1, 0]],
-  parts_manager: [['parts_money', 1, 1], ['sees_all', 1, 0], ['paperwork', 1, 0], ['parts', 1, 1], ['sublet', 1, 1]],
+    ['sublet', 1, 1], ['reports', 1, 0], ['notes', 1, 1]],
+  parts_manager: [['parts_money', 1, 1], ['sees_all', 1, 0], ['paperwork', 1, 0], ['parts', 1, 1],
+    ['sublet', 1, 1], ['notes', 1, 1]],
   front_office: [['ro_totals', 1, 0], ['sees_all', 1, 0], ['edit_ro', 1, 1], ['any_status', 1, 1],
-    ['close_ro', 1, 1], ['leads', 1, 1], ['del_lead', 1, 0], ['paperwork', 1, 1]],
-  salesperson: [['sees_all', 1, 0], ['leads', 1, 1], ['paperwork', 1, 0]],
-  technician: [['sees_all', 1, 0], ['labour_money', 1, 0]]
+    ['close_ro', 1, 1], ['leads', 1, 1], ['del_lead', 1, 0], ['paperwork', 1, 1], ['notes', 1, 1]],
+  salesperson: [['sees_all', 1, 0], ['leads', 1, 1], ['paperwork', 1, 0], ['notes', 1, 1]],
+  technician: [['sees_all', 1, 0], ['labour_money', 1, 0], ['notes', 1, 1]]
 };
 
 const LEGACY_RANK: Record<string, number> = {
