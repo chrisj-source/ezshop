@@ -85,9 +85,13 @@
     display:grid; grid-template-columns:repeat(auto-fill, minmax(305px, 1fr));
     align-items:start; gap:18px; margin-top:16px; max-width:1420px;
   }
-  .sec {
-    border:1px solid var(--whisper); border-radius:7px; padding:0 13px 7px;
-    background:rgba(255,255,255,.012);
+  /* Named for this screen, not `.sec`: shell.css owns `.sec` as a section
+     HEADING and gives it `display:flex` plus a rule before it. Reusing the name
+     here made every section card a flex row, so the heading and all its rows
+     sat side by side and the labels crushed to one letter per line. */
+  .capsec {
+    display:block; border:1px solid var(--whisper); border-radius:7px;
+    padding:0 13px 7px; background:rgba(255,255,255,.012);
   }
   /* One column geometry for the head and every row under it, so a tick always
      sits under the word for the column it belongs to. */
@@ -102,7 +106,7 @@
     align-items:center; min-height:40px; padding:5px 0;
     border-bottom:1px solid var(--whisper);
   }
-  .sec .caprow:last-child { border-bottom:0; }
+  .capsec .caprow:last-child { border-bottom:0; }
   .caprow:hover { background:var(--chip); }
   /* Labels wrap. They were nowrap with an ellipsis, which is how "Void a file
      and bring it back" became "Voi…" — the one thing a permission row cannot
@@ -334,7 +338,7 @@
       '</div>' +
       (lockText ? '<div class="locknote">' + esc(lockText) + '</div>' : '') +
       '<div class="caps">' + sections().map(function (s) {
-        return '<div class="sec"><div class="sechead">' +
+        return '<div class="capsec"><div class="sechead">' +
           '<div class="n">' + esc(s.name) + '</div><div class="c">See</div><div class="c">Change</div></div>' +
           s.caps.map(function (c) {
             var v = r.caps[c.key] || { see: false, change: null };
