@@ -57,9 +57,10 @@
   .field input.rank { width:60px; font-variant-numeric:tabular-nums; }
   .field input:disabled { color:var(--dim); }
   .tick {
-    width:19px; height:19px; border-radius:4px; border:1px solid var(--line); background:transparent;
-    display:grid; place-items:center; font:600 11px var(--font); color:transparent; padding:0; cursor:pointer;
+    width:23px; height:23px; border-radius:4px; border:1px solid var(--line); background:transparent;
+    display:grid; place-items:center; font:600 12px var(--font); color:transparent; padding:0; cursor:pointer;
   }
+  .tick:hover:not(:disabled) { border-color:var(--acc); }
   .tick.on { background:var(--acc); border-color:var(--acc); color:var(--bg); }
   .tick:disabled { opacity:.62; cursor:default; }
   .ownrow { display:flex; align-items:center; gap:9px; cursor:pointer; padding-bottom:5px; }
@@ -75,19 +76,41 @@
     margin-top:12px; padding:9px 12px; border-left:2px solid var(--acc); background:var(--chip);
     font:400 11px/1.5 var(--font); color:var(--muted);
   }
-  .caps { display:grid; grid-template-columns:repeat(2,1fr); gap:0 34px; margin-top:14px; }
-  .sec { margin-bottom:16px; }
+  /* Sections are cards in a track that fills the width it has and stops: two or
+     three across a laptop, four on a wide monitor, one on a phone. The old
+     fixed two columns stretched each row to half the window, and on a wide
+     screen a 900px-wide row put the label at one end and its two ticks at the
+     other — unreadable in exactly the case it was meant to help. */
+  .caps {
+    display:grid; grid-template-columns:repeat(auto-fill, minmax(305px, 1fr));
+    align-items:start; gap:18px; margin-top:16px; max-width:1420px;
+  }
+  .sec {
+    border:1px solid var(--whisper); border-radius:7px; padding:0 13px 7px;
+    background:rgba(255,255,255,.012);
+  }
+  /* One column geometry for the head and every row under it, so a tick always
+     sits under the word for the column it belongs to. */
+  .sechead, .caprow { display:grid; grid-template-columns:minmax(0,1fr) 52px 60px; gap:9px; }
   .sechead {
-    display:grid; grid-template-columns:1fr 52px 62px; align-items:end; gap:10px;
-    padding-bottom:6px; border-bottom:1px solid var(--whisper);
+    align-items:end; padding:11px 0 7px; border-bottom:1px solid var(--line);
+    position:sticky; top:0; background:var(--surf); z-index:1;
   }
-  .sechead .n { font:600 8.5px var(--font); letter-spacing:.12em; text-transform:uppercase; color:var(--acc2); }
-  .sechead .c { font:600 8.5px var(--font); letter-spacing:.09em; text-transform:uppercase; color:var(--dim); text-align:center; }
+  .sechead .n { font:600 9.5px var(--font); letter-spacing:.13em; text-transform:uppercase; color:var(--acc2); }
+  .sechead .c { font:600 9px var(--font); letter-spacing:.08em; text-transform:uppercase; color:var(--dim); text-align:center; }
   .caprow {
-    display:grid; grid-template-columns:1fr 52px 62px; align-items:center; gap:10px;
-    height:30px; border-bottom:1px solid var(--whisper);
+    align-items:center; min-height:40px; padding:5px 0;
+    border-bottom:1px solid var(--whisper);
   }
-  .caprow .cl { font:400 11.5px var(--font); color:var(--dim); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .sec .caprow:last-child { border-bottom:0; }
+  .caprow:hover { background:var(--chip); }
+  /* Labels wrap. They were nowrap with an ellipsis, which is how "Void a file
+     and bring it back" became "Voi…" — the one thing a permission row cannot
+     afford to lose is which permission it is. */
+  .caprow .cl {
+    font:400 12px/1.35 var(--font); color:var(--dim);
+    overflow-wrap:break-word; hyphens:auto;
+  }
   .caprow.on .cl { color:var(--text); }
   .caprow .mid { display:grid; place-items:center; }
   .caprow .dash { font:400 11px var(--font); color:var(--line); }
@@ -118,7 +141,12 @@
   @media (max-width:1100px) {
     .rgrid { grid-template-columns:46px minmax(150px,1fr) 70px 150px 60px 26px; }
     .rgrid .hide-md { display:none; }
-    .caps { grid-template-columns:1fr; }
+  }
+  /* A tick is a target before it is a tick: on touch it gets the full 44px. */
+  @media (pointer:coarse) {
+    .caprow { min-height:46px; }
+    .tick { width:30px; height:30px; }
+    .sechead, .caprow { grid-template-columns:minmax(0,1fr) 58px 66px; }
   }
 </style>
 </head>
