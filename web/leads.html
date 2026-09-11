@@ -251,7 +251,7 @@
   }
   function stamp(v) {
     if (!v) return '—';
-    var d = new Date(v);
+    var d = Shell.wall(v);
     var p = function (n) { return String(n).padStart(2, '0'); };
     return p(d.getMonth() + 1) + '-' + p(d.getDate()) + '-' + String(d.getFullYear()).slice(2) + ' ' +
       d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
@@ -588,7 +588,7 @@
       /* Follow-up sits above the editable fields: it is the thing the row was
          shouting about, so it should be the first thing to hand. */
       var appts = (d.appointments || []).filter(function (a) { return !a.cancelled_at; });
-      var nextAppt = appts.filter(function (a) { return new Date(a.starts_at) >= new Date(); })[0];
+      var nextAppt = appts.filter(function (a) { return Shell.wall(a.starts_at) >= new Date(); })[0];
       var cfgDays = (d.followup && d.followup.days) || 3;
 
       h.push('<div style="margin-top:14px;padding:11px;border:1px solid ' +

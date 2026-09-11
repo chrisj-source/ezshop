@@ -61,6 +61,21 @@ window.Shell = (function () {
     });
   }
 
+  /*
+   * Appointment times are wall clock, not moments. The database column is a
+   * DATETIME and the pool reads it as UTC, so the string that arrives carries
+   * the shop's clock face with a Z stuck on the end. Parsing it with new Date()
+   * then re-renders it in the viewer's zone and the time moves — which is why a
+   * 9:00 drop off kept coming back as something else. Read the digits, build a
+   * local Date from them, and the clock face survives the round trip.
+   */
+  function wall(v) {
+    if (!v) return null;
+    var m = String(v).match(/(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})/);
+    if (!m) return new Date(v);
+    return new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5]);
+  }
+
   function when(iso) {
     if (!iso) return '';
     var d = new Date(iso), now = new Date();
@@ -387,7 +402,7 @@ window.Shell = (function () {
   }
 
   return {
-    mount: mount, api: api, esc: esc, when: when,
+    mount: mount, api: api, esc: esc, when: when, wall: wall,
     refreshCount: refreshCount, announce: announce
   };
 })();

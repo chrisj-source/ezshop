@@ -204,8 +204,9 @@
     x.setDate(x.getDate() - ((x.getDay() + 6) % 7));
     return x;
   }
+  var wall = Shell.wall;
   function timeOf(v) {
-    return new Date(v).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+    return wall(v).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
   }
   function kindLabel(k) {
     return (META.kinds.filter(function (x) { return x.key === k; })[0] || {}).label || k;
@@ -290,7 +291,7 @@
       var weekday = DAYNAMES[d.getDay()];
       if (META.closedDays.indexOf(weekday) >= 0) continue;
 
-      var mine = shown.filter(function (a) { return iso(new Date(a.starts_at)) === key; });
+      var mine = shown.filter(function (a) { return iso(wall(a.starts_at)) === key; });
       var off = (DATA.timeOff || []).filter(function (o) {
         return iso(new Date(o.starts_on)) <= key && iso(new Date(o.ends_on)) >= key;
       });
@@ -326,7 +327,7 @@
             (o.reason ? ' · ' + esc(o.reason) : '') + '</div>';
         }).join('') +
         mine.map(function (a) {
-          var isPast = new Date(a.starts_at).getTime() < now;
+          var isPast = wall(a.starts_at).getTime() < now;
           return '<div class="appt' + (isPast ? ' past' : '') + '" data-appt="' + a.id + '" ' +
             'style="border-left:2px solid ' + TONE[a.kind] + '">' +
             '<div style="display:flex;align-items:baseline;gap:7px">' +
@@ -603,7 +604,7 @@
     if (!a) return;
 
     show(a.customer_name, kindLabel(a.kind) + ' · ' +
-      new Date(a.starts_at).toLocaleDateString('en-US',
+      wall(a.starts_at).toLocaleDateString('en-US',
         { weekday: 'long', month: 'long', day: 'numeric' }) + ' at ' + timeOf(a.starts_at));
 
     var h = ['<div class="sec">Details</div><div class="grid2">'];
@@ -627,8 +628,8 @@
       '<a class="btn btn-ghost" href="/leads.html">Go to leads</a></div>');
 
     h.push('<div class="sec">Move it</div><div class="row">' +
-      '<input type="date" id="mDate" value="' + iso(new Date(a.starts_at)) + '">' +
-      '<input type="time" id="mTime" value="' + new Date(a.starts_at).toTimeString().slice(0, 5) + '">' +
+      '<input type="date" id="mDate" value="' + iso(wall(a.starts_at)) + '">' +
+      '<input type="time" id="mTime" value="' + wall(a.starts_at).toTimeString().slice(0, 5) + '">' +
       '<button class="btn btn-ghost" id="mSave">Save</button></div>');
 
     h.push('<div class="row" style="margin-top:18px">' +

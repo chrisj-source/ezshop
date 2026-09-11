@@ -365,7 +365,7 @@
             '<div style="font:500 13px var(--font)">' + esc(name) + '</div>' +
             '<div class="hint" style="margin-top:2px">' + esc([
               o.lead_number, o.vehicle_text, o.phone,
-              o.drop_at ? 'drops ' + new Date(o.drop_at).toLocaleDateString('en-US',
+              o.drop_at ? 'drops ' + Shell.wall(o.drop_at).toLocaleDateString('en-US',
                 { month: 'short', day: 'numeric' }) : null,
               o.photos ? o.photos + ' photo' + (o.photos === 1 ? '' : 's') : null
             ].filter(Boolean).join(' · ')) + '</div></div>' +

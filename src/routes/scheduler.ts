@@ -116,7 +116,7 @@ export async function registerScheduler(app: FastifyInstance): Promise<void> {
       const d = new Date();
       d.setHours(12, 0, 0, 0);
       d.setDate(d.getDate() + i);
-      const iso = isoDay(d);
+      const iso = localDay(d);
       const weekday = names[d.getDay()];
       const isClosed = closed.includes(weekday);
       const usedN = byDay[iso] ?? 0;
@@ -155,10 +155,10 @@ export async function registerScheduler(app: FastifyInstance): Promise<void> {
     if (!b.startsAt) return reply.code(400).send({ error: 'A date and time are required.' });
     if (!b.customerName?.trim()) return reply.code(400).send({ error: 'A name is required.' });
 
-    const when = new Date(b.startsAt.length === 10 ? b.startsAt + 'T09:00' : b.startsAt);
-    if (isNaN(when.getTime())) return reply.code(400).send({ error: 'That date is not valid.' });
+    const when = wallClock(b.startsAt);
+    if (!when) return reply.code(400).send({ error: 'That date is not valid.' });
 
-    const day = isoDay(when);
+    const day = when.slice(0, 10);
 
     const capRow = await tqOne<RowDataPacket & { setting_value: string }>(cid,
       'SELECT setting_value FROM shop_settings WHERE setting_key = ?', ['cap_' + b.kind]);
@@ -274,7 +274,13 @@ export async function registerScheduler(app: FastifyInstance): Promise<void> {
     for (const [k, col] of Object.entries(map)) {
       if (b[k] === undefined) continue;
       sets.push(`${col} = ?`);
-      vals.push(k === 'startsAt' ? new Date(String(b[k])) : b[k]);
+      if (k === 'startsAt') {
+        const w = wallClock(String(b[k]));
+        if (!w) return reply.code(400).send({ error: 'That date is not valid.' });
+        vals.push(w);
+      } else {
+        vals.push(b[k]);
+      }
     }
     if (!sets.length) return reply.code(400).send({ error: 'Nothing to change' });
 
@@ -427,9 +433,9 @@ export async function registerScheduler(app: FastifyInstance): Promise<void> {
  * that shows them is a warning the owner reads, not a machine check.
  */
 async function conflictsFor(
-  cid: number, userId: number, when: Date, durationMin: number, ignoreApptId: number | null
+  cid: number, userId: number, when: string, durationMin: number, ignoreApptId: number | null
 ): Promise<Array<{ kind: string; text: string }>> {
-  const day = isoDay(when);
+  const day = when.slice(0, 10);
   const out: Array<{ kind: string; text: string }> = [];
 
   const off = await tq<RowDataPacket[]>(cid, `
@@ -462,7 +468,7 @@ async function conflictsFor(
     out.push({
       kind: 'appointment',
       text: `Already booked: ${KIND_LABEL[a.kind as Kind]} for ${a.customer_name} at ` +
-        `${new Date(a.starts_at as Date).toTimeString().slice(0, 5)}.`
+        `${wallTime(a.starts_at as Date)}.`
     });
   }
 
@@ -470,11 +476,34 @@ async function conflictsFor(
 }
 
 function today(): string {
-  const d = new Date();
-  return isoDay(d);
+  return localDay(new Date());
 }
 
+/** A day built from a Date's own local fields — for dates this process made. */
+function localDay(d: Date): string {
+  return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+}
+
+/*
+ * An appointment is a clock face on a day, not an instant: 9am at the counter
+ * is 9am whatever zone the server or the browser happens to run in. So the
+ * booking string is normalised to `YYYY-MM-DD HH:MM:SS` and handed to MySQL as
+ * a string — passing a Date makes the driver convert it to UTC on the way in
+ * and back on the way out, which is what moved saved times.
+ */
+function wallClock(v: string): string | null {
+  const s = String(v).trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s + ' 09:00:00';
+  const m = s.match(/^(\d{4}-\d{2}-\d{2})[T ](\d{2}):(\d{2})/);
+  return m ? `${m[1]} ${m[2]}:${m[3]}:00` : null;
+}
+
+/** The stored clock face of a DATETIME the pool read back as UTC. */
+function wallTime(d: Date | string): string {
+  return d instanceof Date ? d.toISOString().slice(11, 16) : String(d).slice(11, 16);
+}
+
+/** The stored day of a DATETIME the pool read back as UTC. */
 function isoDay(d: Date | string): string {
-  const date = typeof d === 'string' ? new Date(d) : d;
-  return new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+  return d instanceof Date ? d.toISOString().slice(0, 10) : String(d).slice(0, 10);
 }

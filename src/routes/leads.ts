@@ -274,7 +274,9 @@ export async function registerLeads(app: FastifyInstance): Promise<void> {
       startsAt: string; kind?: string; durationMin?: number;
       note?: string; assignedUserId?: number | null;
     };
-    if (!b.startsAt) return reply.code(400).send({ error: 'Pick a date and time.' });
+    if (!b.startsAt || !wallClock(b.startsAt)) {
+      return reply.code(400).send({ error: 'Pick a date and time.' });
+    }
 
     const kind = ['estimate', 'drop', 'appraiser', 'pickup', 'return'].includes(b.kind ?? '')
       ? b.kind! : 'estimate';
@@ -293,7 +295,7 @@ export async function registerLeads(app: FastifyInstance): Promise<void> {
         (kind, starts_at, duration_min, lead_id, customer_name, vehicle_text, phone,
          note, assigned_user_id, created_by)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [kind, b.startsAt, b.durationMin ?? 30, id, who, lead.vehicle_text, lead.phone,
+      [kind, wallClock(b.startsAt), b.durationMin ?? 30, id, who, lead.vehicle_text, lead.phone,
        b.note ?? null, b.assignedUserId ?? null, ctx.user.id]);
 
     /* The lead points at its appointment too, so the scheduler and the lead
@@ -706,4 +708,17 @@ export async function registerLeads(app: FastifyInstance): Promise<void> {
 
     return { ok: true, roId };
   });
+}
+
+
+/*
+ * Same rule the scheduler follows: an appointment is a clock face, so the
+ * booking goes to MySQL as a `YYYY-MM-DD HH:MM:SS` string and is never turned
+ * into a Date on the way in — that conversion is what shifted saved times.
+ */
+function wallClock(v: string): string | null {
+  const s = String(v).trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s + ' 09:00:00';
+  const m = s.match(/^(\d{4}-\d{2}-\d{2})[T ](\d{2}):(\d{2})/);
+  return m ? `${m[1]} ${m[2]}:${m[3]}:00` : null;
 }
