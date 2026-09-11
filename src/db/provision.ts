@@ -5,6 +5,7 @@ import { Connection, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 import { config } from '../config';
 import { adminConnection, mexec, mqOne } from './master';
 import { buildTemplate, toHours, NOTIF_GROUPS, ShopType } from './status-template';
+import { defaultRoutesFor } from '../lib/status-routes';
 import { hashPassword } from '../auth/password';
 import { DERIVED_REF, dropTenantLogin, grantTenantLogin } from '../lib/tenant-credentials';
 
@@ -169,6 +170,23 @@ async function seedTenant(admin: Connection, dbName: string, shopType: ShopType)
     }
   }
 
+  /* Who a status change messages, for the statuses this shop's board actually
+     carries. The grid in Admin › Notifications edits these rows; because the
+     table now has rows, it — and not NOTIF_GROUPS below — routes status.change
+     for this shop from the first file onward. */
+  const slotIds: string[] = [];
+  for (const g of groups) for (const s of g.slots) slotIds.push(s[0]);
+  const routes = defaultRoutesFor(slotIds);
+  if (routes.length) {
+    await admin.query(
+      'INSERT IGNORE INTO status_routes (slot_id, target_kind, target_key) VALUES ?',
+      [routes.map(r => [r.slot_id, r.target_kind, r.target_key])]
+    );
+  }
+
+  /* The older position-and-event router. Still seeded: it carries the other
+     seven events (parts arrivals, stalls, SMS replies), and only status.change
+     is taken over by the grid above. */
   for (const ng of NOTIF_GROUPS) {
     const [r] = await admin.query<ResultSetHeader>(
       'INSERT INTO notification_groups (name, description) VALUES (?, ?)', [ng.name, ng.note]

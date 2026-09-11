@@ -140,7 +140,8 @@ export async function registerParts(app: FastifyInstance): Promise<void> {
 
     const roId = Number((req.params as { id: string }).id);
     const b = req.body as {
-      description: string; partNumber?: string; partType?: string; qty?: number;
+      description: string; partNumber?: string; partType?: string;
+      partTypeEstimated?: string; qty?: number;
       priceCents?: number; costCents?: number; vendorId?: number; eta?: string;
       gating?: boolean; note?: string; poNumber?: string;
     };
@@ -148,11 +149,16 @@ export async function registerParts(app: FastifyInstance): Promise<void> {
 
     const res = await texec(ctx.company!.id, `
       INSERT INTO parts_lines
-        (ro_id, vendor_id, description, part_number, part_type, qty,
+        (ro_id, vendor_id, description, part_number, part_type, part_type_estimated, qty,
          price_cents, cost_cents, po_number, state, gating, eta, note)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'need', ?, ?, ?)`,
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'need', ?, ?, ?)`,
       [roId, b.vendorId ?? null, b.description.slice(0, 255), b.partNumber ?? null,
-       b.partType ?? null, b.qty ?? 1, b.priceCents ?? 0, b.costCents ?? 0,
+       b.partType ?? null,
+       /* A line added by hand is not on the estimate, so it has no estimated
+          type unless the caller says otherwise. Null means "the estimate is
+          silent", which is not the same as "the estimate agrees". */
+       b.partTypeEstimated ?? null,
+       b.qty ?? 1, b.priceCents ?? 0, b.costCents ?? 0,
        b.poNumber ?? null, b.gating === false ? 0 : 1, b.eta ?? null, b.note ?? null]
     );
 
@@ -180,6 +186,7 @@ export async function registerParts(app: FastifyInstance): Promise<void> {
 
     const map: Record<string, string> = {
       description: 'description', partNumber: 'part_number', partType: 'part_type',
+      partTypeEstimated: 'part_type_estimated',
       qty: 'qty', qtyReceived: 'qty_received', priceCents: 'price_cents',
       costCents: 'cost_cents', poNumber: 'po_number', invoiceNo: 'invoice_no',
       vendorId: 'vendor_id', state: 'state', gating: 'gating',
@@ -279,8 +286,13 @@ export async function registerParts(app: FastifyInstance): Promise<void> {
 
   /**
    * Order several lines at once — the normal way a desk works: one order, one
-   * supplier, one order number, one ETA. Prices come from the lines, which the
-   * modal has already corrected.
+   * supplier, one order number, one ETA.
+   *
+   * **Cost is entered here.** Nobody knows what a part costs until it is
+   * ordered, so a to-order line carries no cost at all and the order screen is
+   * where the figure arrives — per line, because two lines on one order rarely
+   * cost the same. Setting it needs the money capability; a desk without it can
+   * still place the order, and the cost is typed later by somebody who can.
    */
   app.post('/api/parts/bulk-order', async (req, reply) => {
     const ctx = requireCompany(req, reply);
@@ -288,8 +300,10 @@ export async function registerParts(app: FastifyInstance): Promise<void> {
     if (!ctx.caps.manageParts) return reply.code(403).send({ error: 'Not permitted' });
 
     const cid = ctx.company!.id;
-    const { ids, vendorId, eta, poNumber } = req.body as
-      { ids: number[]; vendorId?: number; eta?: string; poNumber?: string };
+    const { ids, vendorId, eta, poNumber, lines } = req.body as {
+      ids: number[]; vendorId?: number; eta?: string; poNumber?: string;
+      lines?: Array<{ id: number; costCents?: number | null; partType?: string | null }>;
+    };
     if (!ids?.length) return reply.code(400).send({ error: 'Nothing selected' });
 
     await texec(cid, `
@@ -300,6 +314,43 @@ export async function registerParts(app: FastifyInstance): Promise<void> {
       WHERE id IN (?)`,
       [vendorId ?? null, eta ?? null, poNumber ?? null, ids]
     );
+
+    /* Per-line cost and, where the desk bought something other than what the
+       estimate called for, the type actually ordered. The estimated type is
+       never touched here — that column is the estimate's answer, not ours. */
+    let costed = 0, retyped = 0;
+    for (const l of lines ?? []) {
+      const lineId = Number(l.id);
+      if (!lineId || ids.indexOf(lineId) < 0) continue;
+
+      const row = await tqOne<RowDataPacket & {
+        ro_id: number; description: string; cost_cents: number; part_type: string | null;
+      }>(cid, 'SELECT ro_id, description, cost_cents, part_type FROM parts_lines WHERE id = ?', [lineId]);
+      if (!row) continue;
+
+      if (ctx.caps.money && l.costCents !== undefined && l.costCents !== null) {
+        const cost = Math.max(0, Math.round(Number(l.costCents)));
+        if (cost !== Number(row.cost_cents ?? 0)) {
+          await texec(cid, 'UPDATE parts_lines SET cost_cents = ? WHERE id = ?', [cost, lineId]);
+          costed++;
+          await audit(cid, actorFrom(req), {
+            entity: 'part', entityId: lineId, roId: row.ro_id, action: 'part_cost_set', area: 'Parts',
+            label: `Cost entered at order — ${row.description}`,
+            changes: [{ field: 'Cost', from: String(row.cost_cents ?? 0), to: String(cost) }]
+          });
+        }
+      }
+
+      if (l.partType && l.partType !== row.part_type) {
+        await texec(cid, 'UPDATE parts_lines SET part_type = ? WHERE id = ?', [l.partType, lineId]);
+        retyped++;
+        await audit(cid, actorFrom(req), {
+          entity: 'part', entityId: lineId, roId: row.ro_id, action: 'part_type_changed', area: 'Parts',
+          label: `Type ordered — ${row.description}`,
+          changes: [{ field: 'Type ordered', from: row.part_type, to: String(l.partType) }]
+        });
+      }
+    }
 
     /* One note per file, naming the vendor and what it is against — the parts
        list should read as what is coming, from whom, when. */
@@ -321,7 +372,7 @@ export async function registerParts(app: FastifyInstance): Promise<void> {
       await recomputePartsCost(cid, t.ro_id);
     }
 
-    return { ok: true, count: ids.length, files: touched.length };
+    return { ok: true, count: ids.length, files: touched.length, costed, retyped };
   });
 
   /**

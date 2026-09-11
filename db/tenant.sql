@@ -382,7 +382,8 @@ CREATE TABLE parts_lines (
   line_no         INT           NULL COMMENT 'line number on the estimate',
   description     VARCHAR(255)  NOT NULL,
   part_number     VARCHAR(64)   NULL,
-  part_type       ENUM('oem','aftermarket','used','recycled','reconditioned') NULL,
+  part_type       ENUM('oem','aftermarket','used','recycled','reconditioned') NULL COMMENT 'what was ordered',
+  part_type_estimated ENUM('oem','aftermarket','used','recycled','reconditioned') NULL COMMENT 'what the estimate called for',
   qty             INT           NOT NULL DEFAULT 1,
   qty_received    INT           NOT NULL DEFAULT 0,
   price_cents     BIGINT        NOT NULL DEFAULT 0 COMMENT 'what the estimate pays',
@@ -414,14 +415,20 @@ CREATE TABLE leads (
   id              BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
   lead_number     VARCHAR(24)   NOT NULL,
   source          VARCHAR(48)   NOT NULL COMMENT 'phone, walk-in, website, referral, google, scheduler, sales app',
-  state           ENUM('new','contacted','estimate_sent','appraisal_booked','won','lost') NOT NULL DEFAULT 'new',
+  state           ENUM('new','contacted','estimate_written','estimate_sent','appraisal_booked','won','lost') NOT NULL DEFAULT 'new',
   lost_reason     VARCHAR(64)   NULL,
+  payer           ENUM('cash','insurance') NOT NULL DEFAULT 'cash' COMMENT 'cash-pay stops at estimate_written; only insurance reaches estimate_sent',
   first_name      VARCHAR(80)   NULL,
   last_name       VARCHAR(80)   NULL,
   phone           VARCHAR(32)   NULL,
   email           VARCHAR(190)  NULL,
   vehicle_text    VARCHAR(160)  NULL,
   damage_note     VARCHAR(400)  NULL,
+  estimate_cents  BIGINT        NULL COMMENT 'what was quoted at the counter. Required to mark estimate_written',
+  estimate_written_at DATETIME  NULL,
+  estimate_written_by BIGINT UNSIGNED NULL,
+  estimate_note   VARCHAR(255)  NULL,
+  estimate_requoted_at DATETIME NULL COMMENT 'last time the figure was replaced; the old one is in lead_events',
   owner_user_id   BIGINT UNSIGNED NULL,
   contract_doc_id BIGINT UNSIGNED NULL COMMENT 'photo from the sales app',
   appointment_id  BIGINT UNSIGNED NULL,
@@ -437,13 +444,14 @@ CREATE TABLE leads (
   UNIQUE KEY uq_lead_number (lead_number),
   KEY ix_lead_state (state, received_at),
   KEY ix_lead_deleted (deleted_at),
+  KEY ix_lead_quote (estimate_written_at, estimate_cents),
   CONSTRAINT fk_lead_ro FOREIGN KEY (ro_id) REFERENCES repair_orders(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE lead_events (
   id              BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
   lead_id         BIGINT UNSIGNED NOT NULL,
-  kind            ENUM('note','auto','followup','appointment') NOT NULL DEFAULT 'note',
+  kind            ENUM('note','auto','followup','appointment','estimate') NOT NULL DEFAULT 'note',
   body            VARCHAR(500)  NOT NULL,
   user_id         BIGINT UNSIGNED NULL,
   user_name       VARCHAR(120)  NULL,
@@ -537,6 +545,15 @@ CREATE TABLE notification_group_members (
   user_id         BIGINT UNSIGNED NULL,
   PRIMARY KEY (group_id, member_type, position_key, user_id),
   CONSTRAINT fk_ngm_group FOREIGN KEY (group_id) REFERENCES notification_groups(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE status_routes (
+  slot_id       VARCHAR(48) NOT NULL,
+  target_kind   ENUM('role','assigned') NOT NULL,
+  target_key    VARCHAR(32) NOT NULL COMMENT 'role_key, or tech/pdr/paint/detail',
+  created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (slot_id, target_kind, target_key),
+  KEY ix_sroute_slot (slot_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE notification_subscriptions (

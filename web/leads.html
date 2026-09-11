@@ -213,12 +213,37 @@
 (function () {
   var api = Shell.api, esc = Shell.esc;
   var ME = null, META = null, LEADS = [], STAFF = [], SEL = null, TAB = 'working', SRC = 'All sources';
-  var ADDING = false, DELETED = false;
+  var ADDING = false, DELETED = false, QUOTING = false;
+
+  function todayISO() {
+    var d = new Date();
+    var p = function (n) { return String(n).padStart(2, '0'); };
+    return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
+  }
 
   var TONE = {
-    'new': 'var(--acc)', contacted: 'var(--move)', estimate_sent: 'var(--move)',
+    'new': 'var(--acc)', contacted: 'var(--move)',
+    /* Written is the shop's own estimate and reads in the accent; sent is the
+       insurer's and reads as in-motion, because from here it is their move. */
+    estimate_written: 'var(--acc2)', estimate_sent: 'var(--move)',
     appraisal_booked: 'var(--blocked)', won: 'var(--done)', lost: 'var(--stopped)'
   };
+
+  function usd(cents) {
+    if (cents == null) return '—';
+    return '$' + (cents / 100).toLocaleString('en-US', { maximumFractionDigits: 0 });
+  }
+  function usdK(cents) {
+    if (cents == null) return '—';
+    return cents >= 100000
+      ? '$' + (cents / 100000).toFixed(1) + 'k'
+      : usd(cents);
+  }
+  /** Written, still live, and nobody has chased it since the quote existed. */
+  function unchasedQuote(l) {
+    return l.estimate_written_at && l.state !== 'won' && l.state !== 'lost' &&
+      (!l.last_followup_at || new Date(l.last_followup_at) < new Date(l.estimate_written_at));
+  }
 
   function $(id) { return document.getElementById(id); }
   function label(k) {
@@ -258,6 +283,12 @@
       return '<span class="ftag held" title="Held until ' +
         esc(String(l.followup_snooze_until || '')) + '">Held</span>';
     }
+    /* Only when nothing else is speaking. A quote and a chase in the same cell
+       was two stacked pills in a 46px row on a phone. */
+    if (unchasedQuote(l)) {
+      return '<span class="ftag due" title="Quoted ' + esc(usd(l.estimate_cents)) +
+        ' and not chased since">Not chased</span>';
+    }
     return '';
   }
 
@@ -292,6 +323,7 @@
     return {
       working: open.length,
       'new': LEADS.filter(function (l) { return l.state === 'new'; }).length,
+      quoted: open.filter(function (l) { return l.estimate_cents != null; }).length,
       followup: LEADS.filter(function (l) { return l.needs_followup; }).length,
       won: LEADS.filter(function (l) { return l.state === 'won'; }).length,
       lost: LEADS.filter(function (l) { return l.state === 'lost'; }).length,
@@ -301,17 +333,17 @@
 
   function renderKpis(s) {
     var c = counts();
-    var settled = c.won + c.lost;
     $('kpis').innerHTML = [
       { v: s.unanswered, k: 'Unanswered', n: 'nobody has replied yet',
         tone: s.unanswered ? 'var(--stopped)' : '' },
-      { v: s.avgReplyHours == null ? '—' : s.avgReplyHours + ' hr', k: 'Avg first reply',
-        n: 'across answered leads' },
-      { v: s.closeRate == null ? '—' : s.closeRate + '%', k: 'Close rate',
-        n: c.won + ' won of ' + settled + ' settled' },
-      { v: LEADS.filter(function (l) {
-          return l.source === 'scheduler' || l.source === 'sales app';
-        }).length, k: 'Raised by the system', n: 'calendar and sales app' }
+      /* Dollars won over dollars quoted. A lost lead's quote stays in the
+         denominator — leaving it out would flatter the number. */
+      { v: s.moneyCloseRate == null ? '—' : s.moneyCloseRate + '%', k: 'Money close rate',
+        n: usdK(s.wonCents) + ' won of ' + usdK(s.quotedCents) + ' quoted' },
+      { v: s.quotesUnchased || 0, k: 'Quotes not chased', n: 'written, no follow-up logged',
+        tone: s.quotesUnchased ? 'var(--stopped)' : '' },
+      { v: usdK(s.avgQuoteCents), k: 'Average quote',
+        n: s.quoted ? 'across ' + s.quoted + ' quoted' : 'nothing quoted yet' }
     ].map(function (i) {
       return '<div><div class="lk-v"' + (i.tone ? ' style="color:' + i.tone + '"' : '') + '>' +
         esc(i.v) + '</div><div class="lk-k">' + esc(i.k) + '</div>' +
@@ -324,6 +356,7 @@
     var tabs = [
       { k: 'working', t: 'Working', c: c.working },
       { k: 'new', t: 'New', c: c['new'] },
+      { k: 'quoted', t: 'Quoted', c: c.quoted },
       { k: 'followup', t: 'Follow up', c: c.followup },
       { k: 'won', t: 'Won', c: c.won },
       { k: 'lost', t: 'Lost', c: c.lost },
@@ -352,6 +385,7 @@
     var q = ($('fSearch') ? $('fSearch').value : '').trim().toLowerCase();
     return LEADS.filter(function (l) {
       if (TAB === 'working' && (l.state === 'won' || l.state === 'lost')) return false;
+      if (TAB === 'quoted' && (l.estimate_cents == null || l.state === 'won' || l.state === 'lost')) return false;
       if (TAB === 'followup' && !l.needs_followup) return false;
       if (TAB === 'new' && l.state !== 'new') return false;
       if (TAB === 'won' && l.state !== 'won') return false;
@@ -372,7 +406,10 @@
 
     $('headmeta').textContent = LEADS.length + ' lead' + (LEADS.length === 1 ? '' : 's') +
       ' · ' + c.working + ' still working · ' + never + ' never answered' +
-      (c.followup ? ' · ' + c.followup + ' to chase' : '');
+      (c.followup ? ' · ' + c.followup + ' to chase' : '') +
+      (LEADS.filter(unchasedQuote).length
+        ? ' · ' + LEADS.filter(unchasedQuote).length + ' quotes never chased'
+        : '');
 
     if (!rows.length) {
       $('list').innerHTML = '<div style="font:400 11.5px var(--font);color:var(--dim);padding:16px 18px">' +
@@ -402,6 +439,8 @@
       el.addEventListener('click', function () {
         SEL = Number(el.dataset.id);
         ADDING = false;
+        /* A half-typed quote belongs to the lead it was opened on. */
+        QUOTING = false;
         render();
         renderDetail();
       });
@@ -458,6 +497,7 @@
 
       [['received', stamp(lead.received_at)],
        ['source', lead.source],
+       ['pays', lead.payer === 'insurance' ? 'Insurance' : 'Cash / customer pay'],
        ['damage', lead.damage_note || '—'],
        ['first reply', lead.first_reply_at ? stamp(lead.first_reply_at) : 'no reply yet'],
        ['age', ageText(lead.age_days)],
@@ -473,6 +513,77 @@
             'border-bottom:1px dashed var(--acc)">' + esc(lead.email) + '</a>'
           : '—') +
         '</div></div>');
+
+      /* The estimate sits above the follow-up block, because on a quoted lead
+         the figure is WHY anyone is calling back. Written is the estimate done
+         here at the counter and carries the amount; sent is the insurer's and
+         carries none of its own. Cash-pay work stops at written — there is
+         nobody to send it to. */
+      var quoted = lead.estimate_cents != null;
+      h.push('<div style="margin-top:14px;padding:12px;border:1px solid ' +
+        (quoted ? 'var(--acc)' : 'var(--line)') + ';border-radius:5px">');
+      h.push('<div class="detlbl" style="margin:0">Estimate</div>');
+
+      if (QUOTING) {
+        h.push('<div style="font:400 10.5px/1.5 var(--font);color:var(--muted);margin:8px 0 10px">' +
+          (quoted
+            ? 'Currently ' + esc(usd(lead.estimate_cents)) +
+              '. Saving replaces it; the old figure goes to the activity log.'
+            : 'The figure you handed them. It is what the follow-up is about, so it is required.') +
+          '</div>');
+        h.push('<div class="detlbl">Amount quoted</div>' +
+          '<input id="qAmount" class="detsel" inputmode="decimal" placeholder="$0" ' +
+          'style="font:500 20px var(--font);min-height:50px" aria-label="Amount quoted">');
+        h.push('<div style="margin-top:10px"><div class="detlbl">Written on</div>' +
+          '<input id="qDate" class="detsel" type="date" value="' + esc(todayISO()) + '" ' +
+          'aria-label="Date the estimate was written">' +
+          '<div style="font:400 10px var(--font);color:var(--dim);margin-top:5px">' +
+          'Today, filled in for you. Change it if the estimate was written earlier.</div></div>');
+        h.push('<div style="margin-top:10px"><div class="detlbl">Note — optional</div>' +
+          '<input id="qNote" class="detsel" placeholder="Printed copy handed over"></div>');
+        h.push('<div class="row" style="margin-top:11px;gap:7px">' +
+          '<button class="btn" id="qSave">Save estimate</button>' +
+          '<button class="btn btn-ghost" id="qCancel">Cancel</button></div>');
+        h.push('<div style="font:400 10px var(--font);color:var(--dim);margin-top:7px">' +
+          'An estimate needs an amount — it is what the follow-up is about.</div>');
+      } else if (quoted) {
+        h.push('<div style="display:flex;align-items:baseline;gap:9px;flex-wrap:wrap;margin-top:8px">' +
+          '<div style="font:500 26px/1 var(--font);font-variant-numeric:tabular-nums;color:var(--text)">' +
+          esc(usd(lead.estimate_cents)) + '</div>' +
+          (lead.state === 'estimate_sent'
+            ? '<div class="ftag booked" style="color:var(--move);border-color:var(--move)">' +
+              'sent to the insurer</div>'
+            : '') +
+          '</div>');
+        h.push('<div style="font:400 10.5px var(--font);color:var(--dim);margin-top:5px">written ' +
+          esc(stamp(lead.estimate_written_at)) +
+          (lead.estimate_requoted_at ? ' · re-quoted ' + esc(stamp(lead.estimate_requoted_at)) : '') +
+          '</div>');
+        if (lead.estimate_note) {
+          h.push('<div style="font:400 10.5px/1.5 var(--font);color:var(--muted);margin-top:5px">' +
+            esc(lead.estimate_note) + '</div>');
+        }
+        if (ME.caps.manageLeads) {
+          h.push('<div class="row" style="margin-top:10px;gap:7px;flex-wrap:wrap">' +
+            '<button class="btn btn-ghost" id="qOpen">Re-quote</button>' +
+            (lead.payer === 'insurance' && lead.state !== 'estimate_sent' &&
+             lead.state !== 'won' && lead.state !== 'lost'
+              ? '<button class="btn btn-ghost" id="qSent">Mark estimate sent</button>'
+              : '') +
+            '</div>');
+          if (lead.payer !== 'insurance') {
+            h.push('<div style="font:400 10px/1.5 var(--font);color:var(--dim);margin-top:7px">' +
+              'Cash-pay — nothing to send, it stops here.</div>');
+          }
+        }
+      } else {
+        h.push('<div style="font:400 12px var(--font);color:var(--dim);margin:9px 0 10px">' +
+          'No estimate written.</div>');
+        if (ME.caps.manageLeads) {
+          h.push('<button class="btn btn-ghost" id="qOpen">Mark estimate written</button>');
+        }
+      }
+      h.push('</div>');
 
       /* Follow-up sits above the editable fields: it is the thing the row was
          shouting about, so it should be the first thing to hand. */
@@ -531,10 +642,23 @@
       h.push('</div>');
 
       h.push('<div style="margin-top:14px;display:flex;flex-direction:column;gap:10px">');
+      h.push('<div><div class="detlbl">Pays</div><select class="detsel" id="dPayer">' +
+        (META.payers || [{ key: 'cash', label: 'Cash / customer pay' },
+                          { key: 'insurance', label: 'Insurance' }]).map(function (p) {
+          return '<option value="' + p.key + '"' + (p.key === lead.payer ? ' selected' : '') + '>' +
+            esc(p.label) + '</option>';
+        }).join('') + '</select></div>');
       h.push('<div><div class="detlbl">State</div><select class="detsel" id="dState">' +
-        META.states.map(function (s) {
-          return '<option value="' + s.key + '"' + (s.key === lead.state ? ' selected' : '') + '>' +
-            esc(s.label) + '</option>';
+        META.states.filter(function (s) {
+          /* Estimate sent is an insurance state. Offering it on a cash-pay lead
+             only to refuse the change is worse than not offering it. */
+          return !s.insuranceOnly || lead.payer === 'insurance' || s.key === lead.state;
+        }).map(function (s) {
+          return '<option value="' + s.key + '"' + (s.key === lead.state ? ' selected' : '') +
+            (s.key === 'estimate_written' && lead.estimate_cents == null ? ' disabled' : '') + '>' +
+            esc(s.label) +
+            (s.key === 'estimate_written' && lead.estimate_cents == null ? ' — needs an amount' : '') +
+            '</option>';
         }).join('') + '</select></div>');
       h.push('<div><div class="detlbl">Owner</div><select class="detsel" id="dOwner">' +
         '<option value="">Unassigned</option>' +
@@ -644,6 +768,53 @@
         .then(load).catch(function (e) { say(e.message, 'err'); });
     });
 
+    $('dPayer').addEventListener('change', function () {
+      api('/api/leads/' + lead.id, { method: 'PATCH', body: JSON.stringify({ payer: this.value }) })
+        .then(load).catch(function (e) { say(e.message, 'err'); });
+    });
+
+    /* Marking an estimate written, and re-quoting, are the same screen: the
+       figure is required either way, and a re-quote overwrites rather than
+       stacking up a second number nobody reconciles. */
+    var qOpen = $('qOpen');
+    if (qOpen) qOpen.addEventListener('click', function () {
+      QUOTING = true;
+      renderDetail();
+      var f = $('qAmount');
+      if (f) f.focus();
+    });
+
+    var qCancel = $('qCancel');
+    if (qCancel) qCancel.addEventListener('click', function () { QUOTING = false; renderDetail(); });
+
+    var qSave = $('qSave');
+    if (qSave) qSave.addEventListener('click', function () {
+      var raw = $('qAmount').value.replace(/[^0-9.]/g, '');
+      var dollars = parseFloat(raw);
+      if (!raw || !isFinite(dollars) || dollars <= 0) {
+        return say('An estimate needs an amount. It is what the follow-up is about.', 'err');
+      }
+      api('/api/leads/' + lead.id + '/estimate', {
+        method: 'POST',
+        body: JSON.stringify({
+          amountCents: Math.round(dollars * 100),
+          writtenOn: $('qDate').value || undefined,
+          note: $('qNote').value.trim() || undefined
+        })
+      }).then(function (r) {
+        QUOTING = false;
+        say(r.requote ? 'Quote replaced. The old figure is in the history.' : 'Estimate written.', 'ok');
+        return load();
+      }).catch(function (e) { say(e.message, 'err'); });
+    });
+
+    var qSent = $('qSent');
+    if (qSent) qSent.addEventListener('click', function () {
+      api('/api/leads/' + lead.id, {
+        method: 'PATCH', body: JSON.stringify({ state: 'estimate_sent' })
+      }).then(load).catch(function (e) { say(e.message, 'err'); });
+    });
+
     $('dOwner').addEventListener('change', function () {
       api('/api/leads/' + lead.id, {
         method: 'PATCH',
@@ -715,10 +886,15 @@
       '<div><div class="detlbl">Source</div><select id="nSource" class="detsel">' +
       META.sources.map(function (s) { return '<option value="' + esc(s) + '">' + esc(s) + '</option>'; }).join('') +
       '</select></div>' +
+      '<div><div class="detlbl">Pays</div><select id="nPayer" class="detsel">' +
+      (META.payers || []).map(function (p) {
+        return '<option value="' + p.key + '">' + esc(p.label) + '</option>';
+      }).join('') +
+      '</select></div></div>' +
       '<div><div class="detlbl">Owner</div><select id="nOwner" class="detsel">' +
       '<option value="">Unassigned</option>' +
       STAFF.map(function (s) { return '<option value="' + s.id + '">' + esc(s.name) + '</option>'; }).join('') +
-      '</select></div></div></div>' +
+      '</select></div></div>' +
       '<div class="msg" id="nMsg"></div>' +
       '<button class="winbtn" id="saveLead">Save lead</button>' +
       '<div style="text-align:center;margin-top:9px">' +
@@ -735,6 +911,7 @@
         vehicleText: $('nVehicle').value.trim() || undefined,
         damageNote: $('nNote').value.trim() || undefined,
         source: $('nSource').value,
+        payer: $('nPayer') ? $('nPayer').value : undefined,
         ownerUserId: $('nOwner').value ? Number($('nOwner').value) : undefined
       };
       api('/api/leads', { method: 'POST', body: JSON.stringify(body) })
@@ -745,6 +922,7 @@
 
   $('detBack').addEventListener('click', function () {
     ADDING = false;
+    QUOTING = false;
     SEL = null;
     render();
     renderDetail();
@@ -764,6 +942,7 @@
 
   $('newLead').addEventListener('click', function () {
     ADDING = true;
+    QUOTING = false;
     SEL = null;
     render();
     renderDetail();

@@ -142,6 +142,78 @@
   .dfoot .sp { margin-left:auto; }
   .empty { padding:30px 18px; font:400 12px var(--font); color:var(--dim); }
 
+  /* Two screens, one permission. Roles is the list of who; Status messages is
+     the grid of who hears what. */
+  .pagetabs { display:flex; gap:16px; padding:12px 18px 0; flex:none; flex-wrap:wrap; }
+  .pagetab {
+    background:transparent; border:0; padding:0 0 3px; cursor:pointer;
+    font:400 12px var(--font); color:var(--dim); border-bottom:1px solid transparent;
+  }
+  .pagetab:hover { color:var(--text); }
+  .pagetab.sel { color:var(--text); font-weight:500; border-bottom-color:var(--acc); }
+
+  /* The routing grid. Ten target columns: six roles, then a gap, then the four
+     assigned-person targets, which read in the accent because they go to one
+     person on one file rather than everyone in a trade. */
+  .rt {
+    display:grid;
+    grid-template-columns:minmax(150px,1fr) repeat(6, 34px) 13px repeat(4, 34px);
+    column-gap:5px; align-items:center; padding:0 18px;
+  }
+  .rthead {
+    height:30px; border-top:1px solid var(--line); border-bottom:1px solid var(--line);
+    position:sticky; top:0; background:var(--bg); z-index:3;
+  }
+  .rthead > div {
+    font:600 9px var(--font); letter-spacing:.06em; text-transform:uppercase;
+    color:var(--dim); text-align:center;
+  }
+  .rthead > div:first-child { text-align:left; letter-spacing:.1em; }
+  .rthead .asg { color:var(--acc2); }
+  .rtgroup {
+    display:flex; align-items:baseline; gap:10px; padding:9px 18px 7px; background:var(--surf);
+    border-top:1px solid var(--line); border-bottom:1px solid var(--whisper);
+    position:sticky; top:30px; z-index:2;
+  }
+  .rtgroup .n { font:600 9px var(--font); letter-spacing:.13em; text-transform:uppercase; color:var(--acc2); }
+  .rtgroup .m { font:400 10.5px var(--font); color:var(--dim); }
+  .rtrow { height:34px; border-bottom:1px solid var(--whisper); }
+  .rtrow:hover { background:var(--whisper); }
+  .rtname { display:flex; align-items:center; gap:7px; min-width:0; }
+  .rtname .l {
+    font:400 11.5px var(--font); color:var(--text);
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  }
+  .rtrow.silent .rtname .l { color:var(--dim); }
+  .rttag {
+    font:600 8px var(--font); letter-spacing:.08em; text-transform:uppercase;
+    padding:2px 5px; border-radius:3px; white-space:nowrap; flex:none;
+    color:var(--dim); border:1px solid var(--line);
+  }
+  .rttag.none { color:var(--stopped); border-color:var(--stopped); }
+  .rtcell {
+    height:22px; width:100%; box-sizing:border-box; padding:0;
+    border:1px solid var(--line); border-radius:4px; background:transparent;
+    color:transparent; font:600 10.5px var(--font); cursor:pointer;
+    display:grid; place-items:center;
+  }
+  .rtcell:hover:not(:disabled) { border-color:var(--acc); }
+  .rtcell.on { background:var(--acc); border-color:var(--acc); color:var(--bg); }
+  .rtcell:disabled { cursor:default; opacity:.5; }
+  .rtgap { justify-self:center; width:1px; height:20px; background:var(--line); }
+  .rtfoot {
+    display:flex; align-items:center; gap:18px; padding:12px 18px; flex:none;
+    border-top:1px solid var(--line); background:var(--surf); flex-wrap:wrap;
+  }
+  .rtfoot .a { font:400 11px var(--font); color:var(--muted); }
+  .rtfoot .b { font:400 10.5px var(--font); color:var(--dim); margin-left:auto; }
+
+  @media (pointer:coarse) {
+    .rt { grid-template-columns:minmax(130px,1fr) repeat(6, 38px) 13px repeat(4, 38px); }
+    .rtrow { height:40px; }
+    .rtcell { height:28px; }
+  }
+
   @media (max-width:1100px) {
     .rgrid { grid-template-columns:46px minmax(150px,1fr) 70px 150px 60px 26px; }
     .rgrid .hide-md { display:none; }
@@ -175,6 +247,8 @@
   </div>
 </div>
 
+<div class="pagetabs" id="pagetabs"></div>
+
 <div class="ctrls" id="ctrls"></div>
 <div class="rgrid rhead" id="rhead" hidden>
   <div>Rank</div><div>Role</div><div class="hide-md">People</div>
@@ -182,6 +256,7 @@
   <div style="text-align:right">Ticks</div><div></div>
 </div>
 <div id="list"></div>
+<div class="rtfoot" id="rtfoot" hidden></div>
 <div class="foot" id="foot" hidden>
   Every change is logged — who, when, what. Anything the shop’s plan does not include never appears here.
   People holding a role pick a change up on their next page load.
@@ -203,6 +278,11 @@
 (function () {
   var api = Shell.api, esc = Shell.esc;
   var ME = null, DATA = null, OPEN = null, DLG = null;
+  /* 'roles' is who exists; 'routing' is who hears what. Same permission. */
+  var VIEW = 'roles';
+  var RT = null;      /* the routing payload */
+  var RTSET = null;   /* live ticks: Set of slot|kind|key */
+  var RTDIRTY = false;
 
   function $(id) { return document.getElementById(id); }
 
@@ -213,6 +293,26 @@
     return api('/api/roles').then(function (d) {
       DATA = d;
       render();
+    });
+  }
+
+  function renderPageTabs() {
+    $('pagetabs').innerHTML = [
+      ['roles', 'Roles &amp; permissions'],
+      ['routing', 'Status messages']
+    ].map(function (t) {
+      return '<button class="pagetab' + (VIEW === t[0] ? ' sel' : '') + '" data-view="' + t[0] + '">' +
+        t[1] + '</button>';
+    }).join('');
+
+    Array.prototype.forEach.call($('pagetabs').querySelectorAll('[data-view]'), function (b) {
+      b.addEventListener('click', function () {
+        if (VIEW === b.dataset.view) return;
+        if (VIEW === 'routing' && RTDIRTY &&
+            !confirm('The routing grid has unsaved changes. Leave them?')) return;
+        VIEW = b.dataset.view;
+        if (VIEW === 'routing') loadRouting(); else { RTDIRTY = false; render(); }
+      });
     });
   }
 
@@ -273,6 +373,10 @@
   }
 
   function render() {
+    renderPageTabs();
+    if (VIEW === 'routing') return renderRouting();
+
+    $('rtfoot').hidden = true;
     var total = DATA.roles.reduce(function (a, r) { return a + r.people; }, 0);
     $('headmeta').textContent = DATA.roles.length + ' roles · ' + total + ' people · ' +
       'what someone may do is the union of every role they hold · rank sets the title shown';
@@ -404,6 +508,140 @@
 
     $('pCopy').addEventListener('click', function () { openAdd(r.key); });
     $('pDel').addEventListener('click', function () { openDelete(r); });
+  }
+
+  /* ---------------------------------------------- who a status change messages */
+
+  function rtKey(slot, kind, key) { return slot + '|' + kind + '|' + key; }
+
+  function loadRouting() {
+    return api('/api/status-routing').then(function (d) {
+      RT = d;
+      RTSET = {};
+      d.routes.forEach(function (r) {
+        RTSET[rtKey(r.slot_id, r.target_kind, r.target_key)] = true;
+      });
+      RTDIRTY = false;
+      render();
+    }).catch(function (e) { say(e.message); });
+  }
+
+  function rtRows() {
+    var out = [], seen = {};
+    RT.statuses.forEach(function (s) {
+      if (!seen[s.group_id]) {
+        seen[s.group_id] = { name: s.group_name, lane: s.lane_key, rows: [] };
+        out.push(seen[s.group_id]);
+      }
+      seen[s.group_id].rows.push(s);
+    });
+    return out;
+  }
+
+  function rtOnFor(slot) {
+    return RT.targets.filter(function (t) { return RTSET[rtKey(slot, t.kind, t.key)]; });
+  }
+
+  function renderRouting() {
+    if (!RT) { $('list').innerHTML = '<div class="empty">Loading…</div>'; return; }
+
+    var groups = rtRows();
+    var silent = RT.statuses.filter(function (s) { return !rtOnFor(s.slot_id).length; }).length;
+    var total = RT.statuses.reduce(function (a, s) { return a + rtOnFor(s.slot_id).length; }, 0);
+
+    $('headmeta').textContent = RT.statuses.length + ' statuses · ' + total + ' routes · ' +
+      'a person holding several roles is messaged once';
+    $('rhead').hidden = true;
+    $('foot').hidden = true;
+
+    /* The actions live where the roles screen keeps its own. */
+    $('ctrls').innerHTML =
+      '<div class="lbl">Status messages</div>' +
+      '<div style="font:400 11.5px var(--font);color:var(--muted)">' +
+      'who is told when a file moves' +
+      '</div>' +
+      '<div class="msg" id="ctrlMsg"></div>' +
+      '<button class="ghostbtn sp" id="rtClear">Clear all</button>' +
+      '<button class="ghostbtn" id="rtReset">Reset to default</button>' +
+      '<button class="btn" id="rtSave"' + (RTDIRTY ? '' : ' disabled') + '>Save routing</button>';
+
+    var head = '<div class="rt rthead"><div>Status</div>' +
+      RT.targets.map(function (t, i) {
+        return (i === 6 ? '<div class="rtgap" aria-hidden="true"></div>' : '') +
+          '<div' + (t.kind === 'assigned' ? ' class="asg"' : '') +
+          ' title="' + esc(t.label) + '">' + esc(t.code) + '</div>';
+      }).join('') + '</div>';
+
+    $('list').innerHTML = head + groups.map(function (g) {
+      return '<div class="rtgroup"><div class="n">' + esc(g.name) + '</div>' +
+        '<div class="m">' + g.rows.length + ' status' + (g.rows.length === 1 ? '' : 'es') + '</div></div>' +
+        g.rows.map(function (s) {
+          var on = rtOnFor(s.slot_id);
+          return '<div class="rt rtrow' + (on.length ? '' : ' silent') + '">' +
+            '<div class="rtname"><div class="l" title="' + esc(s.slot_id) + '">' +
+              esc(s.label) + '</div>' +
+              (s.module ? '<div class="rttag">' + esc(s.module) + '</div>' : '') +
+              (on.length ? '' : '<div class="rttag none">Nobody</div>') +
+            '</div>' +
+            RT.targets.map(function (t, i) {
+              var lit = !!RTSET[rtKey(s.slot_id, t.kind, t.key)];
+              return (i === 6 ? '<div class="rtgap" aria-hidden="true"></div>' : '') +
+                '<button class="rtcell' + (lit ? ' on' : '') + '"' +
+                ' data-slot="' + esc(s.slot_id) + '" data-kind="' + esc(t.kind) +
+                '" data-key="' + esc(t.key) + '"' +
+                ' aria-label="' + esc((lit ? 'Messages ' : 'Does not message ') + t.label +
+                  ' on ' + s.label) + '"' +
+                ' title="' + esc((lit ? 'Messages ' : 'Does not message ') + t.label) + '"' +
+                '>✓</button>';
+            }).join('') +
+          '</div>';
+        }).join('');
+    }).join('');
+
+    $('rtfoot').hidden = false;
+    $('rtfoot').innerHTML =
+      '<div class="a">' + total + ' route' + (total === 1 ? '' : 's') + ' set · ' +
+      silent + ' status' + (silent === 1 ? '' : 'es') + ' message nobody' +
+      (RTDIRTY ? ' · unsaved' : '') + '</div>' +
+      '<div class="b">' + esc(RT.targets.filter(function (t) { return t.kind === 'assigned'; })
+        .map(function (t) { return t.code; }).join(' ')) +
+      ' go to the person assigned on the file, not to everyone in that trade</div>';
+
+    Array.prototype.forEach.call($('list').querySelectorAll('.rtcell'), function (b) {
+      b.addEventListener('click', function () {
+        var k = rtKey(b.dataset.slot, b.dataset.kind, b.dataset.key);
+        if (RTSET[k]) delete RTSET[k]; else RTSET[k] = true;
+        RTDIRTY = true;
+        renderRouting();
+      });
+    });
+
+    $('rtSave').addEventListener('click', function () {
+      var routes = Object.keys(RTSET).map(function (k) {
+        var p = k.split('|');
+        return { slotId: p[0], kind: p[1], key: p[2] };
+      });
+      api('/api/status-routing', { method: 'PUT', body: JSON.stringify({ routes: routes }) })
+        .then(function (r) {
+          say('Saved. ' + r.routes + ' routes, ' + r.silentStatuses +
+            ' status' + (r.silentStatuses === 1 ? '' : 'es') + ' messaging nobody.', true);
+          return loadRouting();
+        }).catch(function (e) { say(e.message); });
+    });
+
+    $('rtReset').addEventListener('click', function () {
+      if (!confirm('Put every status back to the shipped default? Unsaved ticks are lost.')) return;
+      api('/api/status-routing/defaults', { method: 'POST' })
+        .then(function (r) { say('Back to the default — ' + r.routes + ' routes.', true); return loadRouting(); })
+        .catch(function (e) { say(e.message); });
+    });
+
+    $('rtClear').addEventListener('click', function () {
+      if (!confirm('Untick everything? Nothing is saved until you press Save routing.')) return;
+      RTSET = {};
+      RTDIRTY = true;
+      renderRouting();
+    });
   }
 
   /* ------------------------------------------------------------ dialogs */

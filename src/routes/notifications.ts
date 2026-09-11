@@ -4,6 +4,10 @@ import { tq, tqOne, texec } from '../db/tenant';
 import { requireCompany } from '../middleware/context';
 import { audit } from '../lib/audit';
 import { actorFrom } from './audit';
+import {
+  ROUTE_ROLES, ROUTE_ASSIGNED, allRoutes, saveRoutes, routingConfigured,
+  defaultRoutesFor, RouteRow
+} from '../lib/status-routes';
 
 /**
  * Messages.
@@ -171,5 +175,136 @@ export async function registerNotifications(app: FastifyInstance): Promise<void>
     });
 
     return { ok: true, deleted: affectedRows };
+  });
+
+  /* ------------------------------------------------- who a status change messages */
+
+  /**
+   * The routing grid: every status on this shop's board against the ten
+   * targets. Read by Admin › Notifications.
+   *
+   * Six targets are roles — everyone holding the role hears. Four are the
+   * person assigned to a trade on the file, and they send to that person only;
+   * an unassigned trade messages nobody rather than falling back to everyone
+   * who could have done the work.
+   */
+  app.get('/api/status-routing', async (req, reply) => {
+    const ctx = requireCompany(req, reply);
+    if (!ctx) return;
+    if (!ctx.caps.managePermissions) return reply.code(403).send({ error: 'Not permitted' });
+    const cid = ctx.company!.id;
+
+    const [statuses, roles, routes, configured] = await Promise.all([
+      tq<RowDataPacket[]>(cid, `
+        SELECT s.slot_id, s.label, s.owner_role, s.module, s.is_terminal,
+               g.id AS group_id, g.name AS group_name, g.lane_key, g.sort_order AS group_order,
+               s.sort_order
+        FROM statuses s
+        JOIN status_groups g ON g.id = s.group_id
+        WHERE s.enabled = 1
+        ORDER BY g.sort_order, s.sort_order`),
+      tq<RowDataPacket[]>(cid, 'SELECT role_key, label FROM roles ORDER BY rank_order, label'),
+      allRoutes(cid),
+      routingConfigured(cid)
+    ]);
+
+    const labelOf = new Map(roles.map(r => [String(r.role_key), String(r.label)]));
+
+    return {
+      configured,
+      /* The grid's columns, in order, with the divider between the two kinds
+         implied by the change of kind. Role labels are the shop's own — a shop
+         that renamed Front office to "Service advisor" sees that here. */
+      targets: [
+        ...ROUTE_ROLES
+          .filter(r => labelOf.has(r.key))
+          .map(r => ({ kind: 'role', key: r.key, code: r.code, label: labelOf.get(r.key) })),
+        ...ROUTE_ASSIGNED.map(a => ({ kind: 'assigned', key: a.key, code: a.code, label: a.label }))
+      ],
+      statuses,
+      routes
+    };
+  });
+
+  /**
+   * Save the grid. One write: the table is replaced inside a transaction, so a
+   * save cannot half-apply and leave a status routed to nobody by accident.
+   * Zero rows for a status is a legitimate answer and is kept as one.
+   */
+  app.put('/api/status-routing', async (req, reply) => {
+    const ctx = requireCompany(req, reply);
+    if (!ctx) return;
+    if (!ctx.caps.managePermissions) return reply.code(403).send({ error: 'Not permitted' });
+    const cid = ctx.company!.id;
+
+    const b = req.body as { routes?: Array<{ slotId: string; kind: string; key: string }> };
+    const incoming = b.routes ?? [];
+
+    /* Only statuses this board carries and only targets that exist — a stale
+       tab should not be able to write a route to a deleted role. */
+    const [slots, roles] = await Promise.all([
+      tq<Array<RowDataPacket & { slot_id: string }>>(cid, 'SELECT slot_id FROM statuses'),
+      tq<Array<RowDataPacket & { role_key: string }>>(cid, 'SELECT role_key FROM roles')
+    ]);
+    const okSlot = new Set(slots.map(s => String(s.slot_id)));
+    const okRole = new Set(roles.map(r => String(r.role_key)));
+    const okAssigned = new Set(ROUTE_ASSIGNED.map(a => a.key));
+
+    const rows: RouteRow[] = [];
+    for (const r of incoming) {
+      if (!okSlot.has(String(r.slotId))) continue;
+      if (r.kind === 'role' && okRole.has(String(r.key))) {
+        rows.push({ slot_id: String(r.slotId), target_kind: 'role', target_key: String(r.key) });
+      } else if (r.kind === 'assigned' && okAssigned.has(String(r.key))) {
+        rows.push({ slot_id: String(r.slotId), target_kind: 'assigned', target_key: String(r.key) });
+      }
+    }
+
+    const before = await allRoutes(cid);
+    const saved = await saveRoutes(cid, rows);
+
+    const silent = [...okSlot].filter(s => !rows.some(r => r.slot_id === s)).length;
+
+    await audit(cid, actorFrom(req), {
+      entity: 'status_routing', action: 'routing_saved', area: 'Permissions',
+      label: `Status messages — ${saved} route${saved === 1 ? '' : 's'} set, ` +
+        `${silent} status${silent === 1 ? '' : 'es'} messaging nobody`,
+      changes: [{ field: 'Routes', from: String(before.length), to: String(saved) }],
+      sensitive: true
+    });
+
+    return { ok: true, routes: saved, silentStatuses: silent };
+  });
+
+  /**
+   * Back to what ships. Only for the statuses this board carries — a shop that
+   * has added its own statuses keeps them, routed to nobody, which is the
+   * honest answer for a status we know nothing about.
+   */
+  app.post('/api/status-routing/defaults', async (req, reply) => {
+    const ctx = requireCompany(req, reply);
+    if (!ctx) return;
+    if (!ctx.caps.managePermissions) return reply.code(403).send({ error: 'Not permitted' });
+    const cid = ctx.company!.id;
+
+    const [slots, roles] = await Promise.all([
+      tq<Array<RowDataPacket & { slot_id: string }>>(cid, 'SELECT slot_id FROM statuses'),
+      tq<Array<RowDataPacket & { role_key: string }>>(cid, 'SELECT role_key FROM roles')
+    ]);
+    const okRole = new Set(roles.map(r => String(r.role_key)));
+
+    /* A shop that deleted or renamed a shipped role gets no route to it. */
+    const rows = defaultRoutesFor(slots.map(s => String(s.slot_id)))
+      .filter(r => r.target_kind !== 'role' || okRole.has(r.target_key));
+
+    const saved = await saveRoutes(cid, rows);
+
+    await audit(cid, actorFrom(req), {
+      entity: 'status_routing', action: 'routing_reset', area: 'Permissions',
+      label: `Status messages reset to the shipped default — ${saved} routes`,
+      sensitive: true
+    });
+
+    return { ok: true, routes: saved };
   });
 }

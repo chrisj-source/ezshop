@@ -1,5 +1,6 @@
 import { PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { tenantPool, tq } from './db/tenant';
+import { recipientsForStatus, routingConfigured } from './lib/status-routes';
 
 /**
  * In-app notifications.
@@ -23,6 +24,8 @@ export interface NotifyInput {
   body: string;
   /** owner_role of the status involved — used by scope='owned' */
   ownerRole?: string | null;
+  /** the status moved to. With this, status.change routes off the shop's grid. */
+  slotId?: string | null;
   /** never notify the person who caused the event */
   actorUserId?: number | null;
   /** direct recipients, bypassing groups (assignment, mentions) */
@@ -57,6 +60,18 @@ interface PositionRow extends RowDataPacket {
 export async function notify(input: NotifyInput): Promise<number> {
   const cid = input.companyId;
   const recipients = new Set<number>(input.directUserIds ?? []);
+
+  /* A status change is routed by the shop's own grid (Admin › Notifications),
+     which supersedes the groups below for this one event. The grid is allowed
+     to say "nobody" — Initial Wash ships that way — so an empty answer for a
+     status is an answer, not a reason to fall through. What decides is whether
+     the shop has any routing rows at all. */
+  if (input.event === 'status.change' && input.slotId && await routingConfigured(cid)) {
+    for (const uid of await recipientsForStatus(cid, input.slotId, input.roId)) {
+      recipients.add(uid);
+    }
+    return deliver(input, recipients);
+  }
 
   const groups = await tq<GroupRow[]>(cid,
     `SELECT ns.group_id, ns.scope, ns.channel_app
@@ -106,6 +121,12 @@ export async function notify(input: NotifyInput): Promise<number> {
     }
   }
 
+  return deliver(input, recipients);
+}
+
+/** The write half: one row per recipient, plus its in-app delivery record. */
+async function deliver(input: NotifyInput, recipients: Set<number>): Promise<number> {
+  const cid = input.companyId;
   if (input.actorUserId) recipients.delete(input.actorUserId);
   if (!recipients.size) return 0;
 

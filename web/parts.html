@@ -130,6 +130,117 @@
     .lgrid .linebtn { min-height:44px; padding:0 14px; font-size:11.5px; }
   }
 
+  /* ------------------------------------------------------------------ one file
+     A file's parts lines, as a modal over the list. It replaced an expansion
+     under the row: seventeen lines pushed every other file off the screen, and
+     what the desk came to read arrived flat and undifferentiated. */
+  .fmscrim { position:fixed; inset:0; background:rgba(6,10,18,.66); z-index:70; }
+  .fmscrim[hidden], .fmodal[hidden] { display:none; }
+  .fmodal {
+    position:fixed; z-index:71; inset:26px; display:flex; flex-direction:column;
+    background:var(--bg); border:1px solid var(--line); border-radius:10px;
+    box-shadow:0 24px 64px rgba(0,0,0,.5); overflow:hidden;
+  }
+  .fmhead {
+    display:flex; align-items:flex-start; gap:16px; padding:16px 20px 15px;
+    border-bottom:1px solid var(--line); flex:none;
+  }
+  .fmacts { margin-left:auto; display:flex; align-items:center; gap:7px; flex-wrap:wrap; justify-content:flex-end; }
+  .fmacts .btn { white-space:nowrap; }
+  .fmmain { flex:1; min-height:0; display:flex; }
+  .fmrail {
+    width:214px; flex:none; border-right:1px solid var(--line); background:var(--surf);
+    display:flex; flex-direction:column; overflow-y:auto;
+  }
+  .fmstage {
+    padding:13px 16px; cursor:pointer; border-bottom:1px solid var(--whisper);
+    border-left:3px solid transparent; background:transparent; text-align:left; width:100%;
+  }
+  .fmstage:hover { background:var(--chip); }
+  .fmstage.sel { background:var(--chip); }
+  .fmstage .t { display:flex; align-items:center; gap:8px; }
+  .fmstage .dot { width:7px; height:7px; border-radius:2px; opacity:.65; flex:none; }
+  .fmstage.sel .dot { opacity:1; }
+  .fmstage .n { font:500 12px var(--font); letter-spacing:.06em; text-transform:uppercase; color:var(--text); }
+  .fmstage .c { margin-left:auto; font:500 12px var(--font); font-variant-numeric:tabular-nums; color:var(--muted); }
+  .fmstage .v { font:400 11px var(--font); font-variant-numeric:tabular-nums; color:var(--muted); margin-top:6px; }
+  .fmstage .m { font:400 10.5px var(--font); color:var(--dim); margin-top:3px; }
+  .fmsums { margin-top:auto; padding:14px 16px; border-top:1px solid var(--whisper); }
+  .fmsum { display:flex; align-items:baseline; justify-content:space-between; gap:10px; margin-bottom:11px; }
+  .fmsum .k { font:600 8.5px var(--font); letter-spacing:.13em; text-transform:uppercase; color:var(--acc2); }
+  .fmsum .v { font:500 13px var(--font); font-variant-numeric:tabular-nums; color:var(--text); }
+  .fmsums .note { font:400 10px/1.45 var(--font); color:var(--dim); }
+
+  .fmpane { flex:1; min-width:0; display:flex; flex-direction:column; }
+  .fmpanehead {
+    display:flex; align-items:center; gap:12px; padding:11px 20px; flex:none;
+    border-bottom:1px solid var(--line); flex-wrap:wrap;
+  }
+  .fmpanehead .t { font:500 13px var(--font); letter-spacing:.06em; text-transform:uppercase; }
+  .fmpanehead .m { font:400 11.5px var(--font); color:var(--dim); }
+  .fmrows { flex:1; min-height:0; overflow:auto; }
+  .fmgrid {
+    display:grid;
+    grid-template-columns:24px minmax(150px,1fr) 104px 126px 46px 116px 108px 80px 78px 80px 78px 42px;
+    gap:10px; align-items:center; padding:0 20px;
+  }
+  .fmghead {
+    height:28px; position:sticky; top:0; z-index:3; background:var(--bg);
+    border-bottom:1px solid var(--whisper);
+  }
+  .fmghead > div { font:600 8.5px var(--font); letter-spacing:.12em; text-transform:uppercase; color:var(--acc2); }
+  .fmghead .num { text-align:right; }
+  .fmrow { height:36px; border-bottom:1px solid var(--whisper); }
+  .fmrow:hover { background:var(--surf); }
+  .fmrow.sel { background:var(--chip); }
+  .fmrow .d { font:400 12.5px var(--font); color:var(--text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .fmrow .s { font:400 11px var(--font); font-variant-numeric:tabular-nums; color:var(--muted);
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .fmrow .sd { font:400 11px var(--font); color:var(--dim); }
+  .fmrow .num { font:400 12px var(--font); font-variant-numeric:tabular-nums; text-align:right; color:var(--text); }
+  .fmrow .num.q { color:var(--muted); }
+  .fmrow .num.pending { font-size:10.5px; color:var(--dim); }
+  .fmrow .num.pp { font-size:11px; color:var(--dim); }
+  .fmtick {
+    width:14px; height:14px; border-radius:3px; border:1px solid var(--line); background:transparent;
+    color:transparent; font:600 9px var(--font); display:grid; place-items:center; padding:0; cursor:pointer;
+  }
+  .fmtick.on { background:var(--acc); border-color:var(--acc); color:var(--bg); }
+  .fmstatus {
+    display:inline-flex; align-items:center; font:500 9.5px var(--font); letter-spacing:.07em;
+    text-transform:uppercase; border-radius:3px; padding:4px 7px; background:transparent;
+    cursor:pointer; white-space:nowrap;
+  }
+  .fmstatus:disabled { cursor:default; }
+  .fmtype {
+    background:transparent; border:1px dashed var(--line); border-radius:3px; color:var(--muted);
+    font:400 11px var(--font); padding:2px 4px; max-width:74px;
+  }
+  .fmtype:hover { border-color:var(--acc); color:var(--text); }
+  .fmtype.swapped { color:var(--text); }
+  .fmest { font:400 9.5px var(--font); color:var(--acc2); white-space:nowrap; }
+  .fmbatch {
+    display:flex; align-items:center; gap:10px; padding:11px 20px; flex:none;
+    border-top:1px solid var(--line); flex-wrap:wrap;
+  }
+  .fmbatch.on { background:var(--chip); }
+  .fmbatch .hint { font:400 10.5px var(--font); color:var(--dim); }
+  .fmbatch .n { font:500 11.5px var(--font); color:var(--text); }
+
+  @media (max-width:900px) {
+    .fmodal { inset:0; border-radius:0; border:0; }
+    .fmmain { flex-direction:column; }
+    .fmrail { width:auto; flex-direction:row; overflow-x:auto; border-right:0; border-bottom:1px solid var(--line); }
+    .fmstage { min-width:150px; border-bottom:0; border-left:0; border-top:3px solid transparent; }
+    .fmsums { display:none; }
+    .fmrows { overflow-x:auto; }
+    .fmgrid { min-width:940px; }
+  }
+  @media (pointer:coarse) {
+    .fmrow { height:44px; }
+    .fmtick { width:20px; height:20px; }
+  }
+
   /* ------------------------------------------------------- pull sheet */
   .pmodal[hidden], .pmscrim[hidden] { display:none; }
   .pmscrim { position:fixed; inset:0; background:rgba(9,13,20,.72); z-index:60; }
@@ -227,7 +338,6 @@
   <button class="btn btn-ghost" id="vendorsBtn">Vendors</button>
   <a class="btn btn-ghost" href="/clients.html">Wholesale clients</a>
   <button class="btn btn-ghost" id="printBtn">Print pull sheet</button>
-  <button class="btn" id="expandAll">Expand all</button>
 </div>
 
 <div class="kpis" id="kpis"></div>
@@ -274,11 +384,37 @@
 
 <div id="printroot"></div>
 
+<div class="fmscrim" id="fmScrim" hidden></div>
+<div class="fmodal" id="fmodal" hidden role="dialog" aria-modal="true" aria-labelledby="fmTitle">
+  <div class="fmhead">
+    <div style="min-width:0">
+      <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap">
+        <div id="fmTitle" style="font:500 17px var(--font)">—</div>
+        <a class="rolink" id="fmRo" href="#">—</a>
+      </div>
+      <div class="sub" id="fmSub">—</div>
+    </div>
+    <div class="fmacts" id="fmActs"></div>
+    <button class="close" id="fmClose" aria-label="Close">&times;</button>
+  </div>
+  <div class="fmmain">
+    <div class="fmrail" id="fmRail"></div>
+    <div class="fmpane">
+      <div class="fmpanehead" id="fmPaneHead"></div>
+      <div class="fmrows" id="fmRows"></div>
+      <div class="fmbatch" id="fmBatch"></div>
+    </div>
+  </div>
+</div>
+
 <script src="/shell.js?v=8"></script>
 <script>
 (function () {
   var api = Shell.api, esc = Shell.esc;
-  var ME = null, PARTS = [], VENDORS = [], RETURNS = [], OPEN = {}, ALL_OPEN = false;
+  var ME = null, PARTS = [], VENDORS = [], RETURNS = [];
+  /* The file whose lines are open, which stage of them, and what is ticked.
+     One file at a time, over the list — not expanded under it. */
+  var FILE = null, FSTAGE = 'need', FSEL = {};
   /* A parts line under this margin reads thin. The server sends its own value. */
   var THIN_PCT = 20;
 
@@ -350,8 +486,7 @@
          still expanded, where the desk left it. */
       var back = new URLSearchParams(location.search).get('open');
       if (back) {
-        OPEN[back] = true;
-        render();
+        openFile(Number(back));
         history.replaceState(null, '', '/parts.html');
       }
     });
@@ -371,6 +506,10 @@
         VENDORS.map(function (v) { return '<option value="' + v.id + '">' + esc(v.name) + '</option>'; }).join('');
       renderKpis(d.summary);
       render();
+      /* A file open on screen follows the data — ordering, receiving and costs
+         all reload, and the modal should show the result rather than what was
+         true before the write. */
+      if (FILE) renderFile();
     });
   }
 
@@ -573,11 +712,10 @@
         '<div class="sub" style="margin-left:auto">' + esc(g.note) + '</div></div>';
 
       mine.forEach(function (f) {
-        var isOpen = ALL_OPEN || OPEN[f.roId];
         var over = f.targetDays != null && f.daysInShop > f.targetDays;
 
         html += '<div class="pgrid prow" data-ro="' + f.roId + '">' +
-          '<div class="caret' + (isOpen ? ' open' : '') + '">▶</div>' +
+          '<div class="caret">▶</div>' +
 
           '<div><div style="font:500 12px var(--font);font-variant-numeric:tabular-nums">' +
           '<a class="rolink" href="/board.html?ro=' + f.roId + '&back=parts" ' +
@@ -625,8 +763,6 @@
                 : f.received + ' of ' + f.lines.length) + '</div></div>'
             : '<div class="hide-md cellnum">' + f.received + ' of ' + f.lines.length + '</div>') +
           '</div>';
-
-        if (isOpen) html += lineTable(f);
       });
 
       html += '</div>';
@@ -636,99 +772,403 @@
 
     Array.prototype.forEach.call($('body').querySelectorAll('[data-ro]'), function (el) {
       el.addEventListener('click', function () {
-        var id = el.dataset.ro;
-        if (ALL_OPEN) {
-          // Collapsing one out of "expand all" turns the flag off and keeps the rest open.
-          ALL_OPEN = false;
-          byRo().forEach(function (f) { OPEN[f.roId] = true; });
-        }
-        OPEN[id] = !OPEN[id];
-        render();
+        openFile(Number(el.dataset.ro));
       });
     });
 
     wireLines();
   }
 
-  function lineTable(f) {
-    var toOrder = f.lines.filter(function (l) { return l.state === 'need'; }).length;
-    var onOrder = f.lines.filter(function (l) {
-      return ['ordered', 'partial', 'backordered'].indexOf(l.state) >= 0;
+  /* ------------------------------------------------------------- one file
+
+     Four stages down the left, one stage's lines at a time on the right. The
+     grouping is the point: a flat list of seventeen lines says nothing about
+     what is waiting on whom.
+
+     Every column the desk asked to keep is on the row at 36px — the complaint
+     was never the column count, it was the flat list, cost and price stacked in
+     one cell, and the rhythm. */
+
+  var STAGES = [
+    { k: 'need', t: 'To order', states: ['need'], tone: 'var(--acc)', btn: 'Order these' },
+    { k: 'ordered', t: 'On order', states: ['ordered', 'partial'], tone: 'var(--move)', btn: 'Receive these' },
+    { k: 'backordered', t: 'Back order', states: ['backordered'], tone: 'var(--stopped)', btn: 'Receive these' },
+    { k: 'received', t: 'Received', states: ['received', 'returned'], tone: 'var(--done)', btn: '' }
+  ];
+
+  /* The ordered type is what the shop is buying. part_type_estimated is what the
+     estimate called for, and the two differ often enough to matter: OEM on the
+     estimate, aftermarket in the van. */
+  var TYPES = [
+    ['oem', 'OEM new', 'oem'],
+    ['aftermarket', 'Aftermarket', 'a/m'],
+    ['used', 'Used / LKQ', 'used'],
+    ['recycled', 'Recycled', 'recy'],
+    ['reconditioned', 'Reconditioned', 'recon']
+  ];
+  function typeShort(v) {
+    var t = TYPES.filter(function (x) { return x[0] === v; })[0];
+    return t ? t[2] : (v || '\u2014');
+  }
+  function typeLong(v) {
+    var t = TYPES.filter(function (x) { return x[0] === v; })[0];
+    return t ? t[1] : (v || 'not typed');
+  }
+
+  function stageOf(state) {
+    var s = STAGES.filter(function (x) { return x.states.indexOf(state) >= 0; })[0];
+    return s ? s.k : 'need';
+  }
+
+  function openFile(roId) {
+    FILE = roId;
+    FSEL = {};
+    var f = fileOf();
+    if (f) {
+      /* Open on the stage with work in it rather than always on To order: a
+         file with everything ordered should not open on an empty pane. */
+      var first = STAGES.filter(function (s) {
+        return f.lines.some(function (l) { return s.states.indexOf(l.state) >= 0; });
+      })[0];
+      FSTAGE = first ? first.k : 'need';
+    }
+    $('fmScrim').hidden = false;
+    $('fmodal').hidden = false;
+    renderFile();
+    $('fmClose').focus();
+  }
+
+  function closeFile() {
+    FILE = null;
+    FSEL = {};
+    $('fmScrim').hidden = true;
+    $('fmodal').hidden = true;
+  }
+
+  function fileOf() {
+    return byRo().filter(function (x) { return x.roId === FILE; })[0] || null;
+  }
+
+  /** What a line costs, and the two honest ways of not knowing yet. */
+  function costText(l) {
+    var c = Number(l.cost_cents || 0);
+    if (c) return { t: money(c), cls: '' };
+    if (l.state === 'need') return { t: 'at order', cls: ' pending' };
+    return { t: 'cost pending', cls: ' pending' };
+  }
+
+  function renderFile() {
+    var f = fileOf();
+    if (!f) { closeFile(); return; }
+
+    $('fmTitle').textContent = f.vehicle || 'File';
+    var ro = $('fmRo');
+    ro.textContent = 'RO ' + f.ro;
+    ro.href = '/board.html?ro=' + f.roId + '&back=parts';
+    $('fmSub').textContent = [
+      f.color, f.customer,
+      f.vin ? 'VIN \u2026' + String(f.vin).slice(-8) : null,
+      'in ' + shopDate(f.openedAt),
+      f.status
+    ].filter(Boolean).join(' \u00b7 ');
+
+    var toOrder = f.lines.filter(function (l) { return l.state === 'need'; });
+
+    /* Header actions. Add part, Costs, the pull sheet, the two VIN copies and
+       one order for everything still to order. */
+    $('fmActs').innerHTML = (ME.caps.manageParts
+      ? '<button class="btn btn-ghost" data-fm="addpart">Add part</button>' +
+        (ME.caps.money ? '<button class="btn btn-ghost" data-fm="costs">Costs</button>' : '')
+      : '') +
+      '<button class="btn btn-ghost" data-fm="pull">Print pull sheet</button>' +
+      (f.vin
+        ? '<button class="btn btn-ghost" data-fm="vin8">Copy VIN</button>' +
+          '<button class="btn btn-ghost" data-fm="vin17">Copy all 17</button>'
+        : '') +
+      (ME.caps.manageParts && toOrder.length
+        ? '<button class="btn" data-fm="orderall">Order all ' + toOrder.length + '</button>'
+        : '');
+
+    /* The rail: a stage, its count, its list total, and the one thing worth
+       knowing about that stage. */
+    var priced = f.lines.filter(function (l) { return Number(l.cost_cents || 0) > 0; });
+    var pricedList = priced.reduce(function (a, l) {
+      return a + Number(l.price_cents || 0) * Number(l.qty || 1);
+    }, 0);
+    var pricedCost = priced.reduce(function (a, l) {
+      return a + Number(l.cost_cents || 0) * Number(l.qty || 1);
+    }, 0);
+    var notOrdered = toOrder.length;
+    var pending = f.lines.filter(function (l) {
+      return !Number(l.cost_cents || 0) && l.state !== 'need';
     }).length;
 
-    var h = '<div class="lines">';
+    $('fmRail').innerHTML = STAGES.map(function (s) {
+      var rows = f.lines.filter(function (l) { return s.states.indexOf(l.state) >= 0; });
+      var list = rows.reduce(function (a, l) {
+        return a + Number(l.price_cents || 0) * Number(l.qty || 1);
+      }, 0);
+      var etas = rows.map(function (l) { return l.eta; }).filter(Boolean).sort();
+      var late = rows.filter(function (l) { return Number(l.days_late) > 0; });
 
-    if (ME.caps.manageParts) {
-      h += '<div class="row" style="padding:8px 0 10px;gap:8px;align-items:center">' +
-        '<button class="btn btn-ghost" data-addpart="' + f.roId + '">Add part</button>' +
-        (ME.caps.money
-          ? '<button class="btn btn-ghost" data-costs="' + f.roId + '">Costs</button>'
-          : '') +
-        (toOrder
-          ? '<button class="btn btn-ghost" data-orderfile="' + f.roId + '">Order ' + toOrder +
-            ' line' + (toOrder === 1 ? '' : 's') + '</button>'
-          : '') +
-        (onOrder
-          ? '<button class="btn btn-ghost" data-recvfile="' + f.roId + '">Receive ' + onOrder +
-            ' line' + (onOrder === 1 ? '' : 's') + '</button>'
-          : '') +
-        '<span class="sub">' +
-        (f.vin ? 'VIN …' + esc(String(f.vin).slice(-8)) + ' · ' : '') +
-        (ME.caps.money && f.thinLines
-          ? f.thinLines + ' line' + (f.thinLines === 1 ? '' : 's') + ' under ' + THIN_PCT + '% margin'
-          : 'one order, one vendor, one order number') +
-        '</span>' +
-        (f.vin
-          ? '<button class="linebtn" data-vin="' + esc(f.vin) + '" ' +
-            'title="Copy the full 17">copy all 17</button>'
-          : '') +
-        '</div>';
+      var meta = !rows.length ? ''
+        : s.k === 'need' ? 'cost not known yet'
+        : late.length ? late.length + ' past ETA'
+        : etas.length ? (s.k === 'received' ? 'last arrival ' : 'oldest ETA ') +
+            shopDate(s.k === 'received' ? etas[etas.length - 1] : etas[0])
+        : '';
+
+      return '<button class="fmstage' + (FSTAGE === s.k ? ' sel' : '') + '" data-stage="' + s.k + '"' +
+        (FSTAGE === s.k ? ' style="border-left-color:' + s.tone + ';border-top-color:' + s.tone + '"' : '') + '>' +
+        '<div class="t"><div class="dot" style="background:' + s.tone + '"></div>' +
+        '<div class="n">' + esc(s.t) + '</div><div class="c">' + rows.length + '</div></div>' +
+        '<div class="v">' + (rows.length ? money(list) + ' list' : 'nothing here') + '</div>' +
+        (meta ? '<div class="m">' + esc(meta) + '</div>' : '') +
+        '</button>';
+    }).join('') +
+      '<div class="fmsums">' +
+      [['List', money(f.listCents)],
+       ['Cost so far', ME.caps.money ? money(pricedCost) : '\u00b7'],
+       ['Parts profit', ME.caps.money
+         ? (pricedList ? Math.round(((pricedList - pricedCost) / pricedList) * 100) + '%' : '\u2014')
+         : '\u00b7'],
+       ['Received', f.received + ' of ' + f.lines.length]
+      ].map(function (r) {
+        return '<div class="fmsum"><div class="k">' + esc(r[0]) + '</div>' +
+          '<div class="v">' + esc(r[1]) + '</div></div>';
+      }).join('') +
+      '<div class="note">' + esc(
+        (notOrdered || pending)
+          ? 'Profit is on the ' + priced.length + ' priced line' + (priced.length === 1 ? '' : 's') + '. ' +
+            [notOrdered ? notOrdered + ' not ordered yet' : '',
+             pending ? pending + ' ordered with no cost entered' : ''].filter(Boolean).join(', ') + '.'
+          : 'Every line has a cost.'
+      ) + '</div></div>';
+
+    /* The pane. */
+    var stage = STAGES.filter(function (s) { return s.k === FSTAGE; })[0] || STAGES[0];
+    var rows = f.lines.filter(function (l) { return stage.states.indexOf(l.state) >= 0; });
+    var stageList = rows.reduce(function (a, l) {
+      return a + Number(l.price_cents || 0) * Number(l.qty || 1);
+    }, 0);
+
+    $('fmPaneHead').innerHTML = '<div class="t">' + esc(stage.t) + '</div>' +
+      '<div class="m">' + (rows.length
+        ? rows.length + (rows.length === 1 ? ' line \u00b7 ' : ' lines \u00b7 ') + money(stageList) + ' list' +
+          (FSTAGE === 'need' ? ' \u00b7 vendor and cost set at order' : '')
+        : 'no lines in this stage') + '</div>' +
+      (stage.btn && rows.length && ME.caps.manageParts
+        ? '<button class="btn btn-ghost" data-fm="selstage" style="margin-left:auto">' +
+          esc(stage.btn) + '</button>'
+        : '');
+
+    var HEADS = [['Part', ''], ['Part #', ''],
+      ['Type', 'What is being bought. The estimate\u2019s type shows beside it when they differ'],
+      ['Qty', 'Received of ordered'], ['Vendor', ''],
+      ['Status', 'Click a line\u2019s status to move it on'], ['Order #', ''], ['ETA', ''],
+      ['List', ''], ['Cost', 'Entered when the order goes in'], ['PP', 'Margin on list']];
+
+    var allOn = rows.length > 0 && rows.every(function (l) { return FSEL[l.id]; });
+
+    var h = '<div class="fmgrid fmghead">' +
+      '<div><button class="fmtick' + (allOn ? ' on' : '') + '" data-fmall="1" ' +
+      'aria-label="Tick every line in this stage">\u2713</button></div>' +
+      HEADS.map(function (x, i) {
+        return '<div class="' + (i >= 8 ? 'num' : '') + '" title="' + esc(x[1]) + '">' +
+          esc(x[0]) + '</div>';
+      }).join('') + '<div></div></div>';
+
+    if (!rows.length) {
+      h += '<div style="padding:26px 20px;font:400 12px var(--font);color:var(--dim)">' +
+        'Nothing in this stage.</div>';
     }
 
-    h += '<div class="lgrid lhead"><div>Line</div><div>Part</div><div class="hide-md">Number</div>' +
-      '<div class="hide-md">Type</div><div>Qty</div><div>Vendor</div><div>ETA</div>' +
-      (ME.caps.money ? '<div style="text-align:right">Price / cost</div>' : '<div></div>') +
-      '<div>State</div></div>';
-
-    f.lines.forEach(function (l) {
+    rows.forEach(function (l) {
+      var on = !!FSEL[l.id];
+      var tone = TONE[l.state] || 'var(--dim)';
       var late = Number(l.days_late) > 0 && l.state !== 'received';
-      h += '<div class="lgrid">' +
-        '<div class="cellsub" style="margin:0">' + (l.line_no || '·') + '</div>' +
-        '<div class="cellmain" title="' + esc(l.description) + '">' + esc(l.description) + '</div>' +
-        '<div class="cellsub hide-md" style="margin:0">' + esc(l.part_number || '—') + '</div>' +
-        '<div class="cellsub hide-md" style="margin:0">' + esc(l.part_type || '—') + '</div>' +
-        '<div class="cellsub" style="margin:0">' + l.qty_received + '/' + l.qty + '</div>' +
-        '<div><div class="cellsub" style="margin:0">' + esc(l.vendor_name || '—') + '</div>' +
-        (l.po_number ? '<div class="cellsub">order ' + esc(l.po_number) + '</div>' : '') + '</div>' +
-        '<div class="cellsub" style="margin:0' + (late ? ';color:var(--stopped)' : '') + '">' +
-        (l.eta ? shopDate(l.eta) : '—') + (late ? ' · ' + l.days_late + 'd' : '') + '</div>' +
-        (ME.caps.money
-          ? '<div><div class="cellnum" style="font-weight:400">' + money(l.price_cents) + '</div>' +
-            '<div class="cellsub" style="text-align:right">' +
-            (Number(l.cost_cents) ? money(l.cost_cents) : 'no cost') + '</div></div>'
-          : '<div></div>') +
+      var swapped = l.part_type && l.part_type_estimated && l.part_type !== l.part_type_estimated;
+      var c = costText(l);
+      var pp = Number(l.price_cents || 0) && Number(l.cost_cents || 0)
+        ? Math.round(((Number(l.price_cents) - Number(l.cost_cents)) / Number(l.price_cents)) * 100) + '%'
+        : '\u2014';
+      var short = Number(l.qty_received || 0) > 0 && Number(l.qty_received) < Number(l.qty);
+
+      h += '<div class="fmgrid fmrow' + (on ? ' sel' : '') + '">' +
+        '<div><button class="fmtick' + (on ? ' on' : '') + '" data-fmsel="' + l.id + '" ' +
+        'aria-label="Select ' + esc(l.description) + '">\u2713</button></div>' +
+
+        '<div class="d" title="' + esc(l.description) + '">' + esc(l.description) + '</div>' +
+        '<div class="s">' + esc(l.part_number || '\u2014') + '</div>' +
+
         '<div style="display:flex;align-items:center;gap:6px;min-width:0">' +
-        '<span class="lstate" style="color:' + TONE[l.state] + ';border:1px solid ' + TONE[l.state] + '">' +
-        esc(LABEL[l.state] || l.state) + '</span>' +
-        (l.state !== 'received'
-          ? '<button class="linebtn" data-recv="' + l.id + '">Received</button>'
+        (ME.caps.manageParts
+          ? '<select class="fmtype' + (swapped ? ' swapped' : '') + '" data-fmtype="' + l.id + '" ' +
+            'aria-label="Type ordered for ' + esc(l.description) + '" ' +
+            'title="' + esc('Ordering ' + typeLong(l.part_type) +
+              (l.part_type_estimated ? '. Estimate: ' + typeLong(l.part_type_estimated) : '')) + '">' +
+            '<option value="">\u2014</option>' +
+            TYPES.map(function (t) {
+              return '<option value="' + t[0] + '"' + (t[0] === l.part_type ? ' selected' : '') + '>' +
+                esc(t[2]) + '</option>';
+            }).join('') + '</select>'
+          : '<span class="sd">' + esc(typeShort(l.part_type)) + '</span>') +
+        (swapped
+          ? '<span class="fmest" title="' + esc('The estimate calls for ' +
+              typeLong(l.part_type_estimated)) + '">est ' + esc(typeShort(l.part_type_estimated)) + '</span>'
           : '') +
-        (l.state === 'need'
-          ? '<button class="linebtn" data-orderfile="' + f.roId + '">Order</button>'
-          : '') +
-        (ME.caps.money && ['received', 'partial'].indexOf(l.state) >= 0
-          ? '<button class="linebtn" data-costs="' + f.roId + '" data-costline="' + l.id + '" ' +
-            'title="Type the cost off the invoice">cost</button>'
-          : '') +
-        (Number(l.qty_received || 0) > 0 && Number(l.qty_received) < Number(l.qty)
-          ? '<span class="lstate" style="color:var(--stopped);border:1px solid var(--stopped)" ' +
-            'title="Part of this line arrived; the rest is still owed">' +
+        '</div>' +
+
+        '<div class="num q">' + l.qty_received + '/' + l.qty + '</div>' +
+        '<div class="s" title="' + esc(l.vendor_name || '') + '">' +
+        (l.vendor_name ? esc(l.vendor_name) : '<span class="sd">not chosen</span>') + '</div>' +
+
+        '<div>' + (ME.caps.manageParts
+          ? '<button class="fmstatus" data-fmadv="' + l.id + '" ' +
+            'style="color:' + tone + ';border:1px solid ' + tone + '"' +
+            (l.state === 'received' || l.state === 'returned' ? ' disabled' : '') + ' ' +
+            'title="' + esc(l.state === 'need'
+              ? 'Order this line \u2014 vendor and cost go in there'
+              : l.state === 'received' ? 'Received' : 'Mark received') + '">' +
+            esc(LABEL[l.state] || l.state) + '</button>'
+          : '<span class="fmstatus" style="color:' + tone + ';border:1px solid ' + tone + '">' +
+            esc(LABEL[l.state] || l.state) + '</span>') +
+        (short
+          ? ' <span class="fmest" style="color:var(--stopped)">' +
             (Number(l.qty) - Number(l.qty_received)) + ' short</span>'
           : '') +
-        '</div></div>';
+        '</div>' +
+
+        '<div class="s">' + esc(l.po_number || '\u2014') + '</div>' +
+        '<div class="s"' + (late ? ' style="color:var(--stopped)"' : '') + '>' +
+        (l.eta ? shopDate(l.eta) : '\u2014') + '</div>' +
+
+        (ME.caps.money
+          ? '<div class="num">' + money(l.price_cents) + '</div>' +
+            '<div class="num' + c.cls + '">' + esc(c.t) + '</div>' +
+            '<div class="num pp">' + esc(pp) + '</div>'
+          : '<div class="num">' + money(l.price_cents) + '</div><div></div><div></div>') +
+        '<div></div></div>';
     });
 
-    return h + '</div>';
+    $('fmRows').innerHTML = h;
+
+    /* The batch bar. Per-line is the status cell; this is the same move over a
+       selection, which is how a real order of six lines gets placed. */
+    var sel = f.lines.filter(function (l) { return FSEL[l.id]; });
+    var ordering = sel.length > 0 && sel.every(function (l) { return l.state === 'need'; });
+    var bar = $('fmBatch');
+    bar.className = 'fmbatch' + (sel.length ? ' on' : '');
+    bar.innerHTML = sel.length
+      ? '<div class="n">' + sel.length + (sel.length === 1 ? ' line' : ' lines') + ' selected</div>' +
+        '<div class="hint">' + (ordering
+          ? 'vendor, order number and cost go in on the next screen'
+          : 'marks them received with the quantity ordered') + '</div>' +
+        '<button class="btn btn-ghost" data-fm="clearsel" style="margin-left:auto">Clear</button>' +
+        '<button class="btn btn-solid" data-fm="batch">' +
+        (ordering ? 'Order these\u2026' : 'Mark received') + '</button>'
+      : '<div class="hint">Tick lines to order or receive several at once, or click a line\u2019s ' +
+        'status to move it on its own. Cost is entered when the order goes in.</div>';
+
+    wireFile();
+  }
+
+  function wireFile() {
+    var m = $('fmodal');
+
+    Array.prototype.forEach.call(m.querySelectorAll('[data-stage]'), function (b) {
+      b.addEventListener('click', function () {
+        FSTAGE = b.dataset.stage;
+        FSEL = {};
+        renderFile();
+      });
+    });
+
+    Array.prototype.forEach.call(m.querySelectorAll('[data-fmsel]'), function (b) {
+      b.addEventListener('click', function () {
+        var id = b.dataset.fmsel;
+        if (FSEL[id]) delete FSEL[id]; else FSEL[id] = true;
+        renderFile();
+      });
+    });
+
+    var all = m.querySelector('[data-fmall]');
+    if (all) all.addEventListener('click', function () {
+      var f = fileOf();
+      var stage = STAGES.filter(function (s) { return s.k === FSTAGE; })[0];
+      var rows = f.lines.filter(function (l) { return stage.states.indexOf(l.state) >= 0; });
+      var on = rows.some(function (l) { return !FSEL[l.id]; });
+      FSEL = {};
+      if (on) rows.forEach(function (l) { FSEL[l.id] = true; });
+      renderFile();
+    });
+
+    /* The status cell IS the per-line action. Needed opens the order screen,
+       because ordering without a vendor and a cost is not a state worth having;
+       anything on order marks received. */
+    Array.prototype.forEach.call(m.querySelectorAll('[data-fmadv]'), function (b) {
+      b.addEventListener('click', function () {
+        var f = fileOf();
+        var l = f.lines.filter(function (x) { return String(x.id) === b.dataset.fmadv; })[0];
+        if (!l) return;
+        if (l.state === 'need') return openOrder(f, [l.id]);
+        api('/api/parts/' + l.id, { method: 'PATCH', body: JSON.stringify({ state: 'received' }) })
+          .then(load).then(function () { Shell.refreshCount(); });
+      });
+    });
+
+    Array.prototype.forEach.call(m.querySelectorAll('[data-fmtype]'), function (s) {
+      s.addEventListener('change', function () {
+        api('/api/parts/' + s.dataset.fmtype, {
+          method: 'PATCH', body: JSON.stringify({ partType: s.value || null })
+        }).then(load).catch(function () { renderFile(); });
+      });
+    });
+
+    Array.prototype.forEach.call(m.querySelectorAll('[data-fm]'), function (b) {
+      b.addEventListener('click', function () {
+        var f = fileOf();
+        if (!f) return;
+        var what = b.dataset.fm;
+
+        if (what === 'addpart') return openAddPart(f);
+        if (what === 'costs') return openCosts(f, null);
+        if (what === 'pull') return openPrint();
+        if (what === 'orderall') {
+          return openOrder(f, f.lines.filter(function (l) { return l.state === 'need'; })
+            .map(function (l) { return l.id; }));
+        }
+        if (what === 'clearsel') { FSEL = {}; return renderFile(); }
+        if (what === 'selstage') {
+          var stage = STAGES.filter(function (s) { return s.k === FSTAGE; })[0];
+          FSEL = {};
+          f.lines.filter(function (l) { return stage.states.indexOf(l.state) >= 0; })
+            .forEach(function (l) { FSEL[l.id] = true; });
+          return renderFile();
+        }
+        if (what === 'batch') {
+          var sel = f.lines.filter(function (l) { return FSEL[l.id]; });
+          if (!sel.length) return;
+          if (sel.every(function (l) { return l.state === 'need'; })) {
+            return openOrder(f, sel.map(function (l) { return l.id; }));
+          }
+          /* Receiving several goes through the receive screen, which is where
+             short counts and the invoice number are recorded. One line on its
+             own is the status cell, and that stays a single click. */
+          return openReceive(f, sel.filter(function (l) { return l.state !== 'received'; })
+            .map(function (l) { return l.id; }));
+        }
+        /* Most dealers want the last 8 over the phone; the full 17 goes on the
+           clipboard when the parts system asks for it. */
+        if (what === 'vin8' || what === 'vin17') {
+          var text = what === 'vin17' ? String(f.vin) : String(f.vin).slice(-8);
+          if (navigator.clipboard) navigator.clipboard.writeText(text);
+          var was = b.textContent;
+          b.textContent = 'copied';
+          setTimeout(function () { b.textContent = was; }, 1600);
+        }
+      });
+    });
   }
 
   function wireLines() {
@@ -960,12 +1400,16 @@
    * and an ETA, covering as many lines as the desk ticks — which is how a single
    * order to a supplier actually happens.
    */
-  function openOrder(f) {
-    var lines = f.lines.filter(function (l) { return l.state === 'need'; });
+  function openOrder(f, ids) {
+    var lines = f.lines.filter(function (l) {
+      return l.state === 'need' && (!ids || ids.indexOf(l.id) >= 0);
+    });
     if (!lines.length) return;
 
-    $('dTitle').textContent = 'Order parts — ' + f.ro;
-    $('dSub').textContent = (f.vehicle || '') + (f.vin ? ' · …' + String(f.vin).slice(-8) : '');
+    $('dTitle').textContent = 'Order ' + lines.length +
+      (lines.length === 1 ? ' line' : ' lines') + ' — ' + f.ro;
+    $('dSub').textContent = (f.vehicle || '') + (f.vin ? ' · …' + String(f.vin).slice(-8) : '') +
+      ' · one vendor, one order number';
     $('scrim').classList.add('open');
     $('drawer').classList.add('open');
     $('drawer').setAttribute('aria-hidden', 'false');
@@ -974,48 +1418,145 @@
       '<div class="row"><select id="oVendor" style="flex:1;min-width:150px">' +
       '<option value="">Pick a vendor</option>' +
       VENDORS.map(function (v) {
-        return '<option value="' + v.id + '">' + esc(v.name) + (v.kind ? ' · ' + esc(v.kind) : '') + '</option>';
+        return '<option value="' + v.id + '"' +
+          (f.lines.some(function (l) { return String(l.vendor_id) === String(v.id); }) ? ' selected' : '') +
+          '>' + esc(v.name) + (v.kind ? ' · ' + esc(v.kind) : '') + '</option>';
       }).join('') + '</select>' +
       '<button class="btn btn-ghost" id="oVendors">Edit list</button></div>',
       '<div class="row" style="margin-top:10px">' +
       '<input id="oPo" placeholder="Order or invoice number" style="flex:1;min-width:150px">' +
       '<input id="oEta" type="date" style="width:150px" title="When the vendor says it lands"></div>',
+      '<div class="sub" style="margin-top:7px">Ordering from a second vendor? Order those lines ' +
+      'separately — the order number has to reconcile against one invoice.</div>',
       '<div class="sec">Lines — untick anything not on this order</div>'];
 
     lines.forEach(function (l) {
+      var swapped = l.part_type && l.part_type_estimated && l.part_type !== l.part_type_estimated;
       h.push('<div class="log" style="display:flex;gap:10px;align-items:flex-start">' +
-        '<input type="checkbox" class="o-line" data-id="' + l.id + '" checked ' +
-        'style="margin-top:3px">' +
+        '<input type="checkbox" class="o-line" data-id="' + l.id + '" checked style="margin-top:3px">' +
         '<div style="min-width:0;flex:1">' +
         '<div class="log-b">' + esc(l.description) + '</div>' +
-        '<div class="log-m">' + esc([l.part_number, l.part_type, 'qty ' + l.qty].filter(Boolean).join(' · ')) +
-        (ME.caps.money ? ' · ' + money(l.price_cents) + ' list / ' +
-          (Number(l.cost_cents) ? money(l.cost_cents) : 'no cost yet') : '') + '</div></div></div>');
+        '<div class="log-m">' +
+        esc([l.part_number, 'qty ' + l.qty].filter(Boolean).join(' · ')) +
+        (ME.caps.money ? ' · ' + money(l.price_cents) + ' list' : '') +
+        (l.part_type_estimated
+          ? ' · estimate says ' + esc(typeLong(l.part_type_estimated))
+          : ' · not on the estimate') +
+        '</div>' +
+
+        /* What is actually being bought, and what it costs. Neither is known
+           until the order is placed, which is why they are asked for here and
+           not on the line. */
+        '<div class="row" style="margin-top:7px;gap:7px;align-items:center;flex-wrap:wrap">' +
+        '<select class="o-type" data-id="' + l.id + '" ' +
+        'aria-label="Type ordered for ' + esc(l.description) + '" style="width:150px">' +
+        '<option value="">Type ordered</option>' +
+        TYPES.map(function (t) {
+          return '<option value="' + t[0] + '"' +
+            (t[0] === (l.part_type || l.part_type_estimated) ? ' selected' : '') + '>' +
+            esc(t[1]) + (t[0] === l.part_type_estimated ? ' — on the estimate' : '') + '</option>';
+        }).join('') + '</select>' +
+        (ME.caps.money
+          ? '<input class="o-cost" data-id="' + l.id + '" type="number" min="0" step="0.01" ' +
+            'placeholder="Cost each" style="width:120px" ' +
+            'aria-label="Cost each for ' + esc(l.description) + '">' +
+            '<span class="sub o-pp" data-id="' + l.id + '">—</span>'
+          : '') +
+        (swapped ? '<span class="sub" style="color:var(--acc2)">differs from the estimate</span>' : '') +
+        '</div></div></div>');
     });
 
-    h.push('<div class="msg" id="oMsg"></div>',
+    h.push('<div class="sec">This order</div>',
+      '<div class="row" id="oTotals" style="gap:22px;flex-wrap:wrap"></div>',
+      '<div class="msg" id="oMsg"></div>',
       '<div class="row" style="margin-top:12px">' +
       '<button class="btn btn-solid" id="oSend">Mark ordered</button>' +
-      '<span class="sub">Ordered date is stamped today.</span></div>');
+      '<span class="sub" id="oHint">Ordered date is stamped today.</span></div>');
 
     $('dBody').innerHTML = h.join('');
     $('oVendors').addEventListener('click', openVendors);
 
-    $('oSend').addEventListener('click', function () {
-      var ids = Array.prototype.filter.call($('dBody').querySelectorAll('.o-line'), function (c) {
+    /* Totals and the gate on the confirm, recomputed as the desk types. The
+       order cannot go in with a line whose cost nobody has entered — a blank
+       there is how a file ends up with parts profit nobody can explain. */
+    function ticked() {
+      return Array.prototype.filter.call($('dBody').querySelectorAll('.o-line'), function (c) {
         return c.checked;
       }).map(function (c) { return Number(c.dataset.id); });
+    }
+    function costOf(id) {
+      var el = $('dBody').querySelector('.o-cost[data-id="' + id + '"]');
+      if (!el || el.value === '') return null;
+      return Math.round(Number(el.value) * 100);
+    }
+    function refreshTotals() {
+      var ids = ticked();
+      var list = 0, cost = 0, missing = 0;
+      ids.forEach(function (id) {
+        var l = lines.filter(function (x) { return x.id === id; })[0];
+        if (!l) return;
+        var qty = Number(l.qty || 1);
+        list += Number(l.price_cents || 0) * qty;
+        var c = costOf(id);
+        if (c === null) { if (ME.caps.money) missing++; } else cost += c * qty;
+
+        var pp = $('dBody').querySelector('.o-pp[data-id="' + id + '"]');
+        if (pp) {
+          pp.textContent = (c !== null && Number(l.price_cents || 0))
+            ? Math.round(((Number(l.price_cents) - c) / Number(l.price_cents)) * 100) + '% PP'
+            : '—';
+        }
+      });
+
+      $('oTotals').innerHTML = [
+        ['Lines', String(ids.length)],
+        ['List', money(list)],
+        ME.caps.money ? ['Cost', money(cost)] : null,
+        ME.caps.money
+          ? ['Parts profit', (!missing && list) ? Math.round(((list - cost) / list) * 100) + '%' : '—']
+          : null
+      ].filter(Boolean).map(function (r) {
+        return '<div><div class="sub" style="letter-spacing:.13em;text-transform:uppercase;' +
+          'color:var(--acc2);font-size:8.5px">' + esc(r[0]) + '</div>' +
+          '<div style="font:500 14px var(--font);font-variant-numeric:tabular-nums">' +
+          esc(r[1]) + '</div></div>';
+      }).join('');
+
+      var ok = ids.length > 0 && missing === 0;
+      $('oSend').disabled = !ok;
+      $('oSend').style.opacity = ok ? '' : '.55';
+      $('oHint').textContent = !ids.length ? 'Nothing ticked.'
+        : missing ? missing + ' line' + (missing === 1 ? '' : 's') + ' still need a cost.'
+        : 'Ordered date is stamped today.';
+    }
+
+    $('dBody').addEventListener('input', refreshTotals);
+    $('dBody').addEventListener('change', refreshTotals);
+    refreshTotals();
+
+    $('oSend').addEventListener('click', function () {
+      var ids = ticked();
       if (!ids.length) { return dMsg('oMsg', 'Nothing ticked.', 'err'); }
       if (!$('oVendor').value) { return dMsg('oMsg', 'Pick the vendor this is going to.', 'err'); }
+
+      var perLine = ids.map(function (id) {
+        var sel = $('dBody').querySelector('.o-type[data-id="' + id + '"]');
+        return { id: id, costCents: costOf(id), partType: sel && sel.value ? sel.value : null };
+      });
+      if (ME.caps.money && perLine.some(function (l) { return l.costCents === null; })) {
+        return dMsg('oMsg', 'Every line needs a cost before the order goes in.', 'err');
+      }
+
       api('/api/parts/bulk-order', {
         method: 'POST',
         body: JSON.stringify({
           ids: ids,
+          lines: perLine,
           vendorId: Number($('oVendor').value),
           poNumber: $('oPo').value.trim() || undefined,
           eta: $('oEta').value || undefined
         })
-      }).then(function () { closeDrawer(); return load(); })
+      }).then(function () { closeDrawer(); FSEL = {}; return load(); })
         .then(function () { Shell.refreshCount(); })
         .catch(function (e) { dMsg('oMsg', e.message, 'err'); });
     });
@@ -1025,9 +1566,10 @@
    * Receiving stays quick, but records the date and what came short: a line with
    * anything owed stays on order for the remainder.
    */
-  function openReceive(f) {
+  function openReceive(f, ids) {
     var lines = f.lines.filter(function (l) {
-      return ['ordered', 'partial', 'backordered'].indexOf(l.state) >= 0;
+      return ['ordered', 'partial', 'backordered'].indexOf(l.state) >= 0 &&
+        (!ids || ids.indexOf(l.id) >= 0);
     });
     if (!lines.length) return;
 
@@ -1170,9 +1712,11 @@
      filters left on screen. */
   function pmScope() {
     var files = byRo();
-    if (!ALL_OPEN) {
-      var open = files.filter(function (f) { return OPEN[f.roId]; });
-      if (open.length === 1) return open;
+    /* With a file open, the sheet is that file's — which is where the Print
+       pull sheet action in its own header comes from. */
+    if (FILE) {
+      var one = files.filter(function (f) { return f.roId === FILE; });
+      if (one.length) return one;
     }
     return files;
   }
@@ -1376,17 +1920,17 @@
       renderPm();
     });
   });
-  $('expandAll').addEventListener('click', function () {
-    ALL_OPEN = !ALL_OPEN;
-    if (!ALL_OPEN) OPEN = {};
-    $('expandAll').textContent = ALL_OPEN ? 'Collapse all' : 'Expand all';
-    render();
-  });
   $('scrim').addEventListener('click', closeDrawer);
   $('dClose').addEventListener('click', closeDrawer);
+  $('fmClose').addEventListener('click', closeFile);
+  $('fmScrim').addEventListener('click', closeFile);
   document.addEventListener('keydown', function (e) {
     if (e.key !== 'Escape') return;
-    if (!$('pmodal').hidden) closePrint(); else closeDrawer();
+    /* Innermost first: the print sheet sits over the drawer, the drawer over the
+       file, the file over the list. */
+    if (!$('pmodal').hidden) closePrint();
+    else if ($('drawer').classList.contains('open')) closeDrawer();
+    else if (!$('fmodal').hidden) closeFile();
   });
 })();
 </script>

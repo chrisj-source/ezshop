@@ -497,10 +497,15 @@ export async function registerEms(app: FastifyInstance): Promise<void> {
 
           await c.query(
             `INSERT INTO parts_lines
-               (ro_id, line_no, description, part_number, part_type, qty, price_cents, state, gating)
-             VALUES (?, ?, ?, ?, ?, ?, ?, 'need', 1)`,
+               (ro_id, line_no, description, part_number, part_type, part_type_estimated,
+                qty, price_cents, state, gating)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'need', 1)`,
             [roId, l.line_no ?? null, String(l.description ?? 'Part').slice(0, 255),
              l.part_number ?? null, partTypeToEnum(l.part_type as string | null),
+             /* The estimate's own type, kept apart from the type the shop ends
+                up buying. Both columns start the same; only the ordered one
+                moves when the desk buys something else. */
+             partTypeToEnum(l.part_type as string | null),
              Number(l.qty ?? 1), Number(l.price_cents ?? 0)]);
         }
       }

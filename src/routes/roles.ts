@@ -292,10 +292,28 @@ export async function registerRoles(app: FastifyInstance): Promise<void> {
       'UPDATE statuses SET owner_role = ? WHERE owner_role = ?',
       [moveTo ?? 'owner', role.label]).catch(() => ({ affectedRows: 0 }));
 
+    /* Any status message routed to this role follows the people who held it.
+       Routing rows are (slot, kind, key) and the primary key would collide if
+       the destination role is already routed on that status, so the move is an
+       INSERT IGNORE then a delete rather than an UPDATE. */
+    let routesMoved = 0;
+    if (moveTo) {
+      const moved = await texec(cid,
+        `INSERT IGNORE INTO status_routes (slot_id, target_kind, target_key)
+         SELECT slot_id, 'role', ? FROM status_routes
+          WHERE target_kind = 'role' AND target_key = ?`,
+        [moveTo, key]).catch(() => ({ affectedRows: 0 }));
+      routesMoved = moved.affectedRows ?? 0;
+    }
+    await texec(cid,
+      `DELETE FROM status_routes WHERE target_kind = 'role' AND target_key = ?`, [key]
+    ).catch(() => undefined);
+
     await texec(cid, 'DELETE FROM roles WHERE role_key = ?', [key]);
     await audit(cid, ctx, key, 'role.deleted', {
       label: role.label, movedTo: moveTo ?? null, holders: holders.length,
-      statusesRepointed: orphaned.affectedRows ?? 0
+      statusesRepointed: orphaned.affectedRows ?? 0,
+      statusRoutesMoved: routesMoved
     });
 
     return { ok: true, moved: holders.length, statusesRepointed: orphaned.affectedRows ?? 0 };

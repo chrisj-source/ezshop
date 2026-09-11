@@ -9,7 +9,8 @@ import { audit } from '../lib/audit';
 import { actorFrom } from './audit';
 
 const SOURCES = ['phone', 'walk-in', 'website', 'referral', 'google', 'scheduler', 'sales app', 'other'];
-const STATES = ['new', 'contacted', 'estimate_sent', 'appraisal_booked', 'won', 'lost'];
+const STATES = ['new', 'contacted', 'estimate_written', 'estimate_sent', 'appraisal_booked', 'won', 'lost'];
+const PAYERS = ['cash', 'insurance'];
 const LOST_REASONS = [
   'Price', 'Went elsewhere', 'Insurance totalled it', 'No answer', 'Not repairing',
   'Too far out', 'Outside what we do', 'Other'
@@ -63,10 +64,18 @@ export async function registerLeads(app: FastifyInstance): Promise<void> {
     states: [
       { key: 'new', label: 'New' },
       { key: 'contacted', label: 'Contacted' },
-      { key: 'estimate_sent', label: 'Estimate sent' },
+      /* Two estimate states. Written is the one done here at the counter and it
+         carries the figure; sent is the insurer one and carries no amount of its
+         own. Cash-pay work stops at written. */
+      { key: 'estimate_written', label: 'Estimate written' },
+      { key: 'estimate_sent', label: 'Estimate sent', insuranceOnly: true },
       { key: 'appraisal_booked', label: 'Appraisal booked' },
       { key: 'won', label: 'Won' },
       { key: 'lost', label: 'Lost' }
+    ],
+    payers: [
+      { key: 'cash', label: 'Cash / customer pay' },
+      { key: 'insurance', label: 'Insurance' }
     ],
     lostReasons: LOST_REASONS
   }));
@@ -124,7 +133,18 @@ export async function registerLeads(app: FastifyInstance): Promise<void> {
              SUM(first_reply_at IS NULL AND state NOT IN ('won','lost')) AS unanswered,
              SUM(state = 'won') AS won,
              SUM(state = 'lost') AS lost,
-             AVG(TIMESTAMPDIFF(HOUR, received_at, first_reply_at)) AS avg_reply_hours
+             AVG(TIMESTAMPDIFF(HOUR, received_at, first_reply_at)) AS avg_reply_hours,
+             /* Quoted dollars. A lost lead's quote stays in the total — it is a
+                lost quote, and leaving it out would flatter the close rate. */
+             SUM(estimate_cents) AS quoted_cents,
+             SUM(estimate_cents IS NOT NULL) AS quoted,
+             SUM(IF(state = 'won', estimate_cents, 0)) AS won_cents,
+             /* Written, still live, and nobody has chased it since. Chasing
+                before the quote existed does not count. */
+             SUM(estimate_written_at IS NOT NULL
+                 AND state NOT IN ('won','lost')
+                 AND (last_followup_at IS NULL OR last_followup_at < estimate_written_at)
+                ) AS quotes_unchased
       FROM leads
       WHERE deleted_at IS NULL AND received_at > DATE_SUB(NOW(), INTERVAL 90 DAY)`);
 
@@ -133,6 +153,9 @@ export async function registerLeads(app: FastifyInstance): Promise<void> {
        WHERE m.company_id = ? AND m.status = 'active' ORDER BY u.name`, [ctx.company!.id]);
 
     const won = Number(sum.won ?? 0), lost = Number(sum.lost ?? 0);
+    const quotedCents = Number(sum.quoted_cents ?? 0);
+    const wonCents = Number(sum.won_cents ?? 0);
+    const quoted = Number(sum.quoted ?? 0);
     return {
       leads: rows,
       staff,
@@ -144,7 +167,16 @@ export async function registerLeads(app: FastifyInstance): Promise<void> {
         needFollowup: rows.filter(r => (r as { needs_followup?: boolean }).needs_followup).length,
         won, lost,
         closeRate: won + lost ? Math.round((won / (won + lost)) * 100) : null,
-        avgReplyHours: sum.avg_reply_hours === null ? null : Math.round(Number(sum.avg_reply_hours) * 10) / 10
+        avgReplyHours: sum.avg_reply_hours === null ? null : Math.round(Number(sum.avg_reply_hours) * 10) / 10,
+        /* The money figures are a lead question, not a repair-order one, so they
+           ride with leads rather than behind the money capability: a
+           salesperson working their own quotes needs to see what they quoted. */
+        quoted,
+        quotedCents,
+        wonCents,
+        moneyCloseRate: quotedCents ? Math.round((wonCents / quotedCents) * 100) : null,
+        avgQuoteCents: quoted ? Math.round(quotedCents / quoted) : null,
+        quotesUnchased: Number(sum.quotes_unchased ?? 0)
       }
     };
   });
@@ -282,6 +314,78 @@ export async function registerLeads(app: FastifyInstance): Promise<void> {
     return { ok: true, appointmentId: res.insertId };
   });
 
+  /**
+   * Mark an estimate written, or replace the figure on one already written.
+   *
+   * This is the estimate written HERE, at the counter, and the amount is the
+   * point of it: it is what the follow-up is about, so it is required. The
+   * insurer estimate is a different state (`estimate_sent`) and carries no
+   * amount of its own.
+   *
+   * Re-quoting overwrites. The latest figure is the number the shop works
+   * from; the one it replaced goes to the lead's history, which is the only
+   * place a superseded quote belongs.
+   */
+  app.post('/api/leads/:id/estimate', async (req, reply) => {
+    const ctx = requireCompany(req, reply);
+    if (!ctx) return;
+    if (!requireFeature(ctx, 'leads', reply)) return;
+    if (!ctx.caps.manageLeads) return reply.code(403).send({ error: 'Not permitted' });
+
+    const cid = ctx.company!.id;
+    const id = Number((req.params as { id: string }).id);
+    const b = req.body as { amountCents?: number; writtenOn?: string; note?: string };
+
+    const amount = Math.round(Number(b.amountCents));
+    if (!Number.isFinite(amount) || amount <= 0) {
+      return reply.code(400).send({ error: 'An estimate needs an amount. It is what the follow-up is about.' });
+    }
+
+    const lead = await tqOne<RowDataPacket & {
+      state: string; lead_number: string; estimate_cents: number | null;
+    }>(cid, 'SELECT state, lead_number, estimate_cents FROM leads WHERE id = ?', [id]);
+    if (!lead) return reply.code(404).send({ error: 'No such lead' });
+
+    const had = lead.estimate_cents === null ? null : Number(lead.estimate_cents);
+    const requote = had !== null;
+    const money = (c: number) => '$' + (c / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+    /* Written-on defaults to today and is editable, because an estimate written
+       on Friday may not be entered until Monday. A settled lead keeps its
+       state: recording what was quoted on a car that went elsewhere is exactly
+       how the lost-quote figure gets its numbers. */
+    const settled = lead.state === 'won' || lead.state === 'lost';
+    await texec(cid, `
+      UPDATE leads
+      SET estimate_cents = ?,
+          estimate_written_at = COALESCE(?, estimate_written_at, NOW()),
+          estimate_written_by = ?,
+          estimate_note = COALESCE(NULLIF(?, ''), estimate_note),
+          estimate_requoted_at = ${requote ? 'NOW()' : 'estimate_requoted_at'},
+          state = ${settled ? 'state' : "IF(state = 'estimate_sent', state, 'estimate_written')"},
+          first_reply_at = COALESCE(first_reply_at, NOW())
+      WHERE id = ?`,
+      [amount, b.writtenOn || null, ctx.user.id, (b.note ?? '').trim().slice(0, 255), id]);
+
+    await texec(cid,
+      `INSERT INTO lead_events (lead_id, kind, body, user_id, user_name)
+       VALUES (?, 'estimate', ?, ?, ?)`,
+      [id,
+       requote
+         ? `Quote changed from ${money(had!)} to ${money(amount)}.`
+         : `Estimate written — ${money(amount)}.` + (b.note ? ' ' + b.note.trim() : ''),
+       ctx.user.id, ctx.user.name]);
+
+    await audit(cid, actorFrom(req), {
+      entity: 'lead', entityId: id, action: requote ? 'lead_requote' : 'lead_estimate', area: 'Lead',
+      label: `Lead ${lead.lead_number} — ` +
+        (requote ? `re-quoted at ${money(amount)}` : `estimate written, ${money(amount)}`),
+      changes: [{ field: 'Estimate', from: had === null ? null : String(had), to: String(amount) }]
+    });
+
+    return { ok: true, amountCents: amount, requote };
+  });
+
   app.post('/api/leads', async (req, reply) => {
     const ctx = requireCompany(req, reply);
     if (!ctx) return;
@@ -290,7 +394,7 @@ export async function registerLeads(app: FastifyInstance): Promise<void> {
 
     const b = req.body as {
       firstName?: string; lastName?: string; phone?: string; email?: string;
-      vehicleText?: string; damageNote?: string; source?: string;
+      vehicleText?: string; damageNote?: string; source?: string; payer?: string;
       ownerUserId?: number | null; receivedAt?: string;
     };
 
@@ -307,10 +411,11 @@ export async function registerLeads(app: FastifyInstance): Promise<void> {
       const [r] = await c.query<ResultSetHeader>(`
         INSERT INTO leads
           (lead_number, source, state, first_name, last_name, phone, email,
-           vehicle_text, damage_note, owner_user_id, received_at)
-        VALUES (?, ?, 'new', ?, ?, ?, ?, ?, ?, ?, COALESCE(?, NOW()))`,
+           vehicle_text, damage_note, payer, owner_user_id, received_at)
+        VALUES (?, ?, 'new', ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, NOW()))`,
         [num, b.source ?? 'phone', b.firstName ?? null, b.lastName ?? null,
          b.phone ?? null, b.email ?? null, b.vehicleText ?? null, b.damageNote ?? null,
+         PAYERS.includes(b.payer ?? '') ? b.payer : 'cash',
          b.ownerUserId ?? ctx.user.id, b.receivedAt ?? null]);
 
       await c.query(
@@ -399,14 +504,16 @@ export async function registerLeads(app: FastifyInstance): Promise<void> {
     const cid = ctx.company!.id;
     const b = req.body as Record<string, unknown>;
 
-    const before = await tqOne<RowDataPacket & { state: string; first_reply_at: Date | null }>(
-      cid, 'SELECT state, first_reply_at FROM leads WHERE id = ?', [id]);
+    const before = await tqOne<RowDataPacket & {
+      state: string; first_reply_at: Date | null;
+      estimate_cents: number | null; payer: string;
+    }>(cid, 'SELECT state, first_reply_at, estimate_cents, payer FROM leads WHERE id = ?', [id]);
     if (!before) return reply.code(404).send({ error: 'No such lead' });
 
     const map: Record<string, string> = {
       firstName: 'first_name', lastName: 'last_name', phone: 'phone', email: 'email',
       vehicleText: 'vehicle_text', damageNote: 'damage_note', source: 'source',
-      ownerUserId: 'owner_user_id', lostReason: 'lost_reason'
+      payer: 'payer', ownerUserId: 'owner_user_id', lostReason: 'lost_reason'
     };
 
     const sets: string[] = [];
@@ -419,9 +526,31 @@ export async function registerLeads(app: FastifyInstance): Promise<void> {
       vals.push(b[k]);
     }
 
+    if (b.payer !== undefined && !PAYERS.includes(String(b.payer))) {
+      return reply.code(400).send({ error: 'Unknown payer' });
+    }
+
     if (b.state !== undefined) {
       const next = String(b.state);
       if (!STATES.includes(next)) return reply.code(400).send({ error: 'Unknown state' });
+
+      /* The amount is what makes the state mean anything, so the state cannot
+         be reached without one. POST /estimate is the way in — it takes the
+         figure in the same request. */
+      if (next === 'estimate_written' && before.estimate_cents === null) {
+        return reply.code(400).send({
+          error: 'Mark the estimate written with its amount — the figure is what the follow-up is about.'
+        });
+      }
+
+      /* Cash-pay work stops at written. There is nobody to send it to. */
+      const payerNow = b.payer !== undefined ? String(b.payer) : before.payer;
+      if (next === 'estimate_sent' && payerNow !== 'insurance') {
+        return reply.code(400).send({
+          error: 'Only insurance work reaches Estimate sent. This one is cash-pay, so it stops at Estimate written.'
+        });
+      }
+
       sets.push('state = ?');
       vals.push(next);
       notes.push(`Moved from ${before.state.replace(/_/g, ' ')} to ${next.replace(/_/g, ' ')}`);
@@ -446,7 +575,7 @@ export async function registerLeads(app: FastifyInstance): Promise<void> {
        pushed, an owner swapped — is exactly what nobody writes a note about. */
     const FIELD_LABEL: Record<string, string> = {
       firstName: 'First name', lastName: 'Last name', phone: 'Phone', email: 'Email',
-      vehicleText: 'Vehicle', damageNote: 'Damage note', source: 'Source',
+      vehicleText: 'Vehicle', damageNote: 'Damage note', source: 'Source', payer: 'Pays',
       ownerUserId: 'Owner', lostReason: 'Lost reason', state: 'State'
     };
     const changed = Object.keys(FIELD_LABEL)
@@ -539,6 +668,20 @@ export async function registerLeads(app: FastifyInstance): Promise<void> {
         await c.query(
           `INSERT INTO ro_notes (ro_id, kind, body, user_id, user_name) VALUES (?, 'note', ?, ?, ?)`,
           [r.insertId, String(lead.damage_note), ctx.user.id, ctx.user.name]);
+      }
+
+      /* What the lead was quoted at, written onto the file as a note and
+         nowhere else. It deliberately does NOT fill the approval amount:
+         quoted and approved are different numbers, and the only way to compare
+         them later is to keep them apart now. */
+      if (lead.estimate_cents !== null && lead.estimate_cents !== undefined) {
+        const q = '$' + (Number(lead.estimate_cents) / 100)
+          .toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        await c.query(
+          `INSERT INTO ro_notes (ro_id, kind, body, user_id, user_name) VALUES (?, 'auto', ?, ?, ?)`,
+          [r.insertId,
+           `Quoted ${q} on lead ${lead.lead_number}. Not an approval figure — the approval is whatever the file is written for.`,
+           ctx.user.id, ctx.user.name]);
       }
 
       await c.query(

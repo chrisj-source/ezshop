@@ -211,6 +211,8 @@ export async function registerRepairOrders(app: FastifyInstance): Promise<void> 
         event: 'status.change',
         roId: id,
         ownerRole: target.owner_role,
+        /* What the shop's routing grid keys on. Slot id, not label. */
+        slotId: target.slot_id,
         title: `${target.label} — RO ${ro?.ro_number ?? id}`,
         body: `${ro?.vehicle || 'A file'} moved from “${current.label ?? 'unset'}” to “${target.label}”.`,
         actorUserId: ctx.user.id,
