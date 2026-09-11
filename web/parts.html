@@ -206,6 +206,13 @@
     color:transparent; font:600 9px var(--font); display:grid; place-items:center; padding:0; cursor:pointer;
   }
   .fmtick.on { background:var(--acc); border-color:var(--acc); color:var(--bg); }
+  .fmdel {
+    width:18px; height:18px; border-radius:4px; border:1px solid transparent; background:transparent;
+    color:var(--dim); font:400 13px var(--font); line-height:1; display:grid; place-items:center;
+    padding:0; cursor:pointer;
+  }
+  .fmrow:hover .fmdel, .fmdel:focus-visible { color:var(--muted); border-color:var(--line); }
+  .fmdel:hover { color:var(--stopped); border-color:var(--stopped); }
   .fmstatus {
     display:inline-flex; align-items:center; font:500 9.5px var(--font); letter-spacing:.07em;
     text-transform:uppercase; border-radius:3px; padding:4px 7px; background:transparent;
@@ -239,6 +246,7 @@
   @media (pointer:coarse) {
     .fmrow { height:44px; }
     .fmtick { width:20px; height:20px; }
+    .fmdel { width:32px; height:32px; font-size:16px; }
   }
 
   /* ------------------------------------------------------- pull sheet */
@@ -415,6 +423,8 @@
   /* The file whose lines are open, which stage of them, and what is ticked.
      One file at a time, over the list — not expanded under it. */
   var FILE = null, FSTAGE = 'need', FSEL = {};
+  /* Ticked lines waiting on the "remove these?" confirm in the batch bar. */
+  var FDEL = false;
   /* A parts line under this margin reads thin. The server sends its own value. */
   var THIN_PCT = 20;
 
@@ -823,6 +833,7 @@
   function openFile(roId) {
     FILE = roId;
     FSEL = {};
+    FDEL = false;
     var f = fileOf();
     if (f) {
       /* Open on the stage with work in it rather than always on To order: a
@@ -841,6 +852,7 @@
   function closeFile() {
     FILE = null;
     FSEL = {};
+    FDEL = false;
     $('fmScrim').hidden = true;
     $('fmodal').hidden = true;
   }
@@ -1048,7 +1060,11 @@
             '<div class="num' + c.cls + '">' + esc(c.t) + '</div>' +
             '<div class="num pp">' + esc(pp) + '</div>'
           : '<div class="num">' + money(l.price_cents) + '</div><div></div><div></div>') +
-        '<div></div></div>';
+        '<div>' + (ME.caps.manageParts
+          ? '<button class="fmdel" data-fmdel="' + l.id + '" title="' +
+            esc('Remove ' + l.description + ' from this file') + '" ' +
+            'aria-label="Remove ' + esc(l.description) + '">\u00d7</button>'
+          : '') + '</div></div>';
     });
 
     $('fmRows').innerHTML = h;
@@ -1057,18 +1073,35 @@
        selection, which is how a real order of six lines gets placed. */
     var sel = f.lines.filter(function (l) { return FSEL[l.id]; });
     var ordering = sel.length > 0 && sel.every(function (l) { return l.state === 'need'; });
+    /* A line already ordered or received is money that left the building, so
+       removing one says so rather than asking the same bland question twice.
+       The usual case — an EMS import that landed twice — is neither. */
+    var spent = sel.filter(function (l) { return l.state !== 'need'; });
     var bar = $('fmBatch');
     bar.className = 'fmbatch' + (sel.length ? ' on' : '');
-    bar.innerHTML = sel.length
+    bar.innerHTML = sel.length && FDEL
+      ? '<div class="n">Remove ' + sel.length + (sel.length === 1 ? ' line' : ' lines') + '?</div>' +
+        '<div class="hint">' + (spent.length
+          ? spent.length + (spent.length === 1 ? ' line has' : ' lines have') +
+            ' already been ordered \u2014 removing drops its cost off the file'
+          : 'this cannot be undone; the removal is written to the audit log') + '</div>' +
+        '<button class="btn btn-ghost" data-fm="delno" style="margin-left:auto">Cancel</button>' +
+        '<button class="btn btn-solid" data-fm="delyes" ' +
+        'style="background:var(--stopped);border-color:var(--stopped)">Remove</button>'
+      : sel.length
       ? '<div class="n">' + sel.length + (sel.length === 1 ? ' line' : ' lines') + ' selected</div>' +
         '<div class="hint">' + (ordering
           ? 'vendor, order number and cost go in on the next screen'
           : 'marks them received with the quantity ordered') + '</div>' +
         '<button class="btn btn-ghost" data-fm="clearsel" style="margin-left:auto">Clear</button>' +
+        (ME.caps.manageParts
+          ? '<button class="btn btn-ghost" data-fm="delask">Remove\u2026</button>'
+          : '') +
         '<button class="btn btn-solid" data-fm="batch">' +
         (ordering ? 'Order these\u2026' : 'Mark received') + '</button>'
       : '<div class="hint">Tick lines to order or receive several at once, or click a line\u2019s ' +
-        'status to move it on its own. Cost is entered when the order goes in.</div>';
+        'status to move it on its own. Cost is entered when the order goes in. ' +
+        '\u00d7 removes a line \u2014 duplicates off an estimate import go that way.</div>';
 
     wireFile();
   }
@@ -1080,6 +1113,19 @@
       b.addEventListener('click', function () {
         FSTAGE = b.dataset.stage;
         FSEL = {};
+        FDEL = false;
+        renderFile();
+      });
+    });
+
+    /* The row \u00d7 ticks just that line and puts the bar into its confirm, so one
+       line and six lines are removed the same way and the question is asked in
+       one place. */
+    Array.prototype.forEach.call(m.querySelectorAll('[data-fmdel]'), function (b) {
+      b.addEventListener('click', function () {
+        FSEL = {};
+        FSEL[b.dataset.fmdel] = true;
+        FDEL = true;
         renderFile();
       });
     });
@@ -1087,6 +1133,7 @@
     Array.prototype.forEach.call(m.querySelectorAll('[data-fmsel]'), function (b) {
       b.addEventListener('click', function () {
         var id = b.dataset.fmsel;
+        FDEL = false;
         if (FSEL[id]) delete FSEL[id]; else FSEL[id] = true;
         renderFile();
       });
@@ -1099,6 +1146,7 @@
       var rows = f.lines.filter(function (l) { return stage.states.indexOf(l.state) >= 0; });
       var on = rows.some(function (l) { return !FSEL[l.id]; });
       FSEL = {};
+      FDEL = false;
       if (on) rows.forEach(function (l) { FSEL[l.id] = true; });
       renderFile();
     });
@@ -1138,7 +1186,24 @@
           return openOrder(f, f.lines.filter(function (l) { return l.state === 'need'; })
             .map(function (l) { return l.id; }));
         }
-        if (what === 'clearsel') { FSEL = {}; return renderFile(); }
+        if (what === 'clearsel') { FSEL = {}; FDEL = false; return renderFile(); }
+        if (what === 'delask') { FDEL = true; return renderFile(); }
+        if (what === 'delno') { FDEL = false; return renderFile(); }
+        if (what === 'delyes') {
+          var gone = f.lines.filter(function (l) { return FSEL[l.id]; });
+          if (!gone.length) { FDEL = false; return renderFile(); }
+          b.disabled = true;
+          return Promise.all(gone.map(function (l) {
+            return api('/api/parts/' + l.id, { method: 'DELETE' });
+          })).then(function () {
+            FSEL = {};
+            FDEL = false;
+            return load();
+          }).then(function () {
+            Shell.refreshCount();
+            Shell.announce(gone.length + (gone.length === 1 ? ' line' : ' lines') + ' removed.');
+          }).catch(function () { b.disabled = false; });
+        }
         if (what === 'selstage') {
           var stage = STAGES.filter(function (s) { return s.k === FSTAGE; })[0];
           FSEL = {};
