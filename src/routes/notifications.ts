@@ -195,13 +195,19 @@ export async function registerNotifications(app: FastifyInstance): Promise<void>
     const cid = ctx.company!.id;
 
     const [statuses, roles, routes, configured] = await Promise.all([
+      /* Written against column names the schema never had — \`s.module\`,
+         \`s.enabled\`, \`g.id\`, \`g.name\`, \`g.lane_key\` — which is why the grid
+         500'd on every load. The real shape: a status carries its own
+         \`lane_key\` and \`module_tags\`, hides behind \`visible\`, and a group is
+         keyed by \`group_id\` with its title in \`label\`. */
       tq<RowDataPacket[]>(cid, `
-        SELECT s.slot_id, s.label, s.owner_role, s.module, s.is_terminal,
-               g.id AS group_id, g.name AS group_name, g.lane_key, g.sort_order AS group_order,
+        SELECT s.slot_id, s.label, s.owner_role, s.module_tags AS module,
+               s.is_terminal, s.lane_key,
+               s.group_id, g.label AS group_name, g.sort_order AS group_order,
                s.sort_order
         FROM statuses s
-        JOIN status_groups g ON g.id = s.group_id
-        WHERE s.enabled = 1
+        JOIN status_groups g ON g.group_id = s.group_id
+        WHERE s.visible = 1
         ORDER BY g.sort_order, s.sort_order`),
       tq<RowDataPacket[]>(cid, 'SELECT role_key, label FROM roles ORDER BY rank_order, label'),
       allRoutes(cid),
