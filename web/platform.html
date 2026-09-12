@@ -104,15 +104,24 @@
   api('/api/me').then(function (me) {
     if (!me.isPlatformOwner) { location.href = '/board.html'; return; }
     $('who').textContent = me.user.name + ' · platform';
-    return api('/api/platform/me');
+    /* This screen is served off disk and the endpoints behind it are not, so
+       the two can be different versions for as long as it takes to rebuild.
+       A missing endpoint says so rather than leaving the pane on "Loading…". */
+    return api('/api/platform/me').catch(function (e) {
+      showStale(e.message);
+      return null;
+    });
   }).then(function (p) {
-    if (!p) return;
+    if (p === undefined) return;
     PLAT = p;
     /* Root is the account nobody uses until something has gone wrong, so it
        says so on every screen for as long as the session lasts. */
-    $('rootbar').hidden = p.role !== 'root';
-    $('peopleBtn').hidden = p.role !== 'root';
-    $('who').textContent = $('who').textContent.replace('platform', p.role === 'root' ? 'ROOT' : 'platform admin');
+    if (p) {
+      $('rootbar').hidden = p.role !== 'root';
+      $('peopleBtn').hidden = p.role !== 'root';
+      $('who').textContent = $('who').textContent
+        .replace('platform', p.role === 'root' ? 'ROOT' : 'platform admin');
+    }
     return api('/api/platform/companies');
   }).then(function (d) {
     if (!d) return;
@@ -120,7 +129,28 @@
     renderList();
     if (COS.length) select(COS[0].id);
     else $('pane').innerHTML = '<div class="empty">No companies yet.</div>';
-  }).catch(function (e) { if (e.message !== 'out') console.error(e); });
+  }).catch(function (e) {
+    if (e.message === 'out') return;
+    console.error(e);
+    showStale(e.message);
+  });
+
+  /**
+   * The screen is ahead of the server. Rather than an empty pane, say which
+   * piece is missing and what to run — the same failure the Status messages
+   * grid used to hide.
+   */
+  function showStale(msg) {
+    $('pane').innerHTML = '<div style="padding:18px;max-width:560px">' +
+      '<div style="font:500 14px var(--font);color:var(--stopped);margin-bottom:8px">' +
+      'This screen is newer than the server</div>' +
+      '<div style="font:400 12px/1.7 var(--font);color:var(--muted)">' +
+      esc(msg) + '<br><br>New shop, Demo and Platform people need the a0.4.0 build. ' +
+      'The page is served straight off disk, so it updated the moment you copied it; ' +
+      'the endpoints behind it did not.<br><br>' +
+      '<span style="color:var(--dim)">npm run build &amp;&amp; npm run migrate &amp;&amp; ' +
+      'sudo systemctl restart easyshop</span></div></div>';
+  }
 
   /* ---------------------------------------------------------------- panels
      Three things that are not a company: making one, the demo shop, and who
