@@ -34,6 +34,7 @@ import { registerCloseout } from './routes/closeout';
 import { registerAudit } from './routes/audit';
 import { registerPayroll } from './routes/payroll';
 import { registerCalendar } from './routes/gcal';
+import { registerMoney } from './routes/money';
 import { purgeExpiredSessions } from './auth/session';
 import { closeQueue, startWorker } from './queue';
 import { makeDerivatives } from './jobs/derivatives';
@@ -88,6 +89,7 @@ async function main(): Promise<void> {
   await registerAudit(app);
   await registerPayroll(app);
   await registerCalendar(app);
+  await registerMoney(app);
 
   app.get('/api/health', async () => {
     const [r] = await master().query('SELECT 1 AS ok');

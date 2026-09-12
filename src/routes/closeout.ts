@@ -291,6 +291,20 @@ export async function registerCloseout(app: FastifyInstance): Promise<void> {
     if (!ctx) return;
     if (!ctx.caps.viewPayPlans) return reply.code(403).send({ error: 'Not permitted' });
 
+    const plans = await tq<RowDataPacket[]>(ctx.company!.id, `
+      SELECT user_id, job_type, basis, pct_paint, pct_nopaint, rate_cents
+        FROM staff_pay_plans`);
+    const byUser = new Map<number, unknown[]>();
+    for (const p of plans) {
+      const list = byUser.get(Number(p.user_id)) ?? [];
+      list.push({
+        jobType: p.job_type, basis: p.basis,
+        pctPaint: Number(p.pct_paint), pctNoPaint: Number(p.pct_nopaint),
+        rateCents: Number(p.rate_cents)
+      });
+      byUser.set(Number(p.user_id), list);
+    }
+
     const rows = await tq<RowDataPacket[]>(ctx.company!.id, `
       SELECT s.user_id, s.display_name, s.position_key, s.pay_basis, s.rate_cents, s.rate_pct,
              p.label AS position_label
@@ -311,6 +325,7 @@ export async function registerCloseout(app: FastifyInstance): Promise<void> {
         basis: r.pay_basis,
         rateCents: Number(r.rate_cents),
         ratePct: Number(r.rate_pct),
+        plans: byUser.get(Number(r.user_id)) ?? [],
         /* A share is PDR only. Everyone else is hours or a flat rate per car. */
         canPct: r.position_key === 'pdr'
       })),

@@ -221,20 +221,32 @@ export async function profitFor(
     ? (paintHours > 0 ? Math.round(paintHours * matRate) : Number(f.materials_flat_cents) || 0)
     : 0;
 
-  /* Everything except PDR, which is a share of what is left and so goes last. */
+  /* Everything except PDR, which is a share of what is left and so goes last.
+     Any trade can now be on a percentage, not only PDR: a tech pay plan prices
+     a body or paint row as a share of the approval net of parts at cost. Those
+     rows arrive already priced from the flag, but a row that came off the sheet
+     unpriced is worked out here rather than silently costing nothing. */
+  const pctBase = Math.max(0, approval - (Number(f.parts_cost_cents) || 0));
   let labour = 0;
   const labourLines: CostLine[] = [];
   for (const trade of LABOUR_TRADES) {
     if (trade === 'pdr') continue;
     const e = byTrade.get(trade);
     if (!e) continue;
-    labour += e.costCents;
+    const cents = e.basis === 'pct' && !e.costCents
+      ? Math.round(pctBase * ((Number(e.ratePct) || 0) / 100))
+      : e.costCents;
+    labour += cents;
     labourLines.push({
       key: trade,
       label: TRADE_LABEL[trade] + ' cost',
       note: (e.displayName ?? 'Unassigned') +
-        (e.basis === 'flat' ? ' — flat' : ` — ${e.hours} hours` + (e.basis === 'ems' ? ', pulled from the estimate' : '')),
-      cents: e.costCents
+        (e.basis === 'pct'
+          ? ` — ${e.ratePct}% of ${(pctBase / 100).toFixed(2)}, after parts at cost`
+          : e.basis === 'flat'
+            ? ' — flat'
+            : ` — ${e.hours} hours` + (e.basis === 'ems' ? ', pulled from the estimate' : '')),
+      cents
     });
   }
 

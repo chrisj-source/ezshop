@@ -204,7 +204,8 @@ CREATE TABLE repair_orders (
   closed_at         DATETIME      NULL,
   close_date        DATE          NULL COMMENT 'the books date, set and re-set by hand',
   closed_by         BIGINT UNSIGNED NULL,
-  paid              TINYINT(1)    NOT NULL DEFAULT 0,
+  paid              TINYINT(1)    NOT NULL DEFAULT 0 COMMENT 'derived: paid_cents >= amount_cents',
+  paid_cents        BIGINT        NOT NULL DEFAULT 0 COMMENT 'sum of live payments, written by the payment endpoints',
   paid_at           DATETIME      NULL,
   total_loss_at     DATETIME      NULL COMMENT 'own flag, like void. the board draws lane 00 from it',
   total_loss_by     BIGINT UNSIGNED NULL,
@@ -883,12 +884,18 @@ CREATE TABLE ro_labour (
   rate_cents    BIGINT        NOT NULL DEFAULT 0 COMMENT 'the rate used, so history survives a rate change',
   rate_pct      DECIMAL(6,3)  NOT NULL DEFAULT 0,
   pct_after_costs TINYINT(1)  NOT NULL DEFAULT 0 COMMENT 'PDR: a share of what is left, not of the approval',
+  pct_base      ENUM('approval','after_parts') NOT NULL DEFAULT 'approval'
+                COMMENT 'what a percentage runs off; tech plans use after_parts',
   cost_cents    BIGINT        NOT NULL DEFAULT 0,
   user_id       BIGINT UNSIGNED NULL COMMENT 'who it is owed to',
   display_name  VARCHAR(120)  NULL,
   entered_by    BIGINT UNSIGNED NULL,
   entered_at    DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  flagged_at    DATETIME      NULL COMMENT 'set when the trade is flagged, cleared when unflagged',
+  flagged_by    BIGINT UNSIGNED NULL,
+  flagged_by_name VARCHAR(120) NULL,
   PRIMARY KEY (ro_id, position_key),
+  KEY ix_labour_flagged (ro_id, flagged_at),
   KEY ix_labour_user (user_id),
   CONSTRAINT fk_labour_ro FOREIGN KEY (ro_id) REFERENCES repair_orders(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -969,3 +976,50 @@ INSERT INTO shop_settings (setting_key, setting_value) VALUES
   ('payroll_close_day', 'wednesday'),
   ('payroll_cutoff', '16:00')
 ON DUPLICATE KEY UPDATE setting_value = setting_value;
+
+-- ===========================================================================
+-- Money in, and what the floor is owed
+-- ===========================================================================
+--
+-- A payment is a row against a file: paid is the balance reaching zero, not a
+-- flag anyone sets. `ref_key` enforces the one rule that matters — the same
+-- check or draft number may pay many files but not the same file twice.
+CREATE TABLE ro_payments (
+  id              BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  ro_id           BIGINT UNSIGNED NOT NULL,
+  invoice_id      BIGINT UNSIGNED NULL COMMENT 'the invoicing port fills this',
+  amount_cents    BIGINT        NOT NULL,
+  method          ENUM('check','cash','card','draft','writeoff') NOT NULL,
+  payer           ENUM('customer','insurer') NOT NULL DEFAULT 'customer',
+  reference       VARCHAR(64)   NULL COMMENT 'check or draft number; required for those two',
+  note            VARCHAR(255)  NULL,
+  received_at     DATE          NOT NULL,
+  recorded_by     BIGINT UNSIGNED NULL,
+  recorded_by_name VARCHAR(120) NULL,
+  created_at      DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  voided_at       DATETIME      NULL,
+  voided_by       BIGINT UNSIGNED NULL,
+  void_reason     VARCHAR(190)  NULL,
+  ref_key VARCHAR(80)
+    AS (IF(reference IS NULL OR reference = '' OR voided_at IS NOT NULL,
+           NULL, CONCAT(method, ':', reference))) STORED,
+  UNIQUE KEY uq_pay_ref (ro_id, ref_key),
+  KEY ix_pay_ro (ro_id, received_at),
+  KEY ix_pay_when (received_at),
+  CONSTRAINT fk_pay_ro FOREIGN KEY (ro_id) REFERENCES repair_orders(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- What a person is paid, per job type. A percentage carries two figures because
+-- the shop pays two: one when the file has paint on it, one when it is body
+-- only. Percentages run off the approval after parts come out at cost.
+CREATE TABLE staff_pay_plans (
+  user_id         BIGINT UNSIGNED NOT NULL,
+  job_type        ENUM('wholesale','insurance','cash') NOT NULL,
+  basis           ENUM('pct','hours','flat') NOT NULL DEFAULT 'hours',
+  pct_paint       DECIMAL(6,3)  NOT NULL DEFAULT 0,
+  pct_nopaint     DECIMAL(6,3)  NOT NULL DEFAULT 0,
+  rate_cents      BIGINT        NOT NULL DEFAULT 0,
+  updated_at      DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  updated_by      BIGINT UNSIGNED NULL,
+  PRIMARY KEY (user_id, job_type)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

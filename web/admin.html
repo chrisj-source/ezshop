@@ -127,6 +127,70 @@
     display:grid; grid-template-columns:3px 1fr 168px 148px 50px; gap:12px;
     align-items:center; min-height:44px; border-bottom:1px solid var(--whisper); padding:0 2px;
   }
+  /* The people row. It used to render all eight role chips and all nine trade
+     chips per person — seventeen buttons of which two were on. It now states
+     what is true; everything editable is in the sheet. */
+  .prow3 {
+    display:grid; grid-template-columns:30px minmax(160px,1.4fr) 1.1fr 1fr 1.2fr 92px;
+    gap:12px; align-items:center; min-height:50px; padding:7px 16px;
+    border-bottom:1px solid var(--whisper);
+  }
+  .prow3:hover { background:var(--whisper); }
+  @media (max-width:1000px) {
+    .prow3 { grid-template-columns:30px minmax(140px,1fr) 1fr 92px; }
+    .prow3 > .hide-sm { display:none; }
+  }
+  .pname { font:500 12.5px var(--font); }
+  .pmeta { font:400 11px var(--font); color:var(--dim); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .pcell { font:400 12px var(--font); color:var(--muted); }
+  .pcell .lead { color:var(--acc2); }
+  .pcell .num { font-variant-numeric:tabular-nums; }
+  .pfilters { display:flex; gap:7px; padding:10px 16px; border-bottom:1px solid var(--line); flex-wrap:wrap; }
+  .pfilter {
+    padding:4px 10px; font:400 11.5px var(--font); color:var(--muted); background:transparent;
+    border:1px solid var(--line); border-radius:99px; cursor:pointer; min-height:28px;
+  }
+  .pfilter.on { background:var(--acc); border-color:var(--acc); color:var(--bg); font-weight:500; }
+
+  /* The person sheet: one person, three tabs, everything editable in one place. */
+  .sheet2 {
+    position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); z-index:40;
+    width:min(560px, calc(100vw - 28px)); max-height:calc(100vh - 40px); overflow:auto;
+    background:var(--bg); border:1px solid var(--line); border-radius:7px;
+    box-shadow:0 18px 44px rgba(0,0,0,.5);
+  }
+  .sheet2[hidden] { display:none; }
+  .shscrim {
+    position:fixed; inset:0; background:rgba(8,12,20,.55); z-index:39;
+  }
+  .shscrim[hidden] { display:none; }
+  .sh-head { padding:14px 17px; border-bottom:1px solid var(--line); display:flex; align-items:center; gap:11px; }
+  .sh-tabs { display:flex; gap:2px; padding:0 17px; border-bottom:1px solid var(--line); }
+  .sh-tab {
+    padding:10px 12px; font:500 12px var(--font); color:var(--dim); background:transparent;
+    border:0; border-bottom:2px solid transparent; cursor:pointer; min-height:40px;
+  }
+  .sh-tab.on { color:var(--acc2); border-bottom-color:var(--acc); }
+  .sh-body { padding:16px 17px; display:flex; flex-direction:column; gap:14px; }
+  .sh-foot {
+    padding:13px 17px; border-top:1px solid var(--line); background:var(--surf);
+    display:flex; align-items:center; gap:9px; flex-wrap:wrap;
+  }
+  .sh-f { display:flex; flex-direction:column; gap:5px; }
+  .sh-f .k { font:400 11px var(--font); color:var(--dim); }
+  .sh-grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+  .payblock { display:flex; flex-direction:column; gap:9px; }
+  .payblock + .payblock { border-top:1px solid var(--whisper); padding-top:13px; }
+  .payhead { display:flex; align-items:baseline; gap:8px; }
+  .payhead .t { font:500 11px var(--font); letter-spacing:.12em; text-transform:uppercase; color:var(--muted); }
+  .payhead .n { font:400 11px var(--font); color:var(--dim); }
+  .payseg { display:flex; border:1px solid var(--line); border-radius:4px; overflow:hidden; width:280px; max-width:100%; }
+  .payseg button {
+    flex:1; padding:7px 0; font:500 11.5px var(--font); color:var(--muted);
+    background:transparent; border:0; cursor:pointer; min-height:34px;
+  }
+  .payseg button.on { background:var(--acc); color:var(--bg); }
+
   .prow2 {
     display:grid; grid-template-columns:26px minmax(150px,1fr) 190px 168px 82px 148px;
     gap:12px; align-items:center; min-height:46px; padding:6px 16px;
@@ -186,6 +250,9 @@
   </div>
 </div>
 
+<div class="shscrim" id="shScrim" hidden></div>
+<div class="sheet2" id="sheet2" hidden role="dialog" aria-modal="true" aria-label="Person"></div>
+
 <script src="/shell.js?v=9"></script>
 <script>
 (function () {
@@ -194,6 +261,103 @@
   /* Labour rates, or null when this person may not see pay. */
   var RATES = null;
   var TAB = 'statuses', RAIL = null, SEL = null;
+  /* The people screen's own state: what is typed in the search and which
+     filter chip is on. Both are view state, so neither is saved anywhere. */
+  var PQ = '', PFILTER = 'all', SHEET = null;
+
+  var PFILTERS = [
+    { k: 'all', t: 'Everyone', n: function (ps) { return ps.length; } },
+    { k: 'tech', t: 'Technicians', n: function (ps) { return ps.filter(isTech).length; } },
+    { k: 'office', t: 'Office', n: function (ps) { return ps.filter(isOffice).length; } },
+    { k: 'sales', t: 'Sales', n: function (ps) { return ps.filter(isSales).length; } },
+    { k: 'noplan', t: 'No pay plan', n: function (ps) { return ps.filter(hasNoPlan).length; } }
+  ];
+
+  function rolesOf(p) { return p.roles || (p.role ? [p.role] : []); }
+  function tradesOf(p) {
+    return (p.positionKeys && p.positionKeys.length)
+      ? p.positionKeys
+      : (p.position_key ? [p.position_key] : []);
+  }
+  function isTech(p) { return rolesOf(p).indexOf('technician') >= 0 || tradesOf(p).length > 0; }
+  function isOffice(p) {
+    return ['front_office', 'accounting', 'owner', 'admin'].some(function (r) {
+      return rolesOf(p).indexOf(r) >= 0;
+    });
+  }
+  function isSales(p) { return rolesOf(p).indexOf('salesperson') >= 0; }
+
+  /** A tech with nothing set for any job type is the one worth chasing. */
+  function hasNoPlan(p) {
+    if (!RATES || !isTech(p)) return false;
+    var row = RATES.staff.filter(function (x) { return x.userId === p.id; })[0];
+    if (!row) return false;
+    return !(row.plans || []).some(function (pl) {
+      return pl.basis === 'pct' ? (pl.pctPaint > 0 || pl.pctNoPaint > 0) : pl.rateCents > 0;
+    });
+  }
+
+  function matchesFilter(p) {
+    if (PQ) {
+      var hay = [p.name, p.email, p.employee_code, tradeNames(p), roleNames(p)]
+        .join(' ').toLowerCase();
+      if (hay.indexOf(PQ.toLowerCase()) < 0) return false;
+    }
+    if (PFILTER === 'tech') return isTech(p);
+    if (PFILTER === 'office') return isOffice(p);
+    if (PFILTER === 'sales') return isSales(p);
+    if (PFILTER === 'noplan') return hasNoPlan(p);
+    return true;
+  }
+
+  function roleLabel(key) {
+    return (ROLES.filter(function (r) { return r.key === key; })[0] || {}).label || key;
+  }
+  function tradeLabel(key) {
+    return (CFG.positions.filter(function (x) { return x.position_key === key; })[0] || {}).label || key;
+  }
+  function roleNames(p) { return rolesOf(p).map(roleLabel).join(', '); }
+  function tradeNames(p) { return tradesOf(p).map(tradeLabel).join(', '); }
+
+  /** The primary role, with the rest as a quiet second line rather than chips. */
+  function roleCell(p) {
+    var held = rolesOf(p);
+    if (!held.length) return '<span style="color:var(--dim)">none</span>';
+    var primary = p.role && held.indexOf(p.role) >= 0 ? p.role : held[0];
+    var others = held.filter(function (k) { return k !== primary; });
+    return '<div class="lead">' + esc(roleLabel(primary)) + '</div>' +
+      (others.length
+        ? '<div class="pmeta">and ' + esc(others.map(roleLabel).join(', ').toLowerCase()) + '</div>'
+        : '');
+  }
+
+  /** Pay in a line: the plan where there is one, the sign-in date where pay is none of your business. */
+  function payCell(p) {
+    if (!RATES) return '<span class="pmeta">' +
+      esc(p.last_login_at ? Shell.when(p.last_login_at) : 'never') + '</span>';
+    var row = RATES.staff.filter(function (x) { return x.userId === p.id; })[0];
+    if (!row) return '<span style="color:var(--dim)">not on the floor</span>';
+
+    var plans = row.plans || [];
+    var pct = plans.filter(function (pl) { return pl.basis === 'pct'; });
+    var hourly = plans.filter(function (pl) { return pl.basis !== 'pct' && pl.rateCents > 0; });
+
+    if (!pct.length && !hourly.length) {
+      return '<span style="color:var(--stopped)">No pay plan</span>';
+    }
+    var bits = [];
+    if (pct.length) {
+      var one = pct[0];
+      bits.push('<span class="num">' + one.pctPaint + '% / ' + one.pctNoPaint + '%</span>');
+    }
+    if (hourly.length) {
+      bits.push('<span class="num">' + esc(money(hourly[0].rateCents)) +
+        (hourly[0].basis === 'flat' ? ' a car' : ' flag') + '</span>');
+    }
+    return bits.join(' · ') +
+      '<div class="pmeta">' + (plans.length > 1 ? 'by job type' : 'one job type set') + '</div>';
+  }
+
 
   // Google sends the owner back here after they authorise; land on the tab and
   // the card they left from.
@@ -722,88 +886,65 @@
       return !RAIL || (RAIL === 'none' ? !p.position_key : p.position_key === RAIL);
     });
 
-    var h = ['<div class="pad"><div class="card2" style="margin:0 0 14px">' +
-      '<div class="card2row" style="grid-template-columns:1fr">' +
-      '<div class="dlbl">Add someone</div>' +
-      '<div class="grid3" style="margin-top:4px;row-gap:14px">' +
-      '<div><div class="dk">Name</div><input class="dinput" id="nName"></div>' +
-      '<div><div class="dk">Email — optional</div><input class="dinput" id="nEmail" type="email"></div>' +
-      '<div><div class="dk">Roles — tick every one they hold</div>' +
-      '<div class="chipset" id="nRoles">' + ROLES.map(function (r, i) {
-        return '<button type="button" class="setchip' + (i === 0 ? ' on' : '') + '" ' +
-          'data-role="' + esc(r.key) + '">' + esc(r.label) + '</button>';
-      }).join('') + '</div></div>' +
-      '<div><div class="dk">Trades — every one they work</div>' +
-      '<div class="chipset" id="nTrades">' + CFG.positions.map(function (p) {
-        return '<button type="button" class="setchip" data-trade="' + esc(p.position_key) + '">' +
-          esc(p.label) + '</button>';
-      }).join('') + '</div></div>' +
-      '<div><div class="dk">Employee code</div><input class="dinput" id="nCode"></div>' +
-      '<div><div class="dk">Temporary password — optional</div>' +
-      '<input class="dinput" id="nPass" placeholder="leave blank to generate one"></div>' +
-      '</div>' +
-      '<div class="row" style="margin-top:12px">' +
-      '<button class="btn btn-solid" id="addPerson">Add</button>' +
-      '<span class="sub">They appear in the list below straight away.</span></div>' +
-      '<div class="sub" style="margin-top:9px">Leave the email blank and they get a sign-in code ' +
-      'instead — good enough for the floor. Add an email later and they set their own password.</div>' +
-      '<div class="msg" id="dMsg"></div></div></div>'];
+    /* One line of controls, not a panel: Add someone opens the same sheet the
+       Edit buttons open, so there is one form to learn instead of two. */
+    var h = ['<div class="pad" style="padding-bottom:0"><div class="row" ' +
+      'style="gap:11px;align-items:center;flex-wrap:wrap;padding-bottom:12px">' +
+      '<div class="dlbl" style="margin:0">People</div>' +
+      '<span class="sub">' + PEOPLE.people.length + ' on the shop</span>' +
+      '<input class="dinput" id="pSearch" placeholder="Search name, trade or code" ' +
+        'style="margin-left:auto;width:210px" value="' + esc(PQ) + '">' +
+      '<button class="btn btn-solid" id="addPerson">Add someone</button>' +
+      '</div><div class="msg" id="dMsg"></div></div>'];
 
-    h.push('<div class="prow2" style="border-top:1px solid var(--line);min-height:32px">' +
-      '<div></div><div class="dk">Name</div><div class="dk">Roles</div>' +
+    h.push('<div class="pfilters">' + PFILTERS.map(function (f) {
+      return '<button class="pfilter' + (PFILTER === f.k ? ' on' : '') + '" data-pf="' +
+        esc(f.k) + '">' + esc(f.t) + ' ' + f.n(PEOPLE.people) + '</button>';
+    }).join('') + '</div>');
+
+
+    h.push('<div class="prow3" style="border-top:1px solid var(--line);min-height:30px">' +
+      '<div></div><div class="dk">Name</div><div class="dk">Role</div>' +
       '<div class="dk hide-sm">Trades</div><div class="dk hide-sm">' +
-      (RATES ? 'Labour rate' : 'Last in') + '</div>' +
-      '<div class="dk">Access</div></div>');
+      (RATES ? 'Pay' : 'Last in') + '</div><div></div></div>');
+
+    list = list.filter(matchesFilter);
+    if (!list.length) h.push('<div class="empty">Nobody matches that.</div>');
 
     list.forEach(function (p) {
       var initials = String(p.name || '?').split(/\s+/).map(function (w) { return w[0]; })
         .join('').slice(0, 2).toUpperCase();
-      h.push('<div class="prow2" data-user="' + p.id + '"' +
+      h.push('<div class="prow3" data-user="' + p.id + '"' +
         (p.membership_status === 'inactive' ? ' style="opacity:.55"' : '') + '>' +
-        '<div class="avatar2">' + esc(initials) + '</div>' +
+        '<div class="avatar2" style="width:28px;height:28px;font-size:11px">' + esc(initials) + '</div>' +
         '<div style="min-width:0">' +
-        '<input class="dinput p-name" value="' + esc(p.name) + '" ' +
-        'style="font:500 12px var(--font);padding:4px 7px" title="Name">' +
-        '<input class="dinput p-email" value="' + esc(p.email || '') + '" ' +
-        'placeholder="no email — code sign-in" ' +
-        'style="font:400 10.5px var(--font);padding:3px 7px;margin-top:4px;color:var(--dim)" ' +
-        'title="Email — this is what they sign in with"></div>' +
-        '<div class="chipset p-roles">' + ROLES.map(function (r) {
-          var held = (p.roles || [p.role]).indexOf(r.key) >= 0;
-          return '<button type="button" class="setchip' + (held ? ' on' : '') +
-            (held && r.key === p.role ? ' primary' : '') + '" ' +
-            'data-role="' + esc(r.key) + '"' +
-            (held && r.key === p.role ? ' title="Primary role — what they are called, and who gets notified"' : '') +
-            '>' + esc(r.label) + '</button>';
-        }).join('') + '</div>' +
-        '<div class="chipset p-trades hide-sm">' + CFG.positions.map(function (x) {
-          var works = (p.positionKeys && p.positionKeys.length
-            ? p.positionKeys
-            : (p.position_key ? [p.position_key] : [])).indexOf(x.position_key) >= 0;
-          return '<button type="button" class="setchip' + (works ? ' on' : '') + '" ' +
-            'data-trade="' + esc(x.position_key) + '">' + esc(x.label) + '</button>';
-        }).join('') + '</div>' +
-        '<div class="ssub hide-sm">' + rateCell(p) + '</div>' +
-        '<div class="row" style="gap:6px">' +
-        '<button class="visbtn" data-code="' + p.id + '">Code</button>' +
-        '<button class="visbtn" data-reset="' + p.id + '">Password</button>' +
-        (p.id === ME.user.id
-          ? '<span class="ssub">you</span>'
-          : '<button class="visbtn" data-remove="' + p.id + '" ' +
-            'style="color:var(--stopped);border-color:var(--stopped)">Remove</button>') +
-        '</div></div>');
+          '<div class="pname">' + esc(p.name) + '</div>' +
+          '<div class="pmeta">' + esc(p.email || 'code sign-in') + '</div>' +
+        '</div>' +
+        '<div class="pcell">' + roleCell(p) + '</div>' +
+        '<div class="pcell hide-sm">' + esc(tradeNames(p) || '—') + '</div>' +
+        '<div class="pcell hide-sm">' + payCell(p) + '</div>' +
+        '<div class="row" style="gap:6px;justify-content:flex-end">' +
+          '<button class="visbtn" data-edit="' + p.id + '">Edit</button>' +
+          '<button class="visbtn" data-more="' + p.id + '" title="Sign-in and removal" ' +
+            'aria-label="Sign-in and removal for ' + esc(p.name) + '">\u22ef</button>' +
+        '</div>' +
+        '<div class="row" data-morebox="' + p.id + '" hidden ' +
+          'style="grid-column:1/-1;gap:6px;justify-content:flex-end;padding:0 0 8px">' +
+          '<button class="visbtn" data-code="' + p.id + '">Sign-in code</button>' +
+          '<button class="visbtn" data-reset="' + p.id + '">Reset password</button>' +
+          (p.id === ME.user.id
+            ? '<span class="ssub">this is you</span>'
+            : '<button class="visbtn" data-remove="' + p.id + '" ' +
+              'style="color:var(--stopped);border-color:var(--stopped)">Remove</button>') +
+        '</div>' +
+      '</div>');
     });
 
-    h.push('<div class="pad" style="padding-top:16px"><div class="row">' +
-      '<button class="btn btn-solid" id="savePeople">Save roles and trades</button>' +
-      '<span class="sub">' + list.length + ' shown' +
-      (RAIL ? ' in this trade' : '') + ' · names and emails save here too</span></div></div>');
-
-    /* Labour rates are pay, so they belong to the owner and accounting. The
-       close-out sheet prices hours from these, and a settled file keeps the rate
-       it was settled on. */
+    /* Paint materials is a shop figure rather than a person's, so it stays on
+       the screen; everything about one person is in that person's sheet now. */
     if (RATES && RATES.canEdit) {
-      h.push('<div class="pad" style="padding-top:6px"><div class="card2">' +
+      h.push('<div class="pad" style="padding-top:14px"><div class="card2">' +
         '<div class="card2row" style="grid-template-columns:1fr">' +
         '<div class="dlbl">Paint materials</div>' +
         '<div class="row" style="margin-top:6px">' +
@@ -874,40 +1015,6 @@
     });
   }
 
-  /**
-   * The labour-rate cell. A tech is paid by the hour, a flat rate per car, or —
-   * PDR only — a share of the job. Nobody else's business, so it falls back to
-   * the sign-in date when this person may not see pay.
-   */
-  function rateCell(p) {
-    if (!RATES) return p.last_login_at ? Shell.when(p.last_login_at) : 'never';
-    var row = RATES.staff.filter(function (s) { return s.userId === p.id; })[0];
-    if (!row) return '<span style="color:var(--dim)">not on the floor</span>';
-    if (!RATES.canEdit) {
-      return row.basis === 'pct'
-        ? row.ratePct + '% share'
-        : money(row.rateCents) + (row.basis === 'flat' ? ' per car' : ' per hour');
-    }
-    var pct = row.basis === 'pct';
-    return '<div class="row" style="gap:6px;flex-wrap:nowrap">' +
-      '<div class="chipset" style="gap:2px">' +
-      '<button type="button" class="setchip' + (row.basis === 'hourly' ? ' on' : '') + '" ' +
-        'data-basis="hourly" data-u="' + p.id + '" title="Per hour">Hr</button>' +
-      '<button type="button" class="setchip' + (row.basis === 'flat' ? ' on' : '') + '" ' +
-        'data-basis="flat" data-u="' + p.id + '" title="Flat per car">Flat</button>' +
-      (row.canPct
-        ? '<button type="button" class="setchip' + (pct ? ' on' : '') + '" ' +
-          'data-basis="pct" data-u="' + p.id + '" title="A share of the job — PDR only">%</button>'
-        : '') +
-      '</div>' +
-      '<input class="dinput" data-rate="' + p.id + '" value="' +
-        esc(pct ? String(row.ratePct) : dollars(row.rateCents)) + '" ' +
-        'style="width:66px;text-align:right;font:500 11.5px var(--font);padding:3px 6px">' +
-      '<span style="color:var(--dim);white-space:nowrap">' +
-        (pct ? '%' : (row.basis === 'flat' ? '/car' : '/hr')) + '</span>' +
-      '</div>';
-  }
-
   function money(c) {
     return '$' + ((Number(c) || 0) / 100).toLocaleString('en-US',
       { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -922,36 +1029,32 @@
   function wirePeople() {
     wireChips();
 
-    /* A tech's labour rate, saved on its own rather than with the roles button —
-       it is pay, and the person editing it may not be the person editing roles. */
-    Array.prototype.forEach.call($('mid').querySelectorAll('[data-rate]'), function (inp) {
-      inp.addEventListener('change', function () {
-        var uid = Number(inp.dataset.rate);
-        var row = RATES.staff.filter(function (s) { return s.userId === uid; })[0];
-        if (!row) return;
-        var body = row.basis === 'pct'
-          ? { basis: 'pct', ratePct: parseFloat(inp.value) || 0, rateCents: 0 }
-          : { basis: row.basis, rateCents: dollarsToCents(inp.value), ratePct: 0 };
-        api('/api/staff/' + uid + '/rate', { method: 'PATCH', body: JSON.stringify(body) })
-          .then(function (res) {
-            row.rateCents = body.rateCents; row.ratePct = body.ratePct;
-            say(res.note, 'ok');
-          })
-          .catch(function (e) { say(e.message, 'err'); });
+    /* Search and the filter chips are view state, so they redraw and nothing else. */
+    var sq = $('pSearch');
+    if (sq) {
+      sq.addEventListener('input', function () {
+        PQ = sq.value;
+        var at = sq.selectionStart;
+        render();
+        var again = $('pSearch');
+        if (again) { again.focus(); again.setSelectionRange(at, at); }
       });
+    }
+
+    Array.prototype.forEach.call($('mid').querySelectorAll('[data-pf]'), function (b) {
+      b.addEventListener('click', function () { PFILTER = b.dataset.pf; render(); });
     });
 
-    Array.prototype.forEach.call($('mid').querySelectorAll('[data-basis]'), function (b) {
+    Array.prototype.forEach.call($('mid').querySelectorAll('[data-edit]'), function (b) {
+      b.addEventListener('click', function () { openSheet(Number(b.dataset.edit)); });
+    });
+
+    /* Sign-in code, password and remove are rare and dangerous, so they are one
+       tap behind the row rather than sitting in every one of them. */
+    Array.prototype.forEach.call($('mid').querySelectorAll('[data-more]'), function (b) {
       b.addEventListener('click', function () {
-        var uid = Number(b.dataset.u);
-        var row = RATES.staff.filter(function (s) { return s.userId === uid; })[0];
-        if (!row) return;
-        row.basis = b.dataset.basis;
-        api('/api/staff/' + uid + '/rate', {
-          method: 'PATCH',
-          body: JSON.stringify({ basis: row.basis, rateCents: row.rateCents, ratePct: row.ratePct })
-        }).then(function () { render(); })
-          .catch(function (e) { say(e.message, 'err'); render(); });
+        var box = $('mid').querySelector('[data-morebox="' + b.dataset.more + '"]');
+        if (box) box.hidden = !box.hidden;
       });
     });
 
@@ -965,82 +1068,10 @@
       }).catch(function (e) { say(e.message, 'err'); });
     });
 
-    $('addPerson').addEventListener('click', function () {
-      var name = $('nName').value.trim();
-      if (!name) return say('A name is required.', 'err');
-      var roles = chipValues($('nRoles'), 'role');
-      if (!roles.length) return say('Tick at least one role.', 'err');
-      api('/api/admin/people', {
-        method: 'POST',
-        body: JSON.stringify({
-          name: name,
-          email: $('nEmail').value.trim() || undefined,
-          useCode: !$('nEmail').value.trim() && !$('nPass').value.trim(),
-          password: $('nPass').value.trim() || undefined,
-          roles: roles,
-          positionKeys: chipValues($('nTrades'), 'trade'),
-          employeeCode: $('nCode').value.trim() || undefined
-        })
-      }).then(function (r) {
-        var extra = (r.loginCode || r.code) ? ' Sign-in code: ' + (r.loginCode || r.code)
-          : r.tempPassword ? ' Temporary password: ' + r.tempPassword +
-            ' — they must change it at first sign-in.' : '';
-        say('Added.' + extra, 'ok');
-        ['nName', 'nEmail', 'nCode', 'nPass'].forEach(function (id) { $(id).value = ''; });
-        return reloadPeople();
-      }).catch(function (e) { say(e.message, 'err'); });
-    });
+    var ap = $('addPerson');
+    if (ap) ap.addEventListener('click', function () { openSheet(null); });
 
-    $('savePeople').addEventListener('click', function () {
-      var jobs = [];
-      Array.prototype.forEach.call($('mid').querySelectorAll('[data-user]'), function (row) {
-        var id = Number(row.dataset.user);
-        var was = PEOPLE.people.filter(function (p) { return p.id === id; })[0];
-        var rolesEl = row.querySelector('.p-roles');
-        var tradesEl = row.querySelector('.p-trades');
-        var roles = rolesEl ? chipValues(rolesEl, 'role') : null;
-        var trades = tradesEl ? chipValues(tradesEl, 'trade') : null;
-        var wasRoles = (was.roles || [was.role]).join(',');
-        var wasTrades = (was.positionKeys && was.positionKeys.length
-          ? was.positionKeys
-          : (was.position_key ? [was.position_key] : [])).join(',');
-        var body = {};
-        if (roles && roles.join(',') !== wasRoles) body.roles = roles;
-        if (trades && trades.join(',') !== wasTrades) body.positionKeys = trades;
-        if (Object.keys(body).length) jobs.push({ id: id, body: body });
 
-        var nameEl = row.querySelector('.p-name');
-        if (nameEl && nameEl.value.trim() && nameEl.value.trim() !== was.name) {
-          jobs.push({ id: id, name: nameEl.value.trim() });
-        }
-
-        var emailEl = row.querySelector('.p-email');
-        if (emailEl && emailEl.value.trim() !== (was.email || '')) {
-          jobs.push({ id: id, email: emailEl.value.trim() || null });
-        }
-      });
-      if (!jobs.length) return say('Nothing changed.', 'ok');
-      // Run in sequence so a rejected email does not hide a saved role.
-      jobs.reduce(function (chain, j) {
-        return chain.then(function () {
-          if (j.name !== undefined) {
-            return api('/api/admin/people/' + j.id + '/name', {
-              method: 'PATCH', body: JSON.stringify({ name: j.name })
-            });
-          }
-          if (j.email !== undefined) {
-            return api('/api/admin/people/' + j.id + '/email', {
-              method: 'PATCH', body: JSON.stringify({ email: j.email })
-            });
-          }
-          return api('/api/admin/people/' + j.id, {
-            method: 'PATCH', body: JSON.stringify(j.body)
-          });
-        });
-      }, Promise.resolve())
-        .then(function () { say('Saved.', 'ok'); return reloadPeople(); })
-        .catch(function (e) { say(e.message + ' — anything before it was saved.', 'err'); });
-    });
 
     Array.prototype.forEach.call($('mid').querySelectorAll('[data-code]'), function (b) {
       b.addEventListener('click', function () {
@@ -1085,6 +1116,339 @@
             return reloadPeople();
           }).catch(function (e) { say(e.message, 'err'); });
       });
+    });
+  }
+
+  /* =====================================================================
+     The person sheet. One person, three tabs: who they are, what they may do,
+     and what they are paid. Add someone opens the same sheet with nothing in
+     it, so there is one form rather than a panel and a row that disagree.
+     ===================================================================== */
+
+  var JOB_LABELS = [
+    ['wholesale', 'Wholesale', 'dealer work, billed to the client'],
+    ['insurance', 'Retail and insurance', 'anything with an estimate behind it'],
+    ['cash', 'Cash quote', 'customer paying out of pocket']
+  ];
+
+  function openSheet(userId) {
+    var p = userId
+      ? PEOPLE.people.filter(function (x) { return x.id === userId; })[0]
+      : null;
+    if (userId && !p) return;
+
+    SHEET = {
+      id: userId,
+      tab: 'details',
+      name: p ? p.name : '',
+      email: p ? (p.email || '') : '',
+      code: p ? (p.employee_code || '') : '',
+      password: '',
+      roles: p ? rolesOf(p).slice() : ['technician'],
+      trades: p ? tradesOf(p).slice() : [],
+      plans: null,
+      loadingPlans: false
+    };
+    $('shScrim').hidden = false;
+    $('sheet2').hidden = false;
+    drawSheet();
+  }
+
+  function closeSheet() {
+    SHEET = null;
+    $('sheet2').hidden = true;
+    $('sheet2').innerHTML = '';
+    $('shScrim').hidden = true;
+  }
+
+  function shsay(t, bad) {
+    var el = $('shMsg');
+    if (!el) return;
+    el.textContent = t;
+    el.className = 'msg ' + (bad ? 'err' : 'ok');
+  }
+
+  function drawSheet() {
+    var s = SHEET;
+    if (!s) return;
+    var initials = String(s.name || '?').split(/\s+/).map(function (w) { return w[0]; })
+      .join('').slice(0, 2).toUpperCase();
+
+    var tabs = [['details', 'Details'], ['access', 'Access']];
+    if (RATES && s.id) tabs.push(['pay', 'Pay']);
+
+    $('sheet2').innerHTML =
+      '<div class="sh-head">' +
+        '<div class="avatar2" style="width:32px;height:32px;font-size:12px">' +
+          esc(s.id ? initials : '+') + '</div>' +
+        '<div style="flex:1;min-width:0">' +
+          '<div style="font:500 14px var(--font)">' +
+            esc(s.id ? (s.name || 'Unnamed') : 'Add someone') + '</div>' +
+          '<div class="sub" style="text-transform:none;letter-spacing:0">' +
+            (s.id
+              ? esc([roleNames({ roles: s.roles }), tradeNames({ positionKeys: s.trades })]
+                  .filter(Boolean).join(' · ') || 'no roles yet')
+              : 'They appear in the list as soon as you save') + '</div>' +
+        '</div>' +
+        '<button class="ghostbtn" id="shX" aria-label="Close">×</button>' +
+      '</div>' +
+      '<div class="sh-tabs">' + tabs.map(function (t) {
+        return '<button class="sh-tab' + (s.tab === t[0] ? ' on' : '') + '" data-shtab="' +
+          t[0] + '">' + t[1] + '</button>';
+      }).join('') + '</div>' +
+      '<div class="sh-body" id="shBody"></div>' +
+      '<div class="sh-foot">' +
+        '<span class="sub" id="shHint" style="text-transform:none;letter-spacing:0"></span>' +
+        '<button class="ghostbtn sp" id="shCancel" style="margin-left:auto">Cancel</button>' +
+        '<button class="btn btn-solid" id="shSave">Save</button>' +
+      '</div>';
+
+    var body = $('shBody');
+    if (s.tab === 'details') body.innerHTML = sheetDetails();
+    else if (s.tab === 'access') body.innerHTML = sheetAccess();
+    else body.innerHTML = sheetPay();
+
+    body.insertAdjacentHTML('beforeend', '<div class="msg" id="shMsg"></div>');
+
+    $('shHint').textContent = s.tab === 'pay'
+      ? 'Changes apply to files closed from here on'
+      : s.id ? '' : 'Leave the email blank and they get a sign-in code instead';
+
+    Array.prototype.forEach.call($('sheet2').querySelectorAll('[data-shtab]'), function (b) {
+      b.addEventListener('click', function () {
+        readSheet();
+        SHEET.tab = b.dataset.shtab;
+        if (SHEET.tab === 'pay' && !SHEET.plans) return loadPlans();
+        drawSheet();
+      });
+    });
+    $('shX').addEventListener('click', closeSheet);
+    $('shCancel').addEventListener('click', closeSheet);
+    $('shSave').addEventListener('click', saveSheet);
+
+    wireSheetChips();
+    wirePayBlocks();
+  }
+
+  function sheetDetails() {
+    var s = SHEET;
+    return '<div class="sh-grid">' +
+        '<div class="sh-f"><div class="k">Name</div>' +
+          '<input class="dinput" id="shName" value="' + esc(s.name) + '"></div>' +
+        '<div class="sh-f"><div class="k">Email — optional</div>' +
+          '<input class="dinput" id="shEmail" type="email" value="' + esc(s.email) + '" ' +
+          'placeholder="no email — code sign-in"></div>' +
+        '<div class="sh-f"><div class="k">Employee code</div>' +
+          '<input class="dinput" id="shCode" value="' + esc(s.code) + '"></div>' +
+        (s.id ? '' :
+          '<div class="sh-f"><div class="k">Temporary password — optional</div>' +
+          '<input class="dinput" id="shPass" placeholder="leave blank to generate one"></div>') +
+      '</div>' +
+      '<div class="sub" style="text-transform:none;letter-spacing:0">' +
+        'Email is what they sign in with. Leave it blank and they get a short code instead — ' +
+        'good enough for the floor. Add an email later and they set their own password.</div>';
+  }
+
+  function sheetAccess() {
+    var s = SHEET;
+    return '<div class="sh-f"><div class="k">Roles — tick every one they hold</div>' +
+        '<div class="chipset" id="shRoles">' + ROLES.map(function (r) {
+          return '<button type="button" class="setchip' +
+            (s.roles.indexOf(r.key) >= 0 ? ' on' : '') + '" data-role="' + esc(r.key) + '">' +
+            esc(r.label) + '</button>';
+        }).join('') + '</div></div>' +
+      '<div class="sh-f"><div class="k">Trades — every one they work</div>' +
+        '<div class="chipset" id="shTrades">' + CFG.positions.map(function (x) {
+          return '<button type="button" class="setchip' +
+            (s.trades.indexOf(x.position_key) >= 0 ? ' on' : '') + '" data-trade="' +
+            esc(x.position_key) + '">' + esc(x.label) + '</button>';
+        }).join('') + '</div></div>' +
+      '<div class="sub" style="text-transform:none;letter-spacing:0">' +
+        'Someone holding several roles gets the union of all of them, and the highest-ranked ' +
+        'is what they are called. Trades decide which lanes they own and which cars they are ' +
+        'offered for.</div>';
+  }
+
+  /**
+   * Pay, per job type, because the shop pays differently by job type. A
+   * percentage carries two figures — with paint and body only — and runs off
+   * the approved amount after any parts we bought come out at cost.
+   */
+  function sheetPay() {
+    var s = SHEET;
+    if (!s.plans) return '<div class="sub">Loading…</div>';
+    if (!RATES.canEdit) {
+      return '<div class="sub" style="text-transform:none;letter-spacing:0">' +
+        'Pay plans are the owner\u2019s and accounting\u2019s.</div>';
+    }
+
+    return JOB_LABELS.map(function (j, i) {
+      var pl = s.plans[i];
+      return '<div class="payblock" data-pay="' + i + '">' +
+        '<div class="payhead"><span class="t">' + esc(j[1]) + '</span>' +
+          '<span class="n">' + esc(j[2]) + '</span></div>' +
+        '<div class="payseg">' +
+          '<button type="button" data-paybasis="' + i + '" data-b="pct"' +
+            (pl.basis === 'pct' ? ' class="on"' : '') + '>Percent of billed</button>' +
+          '<button type="button" data-paybasis="' + i + '" data-b="hours"' +
+            (pl.basis === 'hours' ? ' class="on"' : '') + '>Flag hours</button>' +
+          '<button type="button" data-paybasis="' + i + '" data-b="flat"' +
+            (pl.basis === 'flat' ? ' class="on"' : '') + '>Flat</button>' +
+        '</div>' +
+        (pl.basis === 'pct'
+          ? '<div class="sh-grid">' +
+              '<div class="sh-f"><div class="k">If the file has paint</div>' +
+                '<input class="dinput" data-paypct="' + i + '" style="text-align:right" value="' +
+                esc(String(pl.pctPaint)) + '"></div>' +
+              '<div class="sh-f"><div class="k">Body only</div>' +
+                '<input class="dinput" data-paynopaint="' + i + '" style="text-align:right" value="' +
+                esc(String(pl.pctNoPaint)) + '"></div>' +
+            '</div>'
+          : '<div class="sh-f" style="max-width:200px"><div class="k">' +
+              (pl.basis === 'flat' ? 'Per car' : 'Flag rate, per hour') + '</div>' +
+              '<input class="dinput" data-payrate="' + i + '" style="text-align:right" value="' +
+              esc(dollars(pl.rateCents)) + '"></div>') +
+      '</div>';
+    }).join('') +
+    '<div class="sub" style="text-transform:none;letter-spacing:0">' +
+      'A percentage runs off the approved amount after any parts we bought come out at cost — ' +
+      'a $450 car with no parts on it pays 12.5% of $450. Files already closed keep the plan ' +
+      'they settled on.</div>';
+  }
+
+  function loadPlans() {
+    SHEET.plans = null;
+    drawSheet();
+    api('/api/staff/' + SHEET.id + '/pay-plans').then(function (d) {
+      if (!SHEET) return;
+      SHEET.plans = d.plans;
+      drawSheet();
+    }).catch(function (e) {
+      if (!SHEET) return;
+      SHEET.tab = 'details';
+      drawSheet();
+      shsay(e.message, true);
+    });
+  }
+
+  function wireSheetChips() {
+    var scope = $('sheet2');
+    Array.prototype.forEach.call(scope.querySelectorAll('#shRoles [data-role]'), function (b) {
+      b.addEventListener('click', function () {
+        var on = b.classList.contains('on');
+        if (on && SHEET.roles.length === 1) return shsay('Everyone needs at least one role.', true);
+        b.classList.toggle('on');
+        SHEET.roles = on
+          ? SHEET.roles.filter(function (k) { return k !== b.dataset.role; })
+          : SHEET.roles.concat([b.dataset.role]);
+      });
+    });
+    Array.prototype.forEach.call(scope.querySelectorAll('#shTrades [data-trade]'), function (b) {
+      b.addEventListener('click', function () {
+        var on = b.classList.contains('on');
+        b.classList.toggle('on');
+        SHEET.trades = on
+          ? SHEET.trades.filter(function (k) { return k !== b.dataset.trade; })
+          : SHEET.trades.concat([b.dataset.trade]);
+      });
+    });
+  }
+
+  function wirePayBlocks() {
+    var scope = $('sheet2');
+    Array.prototype.forEach.call(scope.querySelectorAll('[data-paybasis]'), function (b) {
+      b.addEventListener('click', function () {
+        readSheet();
+        SHEET.plans[Number(b.dataset.paybasis)].basis = b.dataset.b;
+        drawSheet();
+      });
+    });
+  }
+
+  /** Whatever is on screen, back into SHEET, before anything redraws or saves. */
+  function readSheet() {
+    if (!SHEET) return;
+    if ($('shName')) SHEET.name = $('shName').value.trim();
+    if ($('shEmail')) SHEET.email = $('shEmail').value.trim();
+    if ($('shCode')) SHEET.code = $('shCode').value.trim();
+    if ($('shPass')) SHEET.password = $('shPass').value.trim();
+    if (SHEET.plans) {
+      SHEET.plans.forEach(function (pl, i) {
+        var pct = $('sheet2').querySelector('[data-paypct="' + i + '"]');
+        var nop = $('sheet2').querySelector('[data-paynopaint="' + i + '"]');
+        var rate = $('sheet2').querySelector('[data-payrate="' + i + '"]');
+        if (pct) pl.pctPaint = parseFloat(pct.value) || 0;
+        if (nop) pl.pctNoPaint = parseFloat(nop.value) || 0;
+        if (rate) pl.rateCents = dollarsToCents(rate.value);
+      });
+    }
+  }
+
+  function saveSheet() {
+    readSheet();
+    var s = SHEET;
+    if (!s.name) return shsay('A name is required.', true);
+    if (!s.roles.length) return shsay('Tick at least one role.', true);
+
+    var btn = $('shSave');
+    btn.disabled = true;
+
+    var work;
+    if (!s.id) {
+      work = api('/api/admin/people', {
+        method: 'POST',
+        body: JSON.stringify({
+          name: s.name,
+          email: s.email || undefined,
+          useCode: !s.email && !s.password,
+          password: s.password || undefined,
+          roles: s.roles,
+          positionKeys: s.trades,
+          employeeCode: s.code || undefined
+        })
+      }).then(function (r) {
+        var extra = (r.loginCode || r.code) ? ' Sign-in code: ' + (r.loginCode || r.code)
+          : r.tempPassword ? ' Temporary password: ' + r.tempPassword +
+            ' — they must change it at first sign-in.' : '';
+        say('Added.' + extra, 'ok');
+      });
+    } else {
+      var was = PEOPLE.people.filter(function (x) { return x.id === s.id; })[0] || {};
+      var jobs = [];
+      if (s.name !== was.name) {
+        jobs.push(['/api/admin/people/' + s.id + '/name', 'PATCH', { name: s.name }]);
+      }
+      if (s.email !== (was.email || '')) {
+        jobs.push(['/api/admin/people/' + s.id + '/email', 'PATCH', { email: s.email || null }]);
+      }
+      var body = {};
+      if (s.roles.join(',') !== rolesOf(was).join(',')) body.roles = s.roles;
+      if (s.trades.join(',') !== tradesOf(was).join(',')) body.positionKeys = s.trades;
+      if (s.code !== (was.employee_code || '')) body.employeeCode = s.code;
+      if (Object.keys(body).length) jobs.push(['/api/admin/people/' + s.id, 'PATCH', body]);
+      if (s.plans && RATES && RATES.canEdit) {
+        jobs.push(['/api/staff/' + s.id + '/pay-plans', 'PUT', { plans: s.plans }]);
+      }
+
+      /* In sequence, so a rejected email does not hide a saved role. */
+      work = jobs.reduce(function (chain, j) {
+        return chain.then(function () {
+          return api(j[0], { method: j[1], body: JSON.stringify(j[2]) });
+        });
+      }, Promise.resolve()).then(function () { say('Saved.', 'ok'); });
+    }
+
+    work.then(function () {
+      closeSheet();
+      return reloadPeople();
+    }).then(function () {
+      return api('/api/staff/rates').catch(function () { return RATES; });
+    }).then(function (r) {
+      RATES = r;
+      render();
+    }).catch(function (e) {
+      btn.disabled = false;
+      shsay(e.message, true);
     });
   }
 

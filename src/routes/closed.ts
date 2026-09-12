@@ -124,7 +124,7 @@ export async function registerClosed(app: FastifyInstance): Promise<void> {
 
     const result = await withTenantTx<CloseResult>(cid, async (c) => {
       const [rows] = await c.query<RowDataPacket[]>(`
-        SELECT r.id, r.ro_number, r.amount_cents, r.close_date, r.voided_at,
+        SELECT r.id, r.ro_number, r.amount_cents, r.paid_cents, r.close_date, r.voided_at,
                r.delivered_at, r.status_slot, ${LOOSE_ENDS}
         FROM repair_orders r WHERE r.id = ? FOR UPDATE`, [id]);
       const ro = rows[0];
@@ -141,7 +141,13 @@ export async function registerClosed(app: FastifyInstance): Promise<void> {
         };
       }
 
-      const paid = b.paid === true;
+      /* Paid is not a flag anybody sets any more: it is the balance reaching
+         zero. The close screen still asks "paid?", but what it does with a yes
+         is open the payment modal — by the time the close lands, the receipts
+         either cover the file or they do not. */
+      const approval = Number(ro.amount_cents) || 0;
+      const received = Number(ro.paid_cents) || 0;
+      const paid = approval > 0 && received >= approval;
       const date = isDate(b.closeDate) ? b.closeDate : suggestDate(ro);
 
       await c.query(`
@@ -153,14 +159,19 @@ export async function registerClosed(app: FastifyInstance): Promise<void> {
 
       await c.query(
         `INSERT INTO ro_notes (ro_id, kind, body, user_id, user_name) VALUES (?, 'auto', ?, ?, ?)`,
-        [id, `File closed, booked to ${date}. Marked ${paid ? 'paid' : 'not paid'}.` +
+        [id, `File closed, booked to ${date}. ` +
+             (paid
+               ? `Paid in full — ${(received / 100).toFixed(2)} received.`
+               : `${((approval - received) / 100).toFixed(2)} still owed.`) +
              (b.note && b.note.trim() ? ` ${b.note.trim()}` : ''),
          ctx.user.id, ctx.user.name]);
 
       await c.query(
         `INSERT INTO audit_log (user_id, user_name, entity, entity_id, action, detail)
          VALUES (?, ?, 'repair_order', ?, 'close', ?)`,
-        [ctx.user.id, ctx.user.name, id, JSON.stringify({ closeDate: date, paid })]);
+        [ctx.user.id, ctx.user.name, id,
+         JSON.stringify({ closeDate: date, paid, receivedCents: received,
+                          balanceCents: approval - received })]);
 
       return { code: 200, closeDate: date, paid };
     });
@@ -222,11 +233,10 @@ export async function registerClosed(app: FastifyInstance): Promise<void> {
       }
     }
 
-    if (b.paid !== undefined && (before.paid === 1) !== b.paid) {
-      sets.push('paid = ?', 'paid_at = IF(? = 1, NOW(), NULL)');
-      vals.push(b.paid ? 1 : 0, b.paid ? 1 : 0);
-      said.push(b.paid ? 'Marked paid' : 'Marked not paid');
-    }
+    /* Paid used to be a toggle in this dialog. It is now the balance, so the
+       only way to make a file paid is to record the money — the dialog offers
+       Record payment instead, and a stray `paid` in the body is ignored rather
+       than quietly overwriting what the receipts say. */
 
     if (!sets.length) return { ok: true, changed: false };
 

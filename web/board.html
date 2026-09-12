@@ -166,6 +166,59 @@
   .guardbody li { margin:2px 0; }
   .guardrow { display:flex; gap:9px; flex-wrap:wrap; }
 
+  /* ---- the money dialog: payments and flagging, over whatever is open ----
+     Deliberately not the big two-column .modal. These are short forms with one
+     job each, and they open on top of the drawer rather than replacing it. */
+  .mdlg {
+    position:fixed; top:50%; left:50%; transform:translate(-50%,-50%);
+    z-index:40; width:min(470px, calc(100vw - 28px)); max-height:calc(100vh - 40px);
+    overflow:auto; background:var(--bg); border:1px solid var(--line);
+    border-radius:7px; box-shadow:0 18px 44px rgba(0,0,0,.5);
+  }
+  .mdlg[hidden] { display:none; }
+  .mdhead { padding:14px 17px; border-bottom:1px solid var(--line); }
+  .mdtitle { font:500 14px var(--font); }
+  .mdsub { font:400 11.5px var(--font); color:var(--dim); margin-top:3px; }
+  .mdbody { padding:15px 17px; display:flex; flex-direction:column; gap:12px; }
+  .mdfoot {
+    padding:13px 17px; border-top:1px solid var(--line); background:var(--surf);
+    display:flex; align-items:center; gap:9px; flex-wrap:wrap;
+  }
+  .mdgrid { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+  .mdf { display:flex; flex-direction:column; gap:5px; }
+  .mdf .k { font:400 11px var(--font); color:var(--dim); }
+  .mdf input, .mdf select { width:100%; }
+  .mdrow {
+    display:flex; align-items:center; gap:10px; padding:10px 12px;
+    border:1px solid var(--line); border-radius:4px; background:var(--surf);
+  }
+  .mdrow.warn { border-color:rgba(208,126,111,.45); }
+  .mdlist { display:flex; flex-direction:column; }
+  .mdline {
+    display:flex; align-items:center; gap:9px; padding:8px 0;
+    border-top:1px solid var(--whisper); font:400 11.5px var(--font); color:var(--muted);
+  }
+  .mdnum { font-variant-numeric:tabular-nums; }
+  .mdseg { display:flex; border:1px solid var(--line); border-radius:4px; overflow:hidden; }
+  .mdseg button {
+    padding:7px 11px; font:500 11.5px var(--font); color:var(--muted);
+    background:transparent; border:0; cursor:pointer; min-height:32px;
+  }
+  .mdseg button.on { background:var(--acc); color:var(--bg); }
+  .mdtick {
+    width:18px; height:18px; border-radius:4px; border:1px solid var(--line);
+    background:transparent; color:var(--bg); font:500 11px var(--font);
+    display:grid; place-items:center; cursor:pointer; padding:0; flex:none;
+  }
+  .mdtick.on { background:var(--acc); border-color:var(--acc); }
+  .ptag2 {
+    font:500 10px var(--font); letter-spacing:.07em; text-transform:uppercase;
+    padding:2px 6px; border-radius:3px; white-space:nowrap;
+  }
+  .ptag2.ok { color:#a9d8c2; background:rgba(111,174,140,.16); border:1px solid rgba(111,174,140,.34); }
+  .ptag2.no { color:#f0bdb2; background:rgba(208,126,111,.2); border:1px solid rgba(208,126,111,.5); }
+  .ptag2.part { color:var(--acc2); border:1px solid rgba(217,164,65,.45); }
+
   /* ---- modal: centred, wide, two columns like the mockup ---- */
   .modal {
     position:fixed; inset:24px; z-index:30; display:none;
@@ -561,6 +614,8 @@
 </main>
 
 <div class="scrim" id="scrim"></div>
+
+<div class="mdlg" id="mdlg" hidden role="dialog" aria-modal="true" aria-label="Money"></div>
 
 <div class="guard" id="guard" hidden>
   <div class="guardcard">
@@ -1867,6 +1922,9 @@
 
   function closeRo() {
     $('guard').hidden = true;
+    var md = $('mdlg');
+    if (md) { md.hidden = true; md.innerHTML = ''; }
+    MONEY = null; FLAGS = null;
     OPEN = null;
     $('scrim').classList.remove('open');
     $('drawer').classList.remove('open');
@@ -2356,9 +2414,7 @@
           '<label class="row" style="gap:7px;align-items:center">' +
           '<span class="sub" style="text-transform:none;letter-spacing:0">Close date</span>' +
           '<input type="date" id="clDate" value="' + esc(String(r.close_date).slice(0, 10)) + '"></label>' +
-          '<select id="clPaid">' +
-          '<option value="1"' + (r.paid ? ' selected' : '') + '>Paid</option>' +
-          '<option value="0"' + (r.paid ? '' : ' selected') + '>Not paid</option></select></div>' +
+          '</div>' +
           '<div class="row" style="justify-content:flex-end;gap:9px">' +
           (d.canUnclose ? '<button class="btn" id="unClose">Reopen this file</button>' : '') +
           '<button class="btn btn-solid" id="saveClose">Save</button></div></div>');
@@ -2376,14 +2432,15 @@
         LAST.push('<div class="stack">' +
           '<span class="sub" style="text-transform:none;letter-spacing:0">Books ' +
           esc(money(r.amount_cents)) + ' to the close date and takes the car off the production ' +
-          'schedule. Marking it unpaid still closes it — it shows as unpaid on the closed board ' +
-          'so it can be chased.</span>' +
+          'schedule. Paid is not a box to tick here — it is what the payments add up to. ' +
+          'Closing with money still out is allowed; the file lands on the closed board as ' +
+          'unpaid so it can be chased.</span>' +
           '<div class="row" style="gap:9px;flex-wrap:wrap">' +
           '<label class="row" style="gap:7px;align-items:center">' +
           '<span class="sub" style="text-transform:none;letter-spacing:0">Close date</span>' +
           '<input type="date" id="clDate" value="' + esc(isoToday()) + '"></label>' +
-          '<select id="clPaid"><option value="1">Paid</option>' +
-          '<option value="0">Not paid</option></select></div>' +
+          '<span id="clBal" class="sub" style="text-transform:none;letter-spacing:0"></span>' +
+          '</div>' +
           '<div class="row" style="justify-content:flex-end">' +
           '<button class="btn btn-solid" id="doClose">Close RO ' + esc(r.ro_number) +
           '</button></div></div>');
@@ -2524,6 +2581,17 @@
     });
     }
 
+    /* Payments and flagging are filled in after the drawer paints — both are
+       their own endpoints, and neither should hold up the rest of the file. */
+    if (ME.caps.money) {
+      R.push('<div class="sec">Payments</div>');
+      R.push('<div id="paySec"><div class="sub">Loading…</div></div>');
+    }
+    if (ME.caps.labourMoney) {
+      R.push('<div class="sec">Labour</div>');
+      R.push('<div id="flagSec"><div class="sub">Loading…</div></div>');
+    }
+
     if (LAST.length) {
       R.push('<div style="margin-top:22px;padding-top:4px;border-top:1px solid var(--whisper)"></div>');
       R.push(LAST.join(''));
@@ -2533,6 +2601,7 @@
     fold($('dLeft'));
     fold($('dRight'));
     wireDrawer();
+    loadMoney();
   }
 
   /**
@@ -2623,9 +2692,15 @@
 
     var dc = $('doClose');
     if (dc) dc.addEventListener('click', function () {
-      var paid = $('clPaid').value === '1';
       var date = $('clDate').value;
       if (!date) return say('Pick a close date.', 'err');
+      /* Money still out? Ask for it here rather than closing and chasing. The
+         modal closes the file itself once the last payment is in; Close unpaid
+         is the other way through and is one click, not a hidden default. */
+      if (MONEY && MONEY.balance && MONEY.balance.balanceCents > 0 && ME.caps.editMoney) {
+        return openPayDlg({ closeDate: date });
+      }
+      var paid = !!(MONEY && MONEY.balance && MONEY.balance.paid);
       /* Owner and accounting get the sheet; everyone else closes straight through,
          because for them there is no sheet to show. */
       if (ME.caps.viewPayPlans) return openCloseout(OPEN, date, paid);
@@ -2692,8 +2767,7 @@
       if (!date) return say('Pick a close date.', 'err');
       sc.disabled = true;
       api('/api/ro/' + OPEN + '/close', {
-        method: 'PATCH',
-        body: JSON.stringify({ closeDate: date, paid: $('clPaid').value === '1' })
+        method: 'PATCH', body: JSON.stringify({ closeDate: date })
       }).then(function () {
         sc.disabled = false;
         say('Saved. Booked to ' + date + '.', 'ok');
@@ -3040,6 +3114,541 @@
     var p = $('colPanel');
     if (!p.hidden && !p.contains(e.target) && e.target.id !== 'colBtn') p.hidden = true;
   });
+
+  /* =====================================================================
+     Money on a file: what came in, and what the floor is owed.
+
+     Two ideas hold this together. **Paid is not a flag** — it is the balance
+     reaching zero, so nothing here offers a paid/not-paid toggle. And **techs
+     are flagged before the close**, not at it, so the close-out sheet reads a
+     decision the shop already made while the car was still here.
+     ===================================================================== */
+
+  var MONEY = null, FLAGS = null, MDLG = null;
+
+  function payMethodNeedsRef(m) { return m === 'check' || m === 'draft'; }
+  function refLabel(m) { return m === 'check' ? 'Check number' : 'Draft number'; }
+
+  function loadMoney() {
+    MONEY = null; FLAGS = null;
+    var id = OPEN;
+    if (ME.caps.money) {
+      api('/api/ro/' + id + '/payments').then(function (d) {
+        if (OPEN !== id) return;
+        MONEY = d;
+        renderPay();
+        paintCloseBalance();
+      }).catch(function (e) {
+        var el = $('paySec');
+        if (el) el.innerHTML = '<div class="sub">' + esc(e.message) + '</div>';
+      });
+    }
+    if (ME.caps.labourMoney) {
+      api('/api/ro/' + id + '/flags').then(function (d) {
+        if (OPEN !== id) return;
+        FLAGS = d;
+        renderFlags();
+      }).catch(function (e) {
+        var el = $('flagSec');
+        if (el) el.innerHTML = '<div class="sub">' + esc(e.message) + '</div>';
+      });
+    }
+  }
+
+  /** The close block says what is still owed, so the button is never a surprise. */
+  function paintCloseBalance() {
+    var el = $('clBal');
+    if (!el || !MONEY) return;
+    var b = MONEY.balance;
+    el.innerHTML = b.balanceCents > 0
+      ? '<span style="color:var(--stopped)">' + esc(money(b.balanceCents)) + ' outstanding</span>'
+      : '<span style="color:var(--done)">Paid in full</span>';
+  }
+
+  function renderPay() {
+    var el = $('paySec');
+    if (!el || !MONEY) return;
+    var b = MONEY.balance;
+    var live = MONEY.payments.filter(function (p) { return !p.voidedAt; });
+    var pct = b.approvalCents > 0
+      ? Math.min(100, Math.round((b.paidCents / b.approvalCents) * 100)) : 0;
+
+    var h = '<div class="stack">';
+
+    h += '<div class="row" style="gap:9px;align-items:baseline;flex-wrap:wrap">' +
+      '<span class="sub" style="text-transform:none;letter-spacing:0">' +
+      esc(money(b.paidCents)) + ' of ' + esc(money(b.approvalCents)) + ' in · ' +
+      live.length + (live.length === 1 ? ' receipt' : ' receipts') + '</span>' +
+      (MONEY.canRecord
+        ? '<button class="btn" id="payAdd" style="margin-left:auto">Record payment</button>'
+        : '') + '</div>';
+
+    h += '<div style="height:7px;border-radius:99px;background:var(--chip);overflow:hidden;display:flex">' +
+      '<div style="width:' + pct + '%;background:' +
+      (b.balanceCents <= 0 ? 'var(--done)' : 'var(--acc)') + '"></div></div>';
+
+    h += '<div class="row" style="justify-content:space-between;font:400 11.5px var(--font);color:var(--dim)">' +
+      '<span>' + esc(money(b.insurerCents)) + ' insurer · ' + esc(money(b.customerCents)) + ' customer</span>' +
+      (b.balanceCents > 0
+        ? '<span style="color:var(--stopped)">' + esc(money(b.balanceCents)) + ' out</span>'
+        : '<span style="color:var(--done)">nothing owed</span>') + '</div>';
+
+    if (!MONEY.payments.length) {
+      h += '<span class="sub" style="text-transform:none;letter-spacing:0">' +
+        'Nothing received yet.</span>';
+    }
+
+    MONEY.payments.forEach(function (p) {
+      var void_ = !!p.voidedAt;
+      h += '<div class="row" style="gap:9px;align-items:flex-start;padding:7px 0;' +
+        'border-top:1px solid var(--whisper)' + (void_ ? ';opacity:.55' : '') + '">' +
+        '<div style="flex:1;min-width:0">' +
+        '<div style="font:400 12.5px var(--font)' + (void_ ? ';text-decoration:line-through' : '') + '">' +
+        esc(p.methodLabel) + ' · ' + (p.payer === 'insurer' ? 'Insurer' : 'Customer') + '</div>' +
+        '<div style="font:400 11px var(--font);color:var(--dim)">' +
+        esc(p.receivedAt) + (p.reference ? ' · ' + esc(p.reference) : '') +
+        (p.recordedBy ? ' · ' + esc(p.recordedBy) : '') +
+        (void_ ? ' · voided: ' + esc(p.voidReason || '') : '') +
+        (p.note ? ' · ' + esc(p.note) : '') + '</div></div>' +
+        '<div class="mdnum" style="font:400 13px var(--font)">' + esc(money(p.amountCents)) + '</div>' +
+        (!void_ && MONEY.canRecord
+          ? '<button class="visbtn" data-payvoid="' + p.id + '" title="Void this payment">Void</button>'
+          : '') + '</div>';
+    });
+
+    h += '</div>';
+    el.innerHTML = h;
+
+    on('payAdd', 'click', function () { openPayDlg({}); });
+    Array.prototype.forEach.call(el.querySelectorAll('[data-payvoid]'), function (btn) {
+      btn.addEventListener('click', function () {
+        var why = prompt('Voiding leaves the row in the record and takes the money off the ' +
+          'balance. Why is it being voided?');
+        if (!why || !why.trim()) return;
+        api('/api/payments/' + btn.dataset.payvoid + '/void', {
+          method: 'POST', body: JSON.stringify({ reason: why.trim() })
+        }).then(function (d) {
+          MONEY.balance = d.balance;
+          MONEY.payments = d.payments;
+          renderPay();
+          paintCloseBalance();
+          Shell.announce('Payment voided.');
+          load();
+        }).catch(function (e) { alert(e.message); });
+      });
+    });
+  }
+
+  function renderFlags() {
+    var el = $('flagSec');
+    if (!el || !FLAGS) return;
+
+    var h = '<div class="stack">';
+    h += '<div class="row" style="gap:9px;align-items:baseline;flex-wrap:wrap">' +
+      '<span class="sub" style="text-transform:none;letter-spacing:0">' +
+      FLAGS.flagged + ' of ' + FLAGS.total + ' trades flagged' +
+      (FLAGS.flaggedCents ? ' · ' + esc(money(FLAGS.flaggedCents)) : '') + '</span>' +
+      (FLAGS.canFlag
+        ? '<button class="btn" id="flagOpen" style="margin-left:auto">Flag techs</button>'
+        : '') + '</div>';
+
+    if (!FLAGS.rows.length) {
+      h += '<span class="sub" style="text-transform:none;letter-spacing:0">' +
+        'Nobody is assigned to this file yet, so there is nothing to flag.</span>';
+    }
+
+    FLAGS.rows.forEach(function (r) {
+      h += '<div class="row" style="gap:9px;align-items:center;padding:7px 0;' +
+        'border-top:1px solid var(--whisper)">' +
+        '<span class="sub" style="width:52px;flex:none;text-transform:none;letter-spacing:0">' +
+        esc(r.label) + '</span>' +
+        '<span style="flex:1;min-width:0;font:400 12.5px var(--font)">' +
+        esc(r.name || 'Unassigned') + '</span>' +
+        '<span class="mdnum" style="font:400 12px var(--font);color:var(--muted)">' +
+        (r.basis === 'pct' ? r.pct + '%' : r.basis === 'flat' ? esc(money(r.flatCents)) : r.hours + ' hrs') +
+        '</span>' +
+        '<span class="ptag2 ' + (r.flagged ? 'ok' : 'no') + '">' +
+        (r.flagged ? 'Flagged' : 'Not flagged') + '</span></div>';
+    });
+
+    h += '<span class="sub" style="text-transform:none;letter-spacing:0">' +
+      esc(FLAGS.jobLabel) + ' · ' + esc(FLAGS.paintReason) +
+      (FLAGS.pctBaseCents !== FLAGS.approvalCents
+        ? ' · percentages run off ' + esc(money(FLAGS.pctBaseCents)) +
+          ', after ' + esc(money(FLAGS.partsCostCents)) + ' of parts at cost'
+        : '') + '</span>';
+    h += '</div>';
+    el.innerHTML = h;
+
+    on('flagOpen', 'click', openFlagDlg);
+  }
+
+  /* ------------------------------------------------------------- dialogs */
+
+  function openMdlg(html) {
+    MDLG = $('mdlg');
+    MDLG.innerHTML = html;
+    MDLG.hidden = false;
+    $('scrim').classList.add('open');
+    var first = MDLG.querySelector('input, select, button');
+    if (first) first.focus();
+  }
+
+  function closeMdlg() {
+    if (!MDLG) return;
+    MDLG.hidden = true;
+    MDLG.innerHTML = '';
+    /* The drawer is still open behind it, and owns the scrim. */
+    if (!OPEN) $('scrim').classList.remove('open');
+  }
+
+  function mdsay(t, bad) {
+    var el = $('mdMsg');
+    if (el) {
+      el.textContent = t;
+      el.style.color = bad ? 'var(--stopped)' : 'var(--done)';
+    }
+  }
+
+  /**
+   * One modal, three ways in: money arriving on an open file, the close out
+   * when the file is marked paid with a balance showing, and a closed file
+   * paying later. `opts.closeDate` is what makes it the close-out flavour.
+   */
+  function openPayDlg(opts) {
+    opts = opts || {};
+    var closing = !!opts.closeDate;
+    var b = MONEY.balance;
+    var owed = Math.max(0, b.balanceCents);
+
+    openMdlg(
+      '<div class="mdhead">' +
+        '<div class="mdtitle">' + (closing ? 'Closing RO ' + esc(MONEY.roNumber) : 'Record payment') + '</div>' +
+        '<div class="mdsub">' + (closing
+          ? esc(money(owed)) + ' is still owed. Enter every payment that came in — ' +
+            'Save and add another keeps the form open for the next check.'
+          : 'RO ' + esc(MONEY.roNumber) + ' · ' + esc(money(b.paidCents)) + ' of ' +
+            esc(money(b.approvalCents)) + ' received') + '</div>' +
+      '</div>' +
+      '<div class="mdbody">' +
+        '<div class="mdrow"><span class="sub" style="text-transform:none;letter-spacing:0">Balance</span>' +
+          '<span id="pdBal" class="mdnum" style="font:400 16px var(--font);color:' +
+          (owed > 0 ? 'var(--stopped)' : 'var(--done)') + '">' + esc(money(owed)) + '</span>' +
+          '<span class="sub" id="pdCount" style="margin-left:auto;text-transform:none;letter-spacing:0">' +
+          b.count + (b.count === 1 ? ' receipt' : ' receipts') + '</span></div>' +
+
+        '<div class="mdgrid">' +
+          '<div class="mdf"><div class="k">Amount</div>' +
+            '<div class="row" style="gap:6px">' +
+            '<input id="pdAmt" style="flex:1;min-width:0;text-align:right" value="' +
+              esc(dollars(owed)) + '">' +
+            '<button class="btn" id="pdAll" title="The whole balance">All</button></div></div>' +
+          '<div class="mdf"><div class="k">Received</div>' +
+            '<input type="date" id="pdDate" value="' + esc(isoToday()) + '"></div>' +
+          '<div class="mdf"><div class="k">Method</div><select id="pdMethod">' +
+            MONEY.methods.map(function (m) {
+              return '<option value="' + esc(m.key) + '">' + esc(m.label) + '</option>';
+            }).join('') + '</select></div>' +
+          '<div class="mdf"><div class="k">From</div>' +
+            '<div class="mdseg" id="pdPayer">' +
+            '<button type="button" data-payer="customer" class="on" style="flex:1">Customer</button>' +
+            '<button type="button" data-payer="insurer" style="flex:1">Insurer</button>' +
+            '</div></div>' +
+        '</div>' +
+
+        '<div class="mdf" id="pdRefWrap">' +
+          '<div class="k"><span id="pdRefK">Check number</span> ' +
+          '<span style="color:var(--acc2)">required</span></div>' +
+          '<input id="pdRef" placeholder="e.g. 10428"></div>' +
+        '<div class="mdf"><div class="k">Note <span style="opacity:.75">optional</span></div>' +
+          '<input id="pdNote" placeholder="Anything worth remembering about this payment"></div>' +
+
+        (closing
+          ? '<div class="mdf"><div class="k">Close date</div>' +
+            '<input type="date" id="pdClose" value="' + esc(opts.closeDate) + '"></div>' +
+            '<div id="pdBatch" class="mdlist"></div>'
+          : '') +
+
+        '<div class="sub" style="text-transform:none;letter-spacing:0">' +
+          'A check or draft number may pay several files, but not the same file twice — ' +
+          'that is how a payment entered twice gets caught.</div>' +
+        '<div class="msg" id="mdMsg"></div>' +
+      '</div>' +
+      '<div class="mdfoot">' +
+        '<button class="btn" id="pdCancel">' + (closing ? 'Back' : 'Cancel') + '</button>' +
+        (closing
+          ? '<button class="btn" id="pdUnpaid" style="margin-left:auto">Close unpaid</button>' +
+            '<button class="btn" id="pdAgain">Save and add another</button>' +
+            '<button class="btn btn-solid" id="pdSave">Record and close file</button>'
+          : '<button class="btn btn-solid" id="pdSave" style="margin-left:auto">Record payment</button>') +
+      '</div>');
+
+    var payer = 'customer';
+
+    function syncRef() {
+      var m = $('pdMethod').value;
+      $('pdRefWrap').hidden = !payMethodNeedsRef(m);
+      if (payMethodNeedsRef(m)) $('pdRefK').textContent = refLabel(m);
+    }
+    syncRef();
+
+    $('pdMethod').addEventListener('change', syncRef);
+    Array.prototype.forEach.call($('pdPayer').querySelectorAll('[data-payer]'), function (btn) {
+      btn.addEventListener('click', function () {
+        payer = btn.dataset.payer;
+        Array.prototype.forEach.call($('pdPayer').children, function (c) {
+          c.classList.toggle('on', c === btn);
+        });
+      });
+    });
+    on('pdAll', 'click', function () {
+      $('pdAmt').value = dollars(Math.max(0, MONEY.balance.balanceCents));
+    });
+    on('pdCancel', 'click', closeMdlg);
+
+    function body() {
+      return {
+        amountCents: toCents($('pdAmt').value),
+        method: $('pdMethod').value,
+        payer: payer,
+        reference: $('pdRef') ? $('pdRef').value.trim() : '',
+        note: $('pdNote').value.trim(),
+        receivedAt: $('pdDate').value
+      };
+    }
+
+    function record(then) {
+      var btns = MDLG.querySelectorAll('.mdfoot button');
+      Array.prototype.forEach.call(btns, function (b2) { b2.disabled = true; });
+      return api('/api/ro/' + OPEN + '/payments', {
+        method: 'POST', body: JSON.stringify(body())
+      }).then(function (d) {
+        MONEY.balance = d.balance;
+        MONEY.payments = d.payments;
+        renderPay();
+        paintCloseBalance();
+        Array.prototype.forEach.call(btns, function (b2) { b2.disabled = false; });
+        then(d);
+      }).catch(function (e) {
+        Array.prototype.forEach.call(btns, function (b2) { b2.disabled = false; });
+        mdsay(e.message, true);
+      });
+    }
+
+    /** In the close-out flavour, what has been entered so far, listed. */
+    function paintBatch() {
+      var el = $('pdBatch');
+      if (!el) return;
+      var owedNow = Math.max(0, MONEY.balance.balanceCents);
+      $('pdBal').textContent = money(owedNow);
+      $('pdBal').style.color = owedNow > 0 ? 'var(--stopped)' : 'var(--done)';
+      $('pdCount').textContent = MONEY.balance.count +
+        (MONEY.balance.count === 1 ? ' receipt' : ' receipts');
+      el.innerHTML = MONEY.payments.filter(function (p) { return !p.voidedAt; })
+        .slice(0, 4).map(function (p) {
+          return '<div class="mdline"><span style="flex:1">' + esc(p.receivedAt) + ' · ' +
+            esc(p.methodLabel) + (p.reference ? ' ' + esc(p.reference) : '') + '</span>' +
+            '<span class="mdnum">' + esc(money(p.amountCents)) + '</span></div>';
+        }).join('');
+    }
+
+    on('pdAgain', 'click', function () {
+      record(function () {
+        $('pdAmt').value = dollars(Math.max(0, MONEY.balance.balanceCents));
+        if ($('pdRef')) $('pdRef').value = '';
+        $('pdNote').value = '';
+        paintBatch();
+        mdsay('Recorded. Next one.');
+        $('pdAmt').focus();
+      });
+    });
+
+    on('pdUnpaid', 'click', function () {
+      closeMdlg();
+      proceedClose($('pdClose') ? $('pdClose').value : opts.closeDate);
+    });
+
+    on('pdSave', 'click', function () {
+      record(function () {
+        if (!closing) {
+          closeMdlg();
+          Shell.announce('Payment recorded.');
+          load();
+          return;
+        }
+        var date = $('pdClose').value;
+        closeMdlg();
+        proceedClose(date);
+      });
+    });
+  }
+
+  /**
+   * Closing, once the money question has been answered one way or the other.
+   * Owner and accounting still get the close-out sheet; everyone else closes
+   * straight through, because for them there is no sheet to show.
+   */
+  function proceedClose(date) {
+    if (!date) return;
+    if (ME.caps.viewPayPlans) {
+      return openCloseout(OPEN, date, !!(MONEY && MONEY.balance && MONEY.balance.paid));
+    }
+    api('/api/ro/' + OPEN + '/close', {
+      method: 'POST', body: JSON.stringify({ closeDate: date })
+    }).then(function () {
+      Shell.announce('Closed and booked to ' + date + '.');
+      closeRo();
+      load();
+    }).catch(function (e) { alert(e.message); });
+  }
+
+  /**
+   * Flagging. Each trade is entered the way it is paid — a percentage of the
+   * billed figure, a flat dollar amount, or hours at that person's rate — and
+   * the server prices it, so the browser never decides what anybody earns.
+   */
+  function openFlagDlg() {
+    var rows = FLAGS.rows.map(function (r) {
+      return {
+        positionKey: r.positionKey, label: r.label, userId: r.userId,
+        displayName: r.name, basis: r.basis, pct: r.pct, hours: r.hours,
+        flatCents: r.flatCents, rateCents: r.rateCents, flagged: r.flagged,
+        noPlan: r.noPlan
+      };
+    });
+
+    function valueOf(r) {
+      return r.basis === 'pct' ? r.pct : r.basis === 'flat' ? dollars(r.flatCents) : r.hours;
+    }
+
+    function draw() {
+      $('fgRows').innerHTML = rows.map(function (r, i) {
+        return '<div class="mdrow' + (r.noPlan && !r.flagged ? ' warn' : '') +
+          '" style="flex-direction:column;align-items:stretch;gap:9px">' +
+          '<div class="row" style="gap:10px;align-items:center">' +
+            '<button type="button" class="mdtick' + (r.flagged ? ' on' : '') +
+              '" data-fgtick="' + i + '" aria-pressed="' + (r.flagged ? 'true' : 'false') +
+              '" aria-label="Flag ' + esc(r.label) + '">' + (r.flagged ? '✓' : '') + '</button>' +
+            '<div style="flex:1;min-width:0">' +
+              '<div style="font:400 12.5px var(--font)">' + esc(r.displayName || 'Unassigned') +
+              ' <span style="color:var(--dim);font-size:11.5px">· ' + esc(r.label.toLowerCase()) +
+              '</span></div>' +
+              '<div style="font:400 11px var(--font);color:var(--dim)">' +
+              esc(r.noPlan || planNote(r)) + '</div>' +
+            '</div>' +
+          '</div>' +
+          '<div class="row" style="gap:8px;padding-left:28px;flex-wrap:wrap">' +
+            '<div class="mdseg">' +
+              '<button type="button" data-fgbasis="' + i + '" data-b="pct"' +
+                (r.basis === 'pct' ? ' class="on"' : '') + '>%</button>' +
+              '<button type="button" data-fgbasis="' + i + '" data-b="flat"' +
+                (r.basis === 'flat' ? ' class="on"' : '') + '>$</button>' +
+              '<button type="button" data-fgbasis="' + i + '" data-b="hours"' +
+                (r.basis === 'hours' ? ' class="on"' : '') + '>hrs</button>' +
+            '</div>' +
+            '<input data-fgval="' + i + '" style="width:96px;text-align:right" value="' +
+              esc(String(valueOf(r))) + '" aria-label="' + esc(r.label) + ' figure">' +
+            '<span class="sub mdnum" style="margin-left:auto;text-transform:none;letter-spacing:0">' +
+              'pays ' + esc(money(priceRow(r))) + '</span>' +
+          '</div>' +
+        '</div>';
+      }).join('');
+
+      $('fgTotal').textContent = money(rows.reduce(function (a, r) {
+        return a + (r.flagged ? priceRow(r) : 0);
+      }, 0)) + ' flagged';
+
+      Array.prototype.forEach.call($('fgRows').querySelectorAll('[data-fgtick]'), function (b) {
+        b.addEventListener('click', function () {
+          var r = rows[Number(b.dataset.fgtick)];
+          r.flagged = !r.flagged;
+          draw();
+        });
+      });
+      Array.prototype.forEach.call($('fgRows').querySelectorAll('[data-fgbasis]'), function (b) {
+        b.addEventListener('click', function () {
+          var r = rows[Number(b.dataset.fgbasis)];
+          r.basis = b.dataset.b;
+          draw();
+        });
+      });
+      Array.prototype.forEach.call($('fgRows').querySelectorAll('[data-fgval]'), function (inp) {
+        inp.addEventListener('change', function () {
+          var r = rows[Number(inp.dataset.fgval)];
+          var v = Number(inp.value) || 0;
+          if (r.basis === 'pct') r.pct = v;
+          else if (r.basis === 'flat') r.flatCents = toCents(inp.value);
+          else r.hours = v;
+          draw();
+        });
+      });
+    }
+
+    function planNote(r) {
+      return r.basis === 'pct'
+        ? r.pct + '% of ' + money(FLAGS.pctBaseCents) +
+          (FLAGS.hasPaint ? ' — paint on this file' : ' — body only')
+        : r.basis === 'flat'
+          ? 'A flat figure for this file'
+          : r.hours + ' hrs at ' + money(r.rateCents);
+    }
+
+    function priceRow(r) {
+      if (r.basis === 'flat') return Math.round(r.flatCents);
+      if (r.basis === 'pct') return Math.round(FLAGS.pctBaseCents * ((Number(r.pct) || 0) / 100));
+      return Math.round((Number(r.hours) || 0) * (Number(r.rateCents) || 0));
+    }
+
+    openMdlg(
+      '<div class="mdhead">' +
+        '<div class="mdtitle">Flag techs</div>' +
+        '<div class="mdsub">RO ' + esc(FLAGS.roNumber) + ' · ' + esc(FLAGS.jobLabel.toLowerCase()) +
+        ' · ' + esc(FLAGS.paintReason) + '</div>' +
+      '</div>' +
+      '<div class="mdbody">' +
+        '<div id="fgRows" style="display:flex;flex-direction:column;gap:10px"></div>' +
+        '<div class="mdrow"><span class="sub" style="text-transform:none;letter-spacing:0">' +
+          'Percentages run off ' + esc(money(FLAGS.pctBaseCents)) + '</span>' +
+          '<span class="sub mdnum" id="fgTotal" style="margin-left:auto;text-transform:none;letter-spacing:0"></span>' +
+        '</div>' +
+        '<div class="sub" style="text-transform:none;letter-spacing:0">' +
+          'One tech per trade, so one row per trade — a trade nobody is assigned to is not ' +
+          'listed. Ticking flags it and stamps who did it; both flagging and unflagging go ' +
+          'to the activity log, and a flag can be changed until the file closes.</div>' +
+        '<div class="msg" id="mdMsg"></div>' +
+      '</div>' +
+      '<div class="mdfoot">' +
+        '<button class="btn" id="fgAll">Flag all</button>' +
+        '<button class="btn" id="fgCancel" style="margin-left:auto">Cancel</button>' +
+        '<button class="btn btn-solid" id="fgSave">Save flags</button>' +
+      '</div>');
+
+    draw();
+
+    on('fgAll', 'click', function () {
+      rows.forEach(function (r) { r.flagged = true; });
+      draw();
+    });
+    on('fgCancel', 'click', closeMdlg);
+    on('fgSave', 'click', function () {
+      var btn = $('fgSave');
+      btn.disabled = true;
+      api('/api/ro/' + OPEN + '/flags', {
+        method: 'PUT', body: JSON.stringify({ rows: rows })
+      }).then(function (d) {
+        FLAGS.rows = d.rows;
+        FLAGS.flagged = d.flagged;
+        FLAGS.total = d.total;
+        FLAGS.flaggedCents = d.flaggedCents;
+        renderFlags();
+        closeMdlg();
+        Shell.announce(d.flagged + ' of ' + d.total + ' trades flagged.');
+      }).catch(function (e) {
+        btn.disabled = false;
+        mdsay(e.message, true);
+      });
+    });
+  }
 
   function on(id, ev, fn) {
     var el = $(id);

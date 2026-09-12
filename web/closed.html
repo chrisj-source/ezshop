@@ -118,6 +118,13 @@
   }
   .seg { display:flex; border:1px solid var(--line); border-radius:4px; overflow:hidden; }
   .segopt { flex:1; text-align:center; padding:10px 0; font:500 12px var(--font); color:var(--muted); background:transparent; border:none; }
+  .paybal { font:400 13px var(--font); font-variant-numeric:tabular-nums; color:var(--text); }
+  .paybal .out { color:#f0bdb2; }
+  .paybal .in { color:#a9d8c2; }
+  .paybal .sub2 { display:block; font:400 11px var(--font); color:var(--dim); margin-top:3px; }
+  .payg { display:grid; grid-template-columns:1fr 1fr; gap:9px; margin-top:10px; }
+  .payg label, #dlgPayForm label { font:400 11px var(--font); color:var(--dim); }
+  .dinput.num { text-align:right; font-variant-numeric:tabular-nums; }
   .segopt.on.paid { background:rgba(111,174,140,.18); color:#a9d8c2; }
   .segopt.on.un { background:rgba(208,126,111,.18); color:#f0bdb2; }
   .dfoot { display:flex; align-items:center; gap:9px; padding:14px 18px; border-top:1px solid var(--line); }
@@ -178,9 +185,37 @@
     </div>
     <div>
       <div class="flabel">Payment</div>
-      <div class="seg">
-        <button class="segopt paid" id="dlgPaid">Paid</button>
-        <button class="segopt un" id="dlgUnpaid">Not paid</button>
+      <div id="dlgBal" class="paybal">—</div>
+      <div id="dlgPayForm" hidden>
+        <div class="payg">
+          <label>Amount<input class="dinput num" id="pyAmt"></label>
+          <label>Received<input class="dinput" type="date" id="pyDate"></label>
+          <label>Method<select class="dinput" id="pyMethod">
+            <option value="check">Check</option>
+            <option value="cash">Cash</option>
+            <option value="card">Card</option>
+            <option value="draft">Insurance draft / EFT</option>
+            <option value="writeoff">Write-off / discount</option>
+          </select></label>
+          <label>From<select class="dinput" id="pyPayer">
+            <option value="customer">Customer</option>
+            <option value="insurer">Insurer</option>
+          </select></label>
+        </div>
+        <label id="pyRefWrap" style="display:block;margin-top:9px">
+          <span id="pyRefK">Check number</span>
+          <input class="dinput" id="pyRef" placeholder="e.g. 10428">
+        </label>
+        <label style="display:block;margin-top:9px">Note — optional
+          <input class="dinput" id="pyNote" placeholder="Anything worth remembering"></label>
+      </div>
+      <div class="row" style="margin-top:9px;display:flex;gap:8px">
+        <button class="ghostbtn" id="dlgPayOpen">Record payment</button>
+        <button class="btn" id="dlgPaySave" hidden>Record</button>
+      </div>
+      <div style="font:400 10.5px/1.45 var(--font);color:var(--dim);margin-top:7px">
+        Paid is what the payments add up to, not a box to tick. The close date does not
+        move when money arrives — the payment carries its own received date.
       </div>
     </div>
     <div class="msg" id="dlgMsg"></div>
@@ -200,7 +235,7 @@
   var ROWS = [], TOTALS = {}, REPORT = null;
   var PAID = 'all', GROUP = false, SORT = 'close_date', CUT = 'month';
   var FROM = '', TO = '';
-  var EDIT = null, EDITPAID = true;
+  var EDIT = null, PAYSTATE = null;
 
   function $(id) { return document.getElementById(id); }
 
@@ -501,13 +536,12 @@
     var r = ROWS.filter(function (x) { return x.id === id; })[0];
     if (!r) return;
     EDIT = r;
-    EDITPAID = r.paid === true;
     $('dlgTitle').textContent = 'RO ' + r.ro_number;
     $('dlgSub').textContent = (r.vehicle || 'Vehicle unknown') + ' · ' + (r.customer || 'No customer');
     $('dlgDate').value = String(r.close_date).slice(0, 10);
     $('dlgMsg').textContent = '';
     $('dlgMsg').className = 'msg';
-    paintSeg();
+    loadPayments(r.id);
     /* Reopening is the only way back off the books, and a closed file cannot be
        reached from the board — so the control belongs here. */
     $('dlgReopen').hidden = !ME.caps.uncloseRepairOrders;
@@ -515,9 +549,37 @@
     $('dlg').hidden = false;
   }
 
-  function paintSeg() {
-    $('dlgPaid').className = 'segopt paid' + (EDITPAID ? ' on' : '');
-    $('dlgUnpaid').className = 'segopt un' + (EDITPAID ? '' : ' on');
+  /* A closed file that pays later gets the same modal the board has, cut down:
+     everything this screen can do about money is take some. */
+  function loadPayments(id) {
+    PAYSTATE = null;
+    $('dlgBal').textContent = 'Loading…';
+    $('dlgPayForm').hidden = true;
+    $('dlgPaySave').hidden = true;
+    api('/api/ro/' + id + '/payments').then(function (d) {
+      if (!EDIT || EDIT.id !== id) return;
+      PAYSTATE = d;
+      paintBalance();
+      $('dlgPayOpen').hidden = !d.canRecord || d.balance.balanceCents <= 0;
+    }).catch(function (e) {
+      $('dlgBal').textContent = e.message;
+      $('dlgPayOpen').hidden = true;
+    });
+  }
+
+  function paintBalance() {
+    var b = PAYSTATE.balance;
+    var live = PAYSTATE.payments.filter(function (p) { return !p.voidedAt; });
+    $('dlgBal').innerHTML = (b.balanceCents > 0
+      ? '<span class="out">' + esc(usd(b.balanceCents)) + ' owed</span>'
+      : '<span class="in">Paid in full</span>') +
+      '<span class="sub2">' + esc(usd(b.paidCents)) + ' of ' + esc(usd(b.approvalCents)) +
+      ' received' + (live.length
+        ? ' · ' + live.map(function (p) {
+            return esc(p.receivedAt) + ' ' + esc(p.methodLabel) +
+              (p.reference ? ' ' + esc(p.reference) : '') + ' ' + esc(usd(p.amountCents));
+          }).join(' · ')
+        : ' · nothing recorded') + '</span>';
   }
 
   function closeEdit() {
@@ -526,8 +588,62 @@
     EDIT = null;
   }
 
-  $('dlgPaid').addEventListener('click', function () { EDITPAID = true; paintSeg(); });
-  $('dlgUnpaid').addEventListener('click', function () { EDITPAID = false; paintSeg(); });
+  function syncRef() {
+    var m = $('pyMethod').value;
+    var needs = m === 'check' || m === 'draft';
+    $('pyRefWrap').hidden = !needs;
+    if (needs) $('pyRefK').textContent = m === 'check' ? 'Check number' : 'Draft number';
+  }
+  $('pyMethod').addEventListener('change', syncRef);
+
+  $('dlgPayOpen').addEventListener('click', function () {
+    if (!PAYSTATE) return;
+    $('dlgPayForm').hidden = false;
+    $('dlgPaySave').hidden = false;
+    this.hidden = true;
+    $('pyAmt').value = (Math.max(0, PAYSTATE.balance.balanceCents) / 100).toFixed(2);
+    $('pyDate').value = new Date().toISOString().slice(0, 10);
+    syncRef();
+    $('pyAmt').focus();
+  });
+
+  $('dlgPaySave').addEventListener('click', function () {
+    if (!EDIT) return;
+    var btn = this;
+    btn.disabled = true;
+    api('/api/ro/' + EDIT.id + '/payments', {
+      method: 'POST',
+      body: JSON.stringify({
+        amountCents: Math.round(Number($('pyAmt').value || 0) * 100),
+        method: $('pyMethod').value,
+        payer: $('pyPayer').value,
+        reference: $('pyRef').value.trim(),
+        note: $('pyNote').value.trim(),
+        receivedAt: $('pyDate').value
+      })
+    }).then(function (d) {
+      btn.disabled = false;
+      PAYSTATE.balance = d.balance;
+      PAYSTATE.payments = d.payments;
+      paintBalance();
+      $('pyRef').value = '';
+      $('pyNote').value = '';
+      $('pyAmt').value = (Math.max(0, d.balance.balanceCents) / 100).toFixed(2);
+      if (d.balance.balanceCents <= 0) {
+        $('dlgPayForm').hidden = true;
+        $('dlgPaySave').hidden = true;
+      }
+      $('dlgMsg').textContent = d.balance.balanceCents > 0
+        ? 'Recorded. ' + usd(d.balance.balanceCents) + ' still owed.'
+        : 'Recorded. This file is paid.';
+      $('dlgMsg').className = 'msg ok';
+      return load();
+    }).catch(function (e) {
+      btn.disabled = false;
+      $('dlgMsg').textContent = e.message;
+      $('dlgMsg').className = 'msg err';
+    });
+  });
 
   $('dlgReopen').addEventListener('click', function () {
     if (!EDIT) return;
@@ -554,7 +670,7 @@
     btn.disabled = true;
     api('/api/ro/' + EDIT.id + '/close', {
       method: 'PATCH',
-      body: JSON.stringify({ closeDate: $('dlgDate').value, paid: EDITPAID })
+      body: JSON.stringify({ closeDate: $('dlgDate').value })
     }).then(function () {
       btn.disabled = false;
       closeEdit();
