@@ -90,8 +90,15 @@
   function $(id) { return document.getElementById(id); }
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
     return { '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]; }); }
+  /* Only declare a JSON body when there is one. Fastify refuses an empty body
+     on a content-type of application/json — the same trap that once made
+     cancelling an appointment silently do nothing, and here it broke every
+     POST that needs no arguments: Reset now, New Tester password, Enter. */
   function api(p, o) {
-    return fetch(p, Object.assign({ headers: { 'content-type': 'application/json' } }, o || {}))
+    var opts = Object.assign({}, o || {});
+    opts.headers = Object.assign({}, opts.headers || {});
+    if (opts.body != null) opts.headers['content-type'] = 'application/json';
+    return fetch(p, opts)
       .then(function (r) {
         if (r.status === 401) { location.href = '/'; throw new Error('out'); }
         return r.json().then(function (j) { if (!r.ok) throw new Error(j.error); return j; });
@@ -268,7 +275,7 @@
     $('dmPw').addEventListener('click', function () {
       var btn = this;
       btn.disabled = true;
-      api('/api/platform/demo/tester-password', { method: 'POST', body: JSON.stringify({}) })
+      api('/api/platform/demo/tester-password', { method: 'POST' })
         .then(function (r) {
           btn.disabled = false;
           paneMsg('Tester password is now ' + r.password + ' \u2014 write it down, it is shown once.');
@@ -325,9 +332,7 @@
 
       Array.prototype.forEach.call($('pane').querySelectorAll('[data-pw]'), function (b) {
         b.addEventListener('click', function () {
-          api('/api/platform/people/' + b.dataset.pw + '/password', {
-            method: 'POST', body: JSON.stringify({})
-          }).then(function (r) { paneMsg('New password: ' + r.password + ' \u2014 ' + r.note); })
+          api('/api/platform/people/' + b.dataset.pw + '/password', { method: 'POST' }).then(function (r) { paneMsg('New password: ' + r.password + ' \u2014 ' + r.note); })
             .catch(function (e) { paneMsg(e.message, true); });
         });
       });
