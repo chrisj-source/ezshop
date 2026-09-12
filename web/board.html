@@ -285,17 +285,35 @@
     color:var(--acc2); padding:15px 18px 8px;
   }
   .cosub { font:400 10.5px/1.5 var(--font); color:var(--dim); padding:0 18px 8px; max-width:620px; }
+  /* Six columns for three facts, and Tech and Trade collided on any long name
+     — "Chuy Alverez (also body)Paint". The trade is a chip beside the name now,
+     the rate is the sentence under it, and what you type sits next to the money
+     it makes. */
   .labhead, .labrow {
-    display:grid; grid-template-columns:126px 74px 152px 172px 66px 88px;
-    column-gap:12px; align-items:center; padding:0 18px;
+    display:grid; grid-template-columns:1fr 104px 160px;
+    column-gap:14px; align-items:center; padding:0 18px;
   }
   .labhead {
     height:26px; border-top:1px solid var(--line); border-bottom:1px solid var(--line);
     font:600 8.5px var(--font); letter-spacing:.11em; text-transform:uppercase; color:var(--dim);
   }
-  .labrow { height:40px; border-bottom:1px solid var(--whisper); }
-  .labrow .who { font:500 12px var(--font); white-space:nowrap; }
+  .labrow { min-height:48px; padding-top:7px; padding-bottom:7px; border-bottom:1px solid var(--whisper); }
+  .labrow .who { font:500 12px var(--font); }
+  .labrow .whowrap { display:flex; align-items:center; gap:6px; flex-wrap:wrap; min-width:0; }
+  .labrow .tradechip {
+    font:500 8.5px var(--font); letter-spacing:.08em; text-transform:uppercase;
+    color:var(--acc2); border:1px solid rgba(217,164,65,.45); border-radius:3px;
+    padding:1px 5px; white-space:nowrap;
+  }
+  /* How the cost was arrived at, in words: "6.2 hrs at $34.50", "12.5% of
+     $4,582.19". It replaces a Rate column that read "—" on most rows. */
+  .labrow .basisline { font:400 10.5px/1.45 var(--font); color:var(--dim); margin-top:3px; }
+  .labrow .basisline.none { color:var(--stopped); }
   .labrow .tr { font:400 11px var(--font); color:var(--dim); white-space:nowrap; }
+  .labrow select {
+    width:100%; font:500 11px var(--font); padding:5px 7px; min-height:30px;
+  }
+  .labfig { display:flex; justify-content:flex-end; align-items:center; gap:9px; }
   .labrow input {
     width:64px; text-align:right; font-variant-numeric:tabular-nums;
     font:500 12px var(--font); padding:5px 8px;
@@ -352,7 +370,7 @@
   }
   .conote.warn { border-left-color:var(--stopped); }
   @media (max-width:760px) {
-    .labhead, .labrow { grid-template-columns:1fr 120px 96px; }
+    .labhead, .labrow { grid-template-columns:1fr 84px 132px; }
     .labhead .hide-sm, .labrow .hide-sm { display:none; }
   }
   .savehint {
@@ -3839,12 +3857,11 @@
       out.push('<div class="conote warn">Nobody is assigned to this car, so there is no labour on it. ' +
         'Assign a tech on the file if that is wrong.</div>');
     } else {
-      out.push('<div class="cosub">Hours at their rate, a flat dollar, or the estimate’s own hours. ' +
-        'PDR can take a share of the job instead.</div>');
+      out.push('<div class="cosub">Each trade is paid the way its plan says — hours at their rate, ' +
+        'a flat dollar, a percentage of what was billed, or the estimate’s own hours. ' +
+        'Anything flagged on the floor arrives already settled.</div>');
       out.push('<div class="labhead">' +
-        '<div>Tech</div><div class="hide-sm">Trade</div><div>Basis</div>' +
-        '<div style="text-align:right">Figure</div>' +
-        '<div class="hide-sm" style="text-align:right">Rate</div>' +
+        '<div>Who</div><div>Paid on</div>' +
         '<div style="text-align:right">Cost</div></div>');
 
       CO.labour.forEach(function (e, i) {
@@ -3854,38 +3871,36 @@
         var noRate = !pct && !flat && !e.rateCents;
         var shown = flat ? dollars(e.hours) : (pct ? e.ratePct : e.hours);
 
+        /* The name arrives carrying the other trades this person works —
+           "Chuy Alverez  (also body)". Split it: the name stays, the rest goes
+           to the quiet line so nothing collides. */
+        var parts = String(e.displayName || 'Unassigned').split(/\s*\(also\s*/);
+        var name = parts[0].trim();
+        var also = parts[1] ? 'also ' + parts[1].replace(/\)\s*$/, '') : '';
+
         out.push('<div class="labrow">' +
-          '<div class="who">' + esc(e.displayName || 'Unassigned') +
-            (e.flaggedAt
-              ? ' <span class="ptag2 ok" title="Flagged' +
-                (e.flaggedBy ? ' by ' + esc(e.flaggedBy) : '') + '">flagged</span>'
-              : '') + '</div>' +
-          '<div class="tr hide-sm">' + esc(e.label) + '</div>' +
-          '<div><div class="segsm">' +
-            /* PDR's share is of the whole job, so it offers a dollar or a
-               percentage and nothing else. Every other trade can now be on a
-               percentage too — from a pay plan — so it keeps hours and the
-               estimate's own figure alongside it. */
-            (e.canPct && e.isPdr
-              ? '<button class="' + (flat ? 'on' : '') + '" data-b="flat" data-i="' + i + '">$</button>' +
-                '<button class="' + (pct ? 'on' : '') + '" data-b="pct" data-i="' + i + '">%</button>'
-              : '<button class="' + (e.basis === 'hours' ? 'on' : '') + '" data-b="hours" data-i="' + i + '">Hours</button>' +
-                '<button class="' + (flat ? 'on' : '') + '" data-b="flat" data-i="' + i + '">$</button>' +
-                (e.canPct
-                  ? '<button class="' + (pct ? 'on' : '') + '" data-b="pct" data-i="' + i + '">%</button>'
-                  : '') +
-                '<button class="' + (ems ? 'on' : '') + '" data-b="ems" data-i="' + i + '">EMS</button>') +
-          '</div></div>' +
-          '<div style="display:flex;justify-content:flex-end;align-items:center;gap:6px">' +
+          '<div>' +
+            '<div class="whowrap">' +
+              '<span class="who">' + esc(name) + '</span>' +
+              '<span class="tradechip">' + esc(e.label) + '</span>' +
+              (e.flaggedAt
+                ? '<span class="ptag2 ok" title="Flagged' +
+                  (e.flaggedBy ? ' by ' + esc(e.flaggedBy) : '') + '">flagged</span>'
+                : '') +
+            '</div>' +
+            '<div class="basisline' + (noRate ? ' none' : '') + '">' +
+              esc(coBasisLine(e, also, noRate)) + '</div>' +
+          '</div>' +
+          '<div><select data-b2="' + i + '" aria-label="How ' + esc(name) + ' is paid on this file">' +
+            coBasisOptions(e) + '</select></div>' +
+          '<div class="labfig">' +
             (flat ? '<span class="tr">$</span>' : '') +
             '<input class="' + (flat ? 'wide' : '') + '" data-v="' + i + '" value="' + esc(String(shown)) +
-              '"' + (ems ? ' disabled' : '') + '>' +
+              '"' + (ems ? ' disabled' : '') +
+              ' aria-label="' + esc(name) + ' figure">' +
             (pct ? '<span class="tr">%</span>' : '') +
-            (ems ? '<span class="tr">' + (e.emsHours > 0 ? 'pulled' : 'nothing to pull') + '</span>' : '') +
+            '<span class="ct" style="min-width:66px">' + money(coCostOf(e)) + '</span>' +
           '</div>' +
-          '<div class="rt hide-sm' + (noRate ? ' none' : '') + '">' +
-            (pct || flat ? '—' : (e.rateCents ? money(e.rateCents) + '/hr' : 'none set')) + '</div>' +
-          '<div class="ct">' + money(coCostOf(e)) + '</div>' +
         '</div>');
 
         if (pct) {
@@ -3968,12 +3983,48 @@
     return Math.round((Number(e.hours) || 0) * (Number(e.rateCents) || 0));
   }
 
+  /**
+   * How this row is paid, as a sentence. It carries the rate — which used to be
+   * a column of dashes — and the other trades the person works.
+   */
+  function coBasisLine(e, also, noRate) {
+    var bits = [];
+    if (also) bits.push(also);
+    if (e.basis === 'pct') {
+      var base = Math.max(0, (CO.approvalCents || 0) - (CO.partsCostCents || 0));
+      bits.push(e.positionKey === 'pdr'
+        ? e.ratePct + '% ' + (e.pctAfterCosts ? 'of what is left' : 'of the approval')
+        : e.ratePct + '% of ' + money(base) + ', after parts at cost');
+    } else if (e.basis === 'flat') {
+      bits.push('a flat figure for this car');
+    } else if (noRate) {
+      bits.push('no rate set — enter a flat figure, or set one on their person sheet');
+    } else {
+      bits.push((e.hours || 0) + ' hrs at ' + money(e.rateCents) +
+        (e.basis === 'ems' ? ', pulled from the estimate' : ''));
+    }
+    return bits.join(' · ');
+  }
+
+  /** Four ways to be paid is one too many for buttons, so it is a select. */
+  function coBasisOptions(e) {
+    var opts = e.isPdr
+      ? [['flat', '$ flat'], ['pct', '% share']]
+      : [['hours', 'Hours'], ['flat', '$ flat']]
+          .concat(e.canPct ? [['pct', '% of billed']] : [])
+          .concat([['ems', 'EMS hours']]);
+    return opts.map(function (o) {
+      return '<option value="' + o[0] + '"' + (e.basis === o[0] ? ' selected' : '') + '>' +
+        o[1] + '</option>';
+    }).join('');
+  }
+
   function coWire() {
-    Array.prototype.forEach.call($('coBody').querySelectorAll('.segsm button[data-b]'), function (b) {
-      b.addEventListener('click', function () {
-        var e = CO.labour[Number(b.dataset.i)];
+    Array.prototype.forEach.call($('coBody').querySelectorAll('select[data-b2]'), function (sel) {
+      sel.addEventListener('change', function () {
+        var e = CO.labour[Number(sel.dataset.b2)];
         var was = e.basis;
-        e.basis = b.dataset.b;
+        e.basis = sel.value;
         /* Switching to hours or EMS means the figure was a dollar amount and is
            now hours — carry across what makes sense rather than a wrong number. */
         if (e.basis === 'ems') e.hours = e.emsHours || 0;
