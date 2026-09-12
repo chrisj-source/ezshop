@@ -97,6 +97,24 @@ export const config = {
     maxUploads: Number(process.env.DEMO_MAX_UPLOADS ?? 40)
   },
 
+  /**
+   * Mail. Resend does the delivery — the domain's SPF and DKIM live there —
+   * and the key never appears in the repository: it is read from the
+   * environment and nothing logs it.
+   */
+  mail: {
+    apiKey: process.env.RESEND_API_KEY ?? '',
+    from: process.env.MAIL_FROM ?? 'donotreply@easyshopauto.com',
+    /** Nothing on the droplet receives, so a reply has to go somewhere real. */
+    replyTo: process.env.MAIL_REPLY_TO ?? 'admin@easyshopauto.com',
+    /** No more than one notification email per person in this many minutes. */
+    throttleMinutes: Number(process.env.MAIL_THROTTLE_MINUTES ?? 15),
+    /** Failures in a row before the platform log says sending is broken. */
+    alertAfter: Number(process.env.MAIL_ALERT_AFTER ?? 5),
+    /** How long a password-reset link is good for. One use, either way. */
+    resetHours: Number(process.env.MAIL_RESET_HOURS ?? 1)
+  },
+
   media: {
     /** Jobs at once. Two is right for a shop box; raise it if the box is idle. */
     concurrency: Number(process.env.MEDIA_CONCURRENCY ?? 2),

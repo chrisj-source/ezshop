@@ -131,6 +131,8 @@ CREATE TABLE IF NOT EXISTS users (
   login_code_expires DATETIME     NULL,
   name              VARCHAR(120)  NOT NULL,
   phone             VARCHAR(32)   NULL,
+  email_opt_in      TINYINT(1)    NOT NULL DEFAULT 0 COMMENT 'mirror notifications to email',
+  last_email_at     DATETIME      NULL COMMENT 'throttle stamp for notification email',
   is_platform_owner TINYINT(1)    NOT NULL DEFAULT 0,
   platform_role     ENUM('none','admin','root') NOT NULL DEFAULT 'none'
                     COMMENT 'none | admin (runs the platform) | root (break-glass, ROOT_ENABLED only)',
@@ -218,3 +220,16 @@ CREATE TABLE IF NOT EXISTS platform_audit (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 SET FOREIGN_KEY_CHECKS = 1;
+
+-- Which events are worth an email, per person. Absent means off: the eight
+-- kinds of notification are not equal, and one switch for all of them is how
+-- somebody ends up turning the useful ones off with the rest.
+CREATE TABLE IF NOT EXISTS user_email_events (
+  user_id     BIGINT UNSIGNED NOT NULL,
+  event_key   VARCHAR(40)   NOT NULL,
+  enabled     TINYINT(1)    NOT NULL DEFAULT 1,
+  scope       ENUM('all','mine') NOT NULL DEFAULT 'mine'
+              COMMENT 'status.change only: every file, or the ones they are on',
+  updated_at  DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (user_id, event_key)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

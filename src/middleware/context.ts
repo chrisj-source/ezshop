@@ -99,7 +99,8 @@ export async function attachContext(req: FastifyRequest): Promise<void> {
   if (!sess) return;
 
   const user = await mqOne<UserRow>(
-    `SELECT id, email, name, is_platform_owner, platform_role, status, must_change_pw
+    `SELECT id, email, name, is_platform_owner, platform_role, status, must_change_pw,
+            email_opt_in
        FROM users WHERE id = ?`,
     [sess.user_id]
   );

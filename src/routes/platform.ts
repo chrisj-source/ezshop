@@ -7,6 +7,7 @@ import { hashPassword, randomPassword } from '../auth/password';
 import { revokeAllForUser } from '../auth/session';
 import { config } from '../config';
 import { demoCompany, resetDemo, setDemoTesterPassword } from '../lib/demo';
+import { mailHealth } from '../lib/mail';
 import { revokeAllForCompany, switchSessionCompany } from '../auth/session';
 import { forgetTenant } from '../db/tenant';
 import { ShopType } from '../db/status-template';
@@ -24,6 +25,8 @@ export async function registerPlatform(app: FastifyInstance): Promise<void> {
       /* Shown on the platform screen so it is obvious whether the break-glass
          door is standing open. */
       rootEnabled: config.rootEnabled,
+      /* Email cannot report its own outage by email, so it reports here. */
+      mail: mailHealth(),
       demo: demo ? {
         companyId: demo.id, name: demo.name, slug: demo.slug,
         resetAt: demo.demo_reset_at ?? null

@@ -123,6 +123,15 @@
     PLAT = p;
     /* Root is the account nobody uses until something has gone wrong, so it
        says so on every screen for as long as the session lasts. */
+    if (p && p.mail && (p.mail.alerting || !p.mail.configured)) {
+      var bar = document.createElement('div');
+      bar.style.cssText = 'background:rgba(208,126,111,.16);border-bottom:1px solid ' +
+        'rgba(208,126,111,.5);padding:9px 16px;font:500 11.5px var(--font);color:#f0bdb2';
+      bar.textContent = p.mail.configured
+        ? 'Email is failing — ' + p.mail.failStreak + ' sends in a row have not gone out.'
+        : 'Email is switched off on this box: no RESEND_API_KEY in .env.';
+      document.querySelector('.main').before(bar);
+    }
     if (p) {
       $('rootbar').hidden = p.role !== 'root';
       $('peopleBtn').hidden = p.role !== 'root';

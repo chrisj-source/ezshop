@@ -30,6 +30,18 @@
     display:grid; place-items:center; font:500 15px var(--font); color:var(--acc); flex:none;
   }
   @media (max-width:620px) { .frow.two { grid-template-columns:1fr; } }
+  .tick {
+    width:18px; height:18px; flex:none; margin-top:1px; border-radius:4px;
+    border:1px solid var(--line); background:transparent; color:var(--bg);
+    font:500 11px var(--font); display:grid; place-items:center; cursor:pointer; padding:0;
+  }
+  .tick.on { background:var(--acc); border-color:var(--acc); }
+  .tick:focus-visible { outline:2px solid var(--acc); outline-offset:2px; }
+  .chipsm {
+    padding:3px 9px; font:400 10.5px var(--font); color:var(--muted); background:transparent;
+    border:1px solid var(--line); border-radius:99px; cursor:pointer; min-height:26px;
+  }
+  .chipsm.on { background:var(--acc); border-color:var(--acc); color:var(--bg); font-weight:500; }
 </style>
 </head>
 <body>
@@ -111,6 +123,29 @@
     <div class="msg" id="passMsg"></div>
   </div>
 
+  <div class="card3">
+    <div class="cardtitle">Email</div>
+    <div class="cardnote">Everything the shop tells you arrives in the app whatever this says.
+      Switch this on and the same notifications are also sent to your email address — at most
+      one every fifteen minutes, so a busy afternoon does not become forty emails.</div>
+    <div class="row" style="margin-top:13px;gap:10px;align-items:center">
+      <button class="btn" id="emailToggle">Loading…</button>
+      <span class="cardnote" id="emailWhere" style="margin:0"></span>
+    </div>
+
+    <div id="evWrap" hidden style="margin-top:16px;padding-top:15px;border-top:1px solid var(--whisper)">
+      <div class="cardnote" style="margin-bottom:2px">Pick what is worth an email. Everything
+        is in the app either way, and the note on each line says how often it tends to fire.</div>
+      <div id="evRows"></div>
+      <div class="row" style="margin-top:13px;gap:9px;align-items:center">
+        <button class="btn btn-solid" id="evSave">Save</button>
+        <button class="btn" id="evNone">Turn all off</button>
+      </div>
+    </div>
+
+    <div class="msg" id="optMsg"></div>
+  </div>
+
   <div class="card3" id="shopsCard" hidden>
     <div class="cardtitle">Shops you can work in</div>
     <div class="cardnote">Switching moves this session to that shop. Nothing about your account
@@ -136,9 +171,113 @@
       .join('').slice(0, 2).toUpperCase();
   }
 
+  /* The email switch. Its state comes from /api/me, so it is right on load
+     rather than after a round trip. */
+  function paintOpt(on, email) {
+    var b = document.getElementById('emailToggle');
+    b.textContent = on ? 'Email is on' : 'Email is off';
+    b.className = 'btn' + (on ? ' btn-solid' : '');
+    b.dataset.on = on ? '1' : '0';
+    document.getElementById('emailWhere').textContent = email
+      ? (on ? 'Sent to ' + email : 'Nothing is sent to ' + email)
+      : 'Add an email address above first.';
+  }
+
+  document.getElementById('emailToggle').addEventListener('click', function () {
+    var next = this.dataset.on !== '1';
+    var b = this;
+    b.disabled = true;
+    api('/api/auth/email-preference', { method: 'PATCH', body: JSON.stringify({ on: next }) })
+      .then(function (r) {
+        b.disabled = false;
+        paintOpt(r.on, (ME && ME.user && ME.user.email) || '');
+        say('optMsg', r.note, 'ok');
+        loadEvents();
+      }).catch(function (e) { b.disabled = false; say('optMsg', e.message, 'err'); });
+  });
+
+  /* ---------------------------------------------------------------- events
+     One switch for eight kinds of notification was the wrong shape: an
+     assignment is worth an interruption, a status change on somebody else's
+     car is not, and left as one switch the honest response is to turn the lot
+     off — which stops the useful ones too. */
+
+  var EVENTS = null;
+
+  var WEIGHT = {
+    rare:  ['a few a month',   'var(--dim)'],
+    some:  ['a few a week',    'var(--muted)'],
+    noisy: ['many a day',      'var(--acc2)']
+  };
+
+  function loadEvents() {
+    api('/api/auth/email-events').then(function (d) {
+      EVENTS = d.events;
+      drawEvents(d);
+    }).catch(function (e) { say('optMsg', e.message, 'err'); });
+  }
+
+  function drawEvents(d) {
+    $('evWrap').hidden = !d.on;
+    if (!d.on) return;
+
+    $('evRows').innerHTML = EVENTS.map(function (e, i) {
+      var w = WEIGHT[e.weight] || WEIGHT.some;
+      return '<div class="row" style="gap:10px;align-items:flex-start;padding:9px 0;' +
+        'border-top:1px solid var(--whisper)">' +
+        '<button class="tick' + (e.enabled ? ' on' : '') + '" data-ev="' + i + '" ' +
+          'aria-pressed="' + (e.enabled ? 'true' : 'false') + '" ' +
+          'aria-label="' + esc(e.label) + '">' + (e.enabled ? '✓' : '') + '</button>' +
+        '<div style="flex:1;min-width:0">' +
+          '<div style="font:400 12.5px var(--font)">' + esc(e.label) + '</div>' +
+          '<div style="font:400 11px var(--font);color:var(--dim)">' + esc(e.fires) +
+            ' · <span style="color:' + w[1] + '">' + w[0] + '</span></div>' +
+          (e.scoped && e.enabled
+            ? '<div class="row" style="gap:6px;margin-top:7px">' +
+              '<button class="chipsm' + (e.scope === 'mine' ? ' on' : '') + '" data-sc="' + i +
+                '" data-v="mine">Only my cars</button>' +
+              '<button class="chipsm' + (e.scope === 'all' ? ' on' : '') + '" data-sc="' + i +
+                '" data-v="all">Every car</button></div>'
+            : '') +
+        '</div></div>';
+    }).join('');
+
+    Array.prototype.forEach.call($('evRows').querySelectorAll('[data-ev]'), function (b) {
+      b.addEventListener('click', function () {
+        var e = EVENTS[Number(b.dataset.ev)];
+        e.enabled = !e.enabled;
+        drawEvents({ on: true });
+      });
+    });
+    Array.prototype.forEach.call($('evRows').querySelectorAll('[data-sc]'), function (b) {
+      b.addEventListener('click', function () {
+        EVENTS[Number(b.dataset.sc)].scope = b.dataset.v;
+        drawEvents({ on: true });
+      });
+    });
+  }
+
+  $('evSave').addEventListener('click', function () {
+    var btn = this;
+    btn.disabled = true;
+    api('/api/auth/email-events', { method: 'PUT', body: JSON.stringify({ events: EVENTS }) })
+      .then(function (r) {
+        btn.disabled = false;
+        say('optMsg', r.note, 'ok');
+        if (r.on === 0) { paintOpt(false, (ME && ME.user && ME.user.email) || ''); loadEvents(); }
+      }).catch(function (e) { btn.disabled = false; say('optMsg', e.message, 'err'); });
+  });
+
+  $('evNone').addEventListener('click', function () {
+    EVENTS.forEach(function (e) { e.enabled = false; });
+    drawEvents({ on: true });
+  });
+
   api('/api/me').then(function (me) {
     ME = me;
     Shell.mount({ me: me, active: 'account' });
+    paintOpt(!!(me.user && me.user.emailOptIn), (me.user && me.user.email) || '');
+    loadEvents();
 
     $('headmeta').textContent = me.company
       ? 'Signed in at ' + me.company.name

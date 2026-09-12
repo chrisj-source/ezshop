@@ -1,6 +1,9 @@
 import { PoolConnection, RowDataPacket } from 'mysql2/promise';
-import { tenantPool, tq } from './db/tenant';
+import { tenantPool, texec, tq, tqOne } from './db/tenant';
 import { recipientsForStatus, routingConfigured } from './lib/status-routes';
+import { emailableUser, letter, sendMail, stampEmailed } from './lib/mail';
+import { mqOne } from './db/master';
+import { config } from './config';
 
 /**
  * In-app notifications.
@@ -155,6 +158,11 @@ async function deliver(input: NotifyInput, recipients: Set<number>): Promise<num
     [input.event, [...recipients]]
   ).catch(() => undefined);
 
+  /* And out of the building, for anyone who asked for it. Deliberately not
+     awaited: a slow provider must never hold up the request that caused the
+     notification, and a failed send is recorded rather than thrown. */
+  void mirrorToEmail(cid, [...recipients], input).catch(() => undefined);
+
   return recipients.size;
 }
 
@@ -162,6 +170,63 @@ async function deliver(input: NotifyInput, recipients: Set<number>): Promise<num
 export async function notifyIn(c: PoolConnection, input: NotifyInput): Promise<void> {
   // The routing queries are reads; run them on the pool, then insert on the tx.
   await notify(input);
+}
+
+/**
+ * The email copy of a notification, for the people who switched it on.
+ *
+ * Off by default, one per person per throttle window, and every attempt —
+ * including the ones that fail — lands on the message's own delivery record, so
+ * "did he get told" has one answer in one place.
+ */
+async function mirrorToEmail(
+  companyId: number, userIds: number[], input: NotifyInput
+): Promise<void> {
+  const shop = await mqOne<RowDataPacket>(
+    'SELECT name FROM companies WHERE id = ?', [companyId]).catch(() => null);
+
+  for (const userId of userIds) {
+    /* Asked lazily: most events are unscoped, and the ones that are scoped are
+       only asked about for people who got that far through the other tests. */
+    const assigned = async (): Promise<boolean> => {
+      if (!input.roId) return false;
+      const hit = await tqOne<RowDataPacket>(companyId,
+        'SELECT 1 AS ok FROM ro_assignments WHERE ro_id = ? AND user_id = ? LIMIT 1',
+        [input.roId, userId]).catch(() => null);
+      return !!hit;
+    };
+
+    const who = await emailableUser(userId, input.event, assigned);
+    if (!who) continue;
+
+    const note = await tqOne<RowDataPacket>(companyId, `
+      SELECT id FROM notifications
+       WHERE user_id = ? AND event_key = ?
+       ORDER BY id DESC LIMIT 1`, [userId, input.event]).catch(() => null);
+
+    const body = letter(input.title, [input.body], input.roId
+      ? { label: 'Open the file', url: `${config.appUrl}/board.html?ro=${input.roId}` }
+      : undefined);
+
+    const sent = await sendMail({
+      to: who.email,
+      subject: input.title,
+      text: body.text,
+      html: body.html,
+      shopName: shop?.name ? String(shop.name) : null
+    });
+
+    if (note) {
+      await texec(companyId, `
+        INSERT INTO notification_deliveries
+          (notification_id, user_id, channel, address, state, sent_at, error)
+        VALUES (?, ?, 'email', ?, ?, NOW(), ?)`,
+        [note.id, userId, who.email, sent.ok ? 'sent' : 'failed',
+         sent.ok ? null : (sent.error ?? '').slice(0, 190)]).catch(() => undefined);
+    }
+
+    if (sent.ok) await stampEmailed(userId);
+  }
 }
 
 export async function unreadCount(companyId: number, userId: number): Promise<number> {

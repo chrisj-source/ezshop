@@ -4,6 +4,7 @@ import { texec, tq, tqOne, withTenantTx } from '../db/tenant';
 import { mexec, mq, mqOne } from '../db/master';
 import { requireCompany } from '../middleware/context';
 import { hashPassword } from '../auth/password';
+import { sendResetLink } from '../auth/routes';
 import { Role, ROLE_LABEL, sortRoles } from '../permissions';
 import crypto from 'node:crypto';
 
@@ -291,6 +292,33 @@ export async function registerAdmin(app: FastifyInstance): Promise<void> {
    * over verbally — or let the app generate one. Either way the person must
    * change it at first sign-in, and every session they have is killed.
    */
+  /**
+   * Email somebody a reset link rather than reading a temporary password down
+   * the phone. Better in every way that matters: nothing is said aloud, nothing
+   * is written on a card, and the link dies in an hour whether it is used or
+   * not. The old path stays for anyone with no email address.
+   */
+  app.post('/api/admin/people/:userId/reset-link', async (req, reply) => {
+    const ctx = requireCompany(req, reply);
+    if (!ctx) return;
+    if (!ctx.caps.admin) return reply.code(403).send({ error: 'Not permitted' });
+
+    const userId = Number((req.params as { userId: string }).userId);
+    const who = await mqOne<RowDataPacket>(
+      'SELECT id, name, email FROM users WHERE id = ?', [userId]);
+    if (!who) return reply.code(404).send({ error: 'Nobody by that id.' });
+    if (!who.email) {
+      return reply.code(400).send({
+        error: 'They have no email address — give them a temporary password instead.'
+      });
+    }
+
+    const out = await sendResetLink(userId, String(who.name), String(who.email));
+    if (!out.ok) return reply.code(502).send({ error: 'Could not send it: ' + out.error });
+
+    return { ok: true, note: `Link sent to ${who.email}. It works once and expires in an hour.` };
+  });
+
   app.post('/api/admin/people/:userId/reset-password', async (req, reply) => {
     const ctx = requireCompany(req, reply);
     if (!ctx) return;

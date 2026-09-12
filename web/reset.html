@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Set a new password — Easy Shop</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/shell.css?v=8">
+<style>
+  body { display:grid; place-items:center; min-height:100vh; padding:24px; }
+  .box { width:min(400px,100%); }
+  .mark2 {
+    width:30px; height:30px; border-radius:6px; display:grid; place-items:center;
+    font:600 12px var(--font); color:var(--acc); border:1px solid var(--acc);
+  }
+  h1 { font:500 24px var(--font); margin:22px 0 6px; }
+  .sub { font:400 13px/1.6 var(--font); color:var(--dim); margin-bottom:20px; }
+  label { display:block; font:600 10px var(--font); letter-spacing:.11em; text-transform:uppercase;
+          color:var(--acc2); margin:14px 0 6px; }
+  input { width:100%; padding:11px 12px; font-size:15px; }
+  button[type=submit] {
+    width:100%; margin-top:18px; padding:12px; font:600 14px var(--font);
+    background:var(--acc); color:var(--bg); border:none; border-radius:5px; min-height:46px;
+  }
+  .msg { margin-top:14px; font:400 12.5px/1.55 var(--font); padding:10px 12px; border-radius:5px; }
+  .msg:empty { display:none; }
+  .msg.err { color:#f0bdb2; background:rgba(208,126,111,.14); border:1px solid rgba(208,126,111,.4); }
+  .msg.ok { color:#a9d8c2; background:rgba(111,174,140,.14); border:1px solid rgba(111,174,140,.4); }
+  .back { display:block; text-align:center; margin-top:16px; font:400 12px var(--font); color:var(--dim); }
+</style>
+</head>
+<body>
+<div class="box">
+  <div style="display:flex;align-items:center;gap:10px">
+    <div class="mark2">ES</div>
+    <div style="font:600 13px var(--font);letter-spacing:.16em;text-transform:uppercase">Easy Shop</div>
+  </div>
+
+  <h1 id="title">Set a new password</h1>
+  <div class="sub" id="sub">The link you followed is good for one use.</div>
+
+  <form id="form">
+    <label for="pw">New password</label>
+    <input id="pw" type="password" autocomplete="new-password" required>
+    <label for="pw2">Confirm</label>
+    <input id="pw2" type="password" autocomplete="new-password" required>
+    <button type="submit" id="go">Set password</button>
+  </form>
+
+  <div class="msg" id="msg"></div>
+  <a class="back" href="/">Back to sign in</a>
+</div>
+
+<script>
+(function () {
+  var token = new URLSearchParams(location.search).get('t') || '';
+  var msg = document.getElementById('msg');
+
+  function say(t, k) { msg.textContent = t; msg.className = 'msg ' + (k || 'err'); }
+
+  if (!token) {
+    document.getElementById('form').hidden = true;
+    say('That link is missing its token. Ask for another from the sign-in screen.');
+  }
+
+  document.getElementById('form').addEventListener('submit', function (e) {
+    e.preventDefault();
+    var pw = document.getElementById('pw').value;
+    if (pw !== document.getElementById('pw2').value) return say('Those two do not match.');
+
+    var btn = document.getElementById('go');
+    btn.disabled = true;
+    fetch('/api/auth/reset', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ token: token, password: pw })
+    }).then(function (r) {
+      return r.json().then(function (j) { return { ok: r.ok, j: j }; });
+    }).then(function (res) {
+      btn.disabled = false;
+      if (!res.ok) return say(res.j.error || 'That did not work.');
+      say('Password set. Taking you to sign in…', 'ok');
+      setTimeout(function () { location.href = '/'; }, 900);
+    }).catch(function () {
+      btn.disabled = false;
+      say('Could not reach the server.');
+    });
+  });
+})();
+</script>
+</body>
+</html>

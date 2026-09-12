@@ -87,6 +87,10 @@
     <button type="submit" id="submit">Sign in</button>
   </form>
 
+  <button type="button" id="forgot" style="display:block;width:100%;margin-top:14px;
+    background:transparent;border:none;font:400 12px var(--font);color:var(--dim);cursor:pointer">
+    Forgot your password?</button>
+
   <button class="alt" id="toggle" type="button">Use an access code instead</button>
 
   <div class="foot" id="foot"></div>
@@ -104,6 +108,30 @@
     msg.textContent = text;
     msg.className = 'msg ' + (kind || 'err');
   }
+
+  document.getElementById('forgot').addEventListener('click', function () {
+    var email = document.getElementById('email').value.trim();
+    if (!email) {
+      document.getElementById('email').focus();
+      return say('Type your email address first, then press it again.');
+    }
+    var btn = this;
+    btn.disabled = true;
+    fetch('/api/auth/forgot', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ email: email })
+    }).then(function (r) { return r.json().catch(function () { return {}; }); })
+      .then(function (j) {
+        btn.disabled = false;
+        /* The same answer either way — telling somebody which addresses have
+           accounts is not a favour worth doing. */
+        say(j.note || 'If that address has an account, a link is on its way.', 'ok');
+      }).catch(function () {
+        btn.disabled = false;
+        say('Could not reach the server.');
+      });
+  });
 
   toggle.addEventListener('click', function () {
     mode = mode === 'password' ? 'code' : 'password';
