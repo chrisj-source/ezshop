@@ -445,6 +445,20 @@ export async function saveCloseout(
     if (r.flagged_at) flagged.set(r.position_key, new Date(r.flagged_at).toISOString().slice(0, 19).replace('T', ' '));
   }
 
+  /* A percentage row arrives unpriced from the sheet — PDR's share is worked
+     out against the whole file, so it could not be priced line by line. Every
+     other trade on a percentage is priced here, against the approval net of
+     parts at cost, so what payroll reads is a figure and not a zero. */
+  const f = await fileFor(companyId, roId);
+  const pctBase = f
+    ? Math.max(0, (Number(f.amount_cents) || 0) - (Number(f.parts_cost_cents) || 0))
+    : 0;
+  for (const e of entries) {
+    if (e.basis === 'pct' && e.positionKey !== 'pdr' && !e.costCents) {
+      e.costCents = Math.round(pctBase * ((Number(e.ratePct) || 0) / 100));
+    }
+  }
+
   await texec(companyId, 'DELETE FROM ro_labour WHERE ro_id = ?', [roId]);
   for (const e of entries) {
     await texec(companyId, `

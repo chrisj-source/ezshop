@@ -73,6 +73,18 @@ export async function registerCloseout(app: FastifyInstance): Promise<void> {
     if (!f) return reply.code(404).send({ error: 'No such repair order' });
 
     const entries = await suggestLabour(cid, id);
+
+    /* What was already flagged on the floor. The sheet says so on the row, so
+       the desk can see the figure came from the shop rather than from here. */
+    const flags = new Map<string, { at: string; by: string | null }>();
+    for (const r of await tq<RowDataPacket[]>(cid,
+      'SELECT position_key, flagged_at, flagged_by_name FROM ro_labour WHERE ro_id = ?', [id])) {
+      if (r.flagged_at) {
+        flags.set(String(r.position_key), {
+          at: String(r.flagged_at), by: r.flagged_by_name ?? null
+        });
+      }
+    }
     const profit = await profitFor(cid, id, entries);
     const assigned = await assignmentsFor(cid, id);
     const rates = await ratesFor(cid, assigned.map(a => a.userId).filter((n): n is number => n !== null));
@@ -83,6 +95,9 @@ export async function registerCloseout(app: FastifyInstance): Promise<void> {
     return {
       roNumber: f.ro_number,
       approvalCents: Number(f.amount_cents),
+      /* What a percentage runs off, sent so the sheet can price a percentage
+         row as the desk types instead of waiting for the server. */
+      partsCostCents: Number(f.parts_cost_cents),
       totalLoss: !!f.total_loss_at,
       /* Editable at close: the rental price and nothing else about the rental. */
       rental: {
@@ -103,8 +118,14 @@ export async function registerCloseout(app: FastifyInstance): Promise<void> {
       labour: entries.map(e => ({
         ...e,
         label: TRADE_LABEL[e.positionKey],
-        /* PDR alone can be paid a share; the sheet offers what the tech is on. */
-        canPct: e.positionKey === 'pdr',
+        /* PDR has always been able to take a share of the job. Any trade can
+           now, because a tech pay plan prices body or paint as a percentage —
+           so the sheet offers it wherever the flag or the plan says so, rather
+           than dropping the row back to hours and showing zero. */
+        canPct: e.positionKey === 'pdr' || e.basis === 'pct',
+        isPdr: e.positionKey === 'pdr',
+        flaggedAt: flags.get(e.positionKey)?.at ?? null,
+        flaggedBy: flags.get(e.positionKey)?.by ?? null,
         rateOnFile: e.userId ? (rates.get(e.userId)?.rateCents ?? 0) : 0,
         ratePctOnFile: e.userId ? (rates.get(e.userId)?.ratePct ?? 0) : 0,
         emsHours: ems[e.positionKey] ?? 0

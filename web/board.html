@@ -3855,14 +3855,25 @@
         var shown = flat ? dollars(e.hours) : (pct ? e.ratePct : e.hours);
 
         out.push('<div class="labrow">' +
-          '<div class="who">' + esc(e.displayName || 'Unassigned') + '</div>' +
+          '<div class="who">' + esc(e.displayName || 'Unassigned') +
+            (e.flaggedAt
+              ? ' <span class="ptag2 ok" title="Flagged' +
+                (e.flaggedBy ? ' by ' + esc(e.flaggedBy) : '') + '">flagged</span>'
+              : '') + '</div>' +
           '<div class="tr hide-sm">' + esc(e.label) + '</div>' +
           '<div><div class="segsm">' +
-            (e.canPct
+            /* PDR's share is of the whole job, so it offers a dollar or a
+               percentage and nothing else. Every other trade can now be on a
+               percentage too — from a pay plan — so it keeps hours and the
+               estimate's own figure alongside it. */
+            (e.canPct && e.isPdr
               ? '<button class="' + (flat ? 'on' : '') + '" data-b="flat" data-i="' + i + '">$</button>' +
                 '<button class="' + (pct ? 'on' : '') + '" data-b="pct" data-i="' + i + '">%</button>'
               : '<button class="' + (e.basis === 'hours' ? 'on' : '') + '" data-b="hours" data-i="' + i + '">Hours</button>' +
                 '<button class="' + (flat ? 'on' : '') + '" data-b="flat" data-i="' + i + '">$</button>' +
+                (e.canPct
+                  ? '<button class="' + (pct ? 'on' : '') + '" data-b="pct" data-i="' + i + '">%</button>'
+                  : '') +
                 '<button class="' + (ems ? 'on' : '') + '" data-b="ems" data-i="' + i + '">EMS</button>') +
           '</div></div>' +
           '<div style="display:flex;justify-content:flex-end;align-items:center;gap:6px">' +
@@ -3942,8 +3953,16 @@
   /** What a row costs, for the row's own display. The total is the server's. */
   function coCostOf(e) {
     if (e.basis === 'pct') {
-      var l = ((CO.profit || {}).lines || []).filter(function (x) { return x.key === 'pdr'; })[0];
-      return l ? l.cents : 0;
+      /* PDR's share is of what is left after everything else, so only the
+         server can price it and the row reads the answer back off the profit
+         lines. Any other trade on a percentage is a share of the approval net
+         of parts at cost, which is arithmetic this screen can do while the
+         desk types. */
+      var key = e.positionKey === 'pdr' ? 'pdr' : e.positionKey;
+      var l = ((CO.profit || {}).lines || []).filter(function (x) { return x.key === key; })[0];
+      if (e.positionKey === 'pdr') return l ? l.cents : 0;
+      var base = Math.max(0, (CO.approvalCents || 0) - (CO.partsCostCents || 0));
+      return Math.round(base * ((Number(e.ratePct) || 0) / 100));
     }
     if (e.basis === 'flat') return Math.round(Number(e.hours) || 0);
     return Math.round((Number(e.hours) || 0) * (Number(e.rateCents) || 0));

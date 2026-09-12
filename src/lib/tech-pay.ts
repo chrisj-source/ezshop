@@ -216,10 +216,17 @@ export async function flagRowsFor(companyId: number, roId: number): Promise<{
     let flatCents = 0;
 
     if (have) {
+      /* 'ems' is the sheet's word for hours that came off the estimate; as far
+         as flagging is concerned it is hours. A flat figure lives in the hours
+         column — the close-out sheet's own convention — so it is read back from
+         there, with cost_cents as the fallback for rows written before that
+         was true. */
       basis = have.basis === 'flat' ? 'flat' : have.basis === 'pct' ? 'pct' : 'hours';
       pct = Number(have.rate_pct) || plannedPct;
       hours = basis === 'flat' ? hours : Number(have.hours) || hours;
-      flatCents = basis === 'flat' ? Number(have.cost_cents) || 0 : 0;
+      flatCents = basis === 'flat'
+        ? (Number(have.hours) || Number(have.cost_cents) || 0)
+        : 0;
     }
 
     const value = basis === 'pct' ? pct : basis === 'flat' ? flatCents : hours;

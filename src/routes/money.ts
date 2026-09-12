@@ -422,8 +422,12 @@ export async function registerMoney(app: FastifyInstance): Promise<void> {
       const value = basis === 'pct' ? pct : basis === 'flat' ? flatCents : hours;
       const amountCents = priceFlag(basis, value, file, rateCents);
 
-      /* `ro_labour.basis` has carried 'hours' | 'flat' | 'ems' | 'pct' since the
-         close-out sheet was built; a flag writes the same three it uses. */
+      /* The close-out sheet has always kept a **flat dollar figure in the hours
+         column** — `priceEntry` reads it straight out of `hours` — so a flag has
+         to write it there too. Writing the amount only to `cost_cents`, which
+         is what this did first, made the sheet recompute the row as zero and
+         quietly lose what the shop had already agreed. */
+      const storedHours = basis === 'flat' ? flatCents : basis === 'pct' ? 0 : hours;
       await texec(cid, `
         INSERT INTO ro_labour
           (ro_id, position_key, basis, hours, rate_cents, rate_pct, pct_after_costs,
@@ -438,7 +442,7 @@ export async function registerMoney(app: FastifyInstance): Promise<void> {
           flagged_at = VALUES(flagged_at), flagged_by = VALUES(flagged_by),
           flagged_by_name = VALUES(flagged_by_name)`,
         [id, trade, basis === 'flat' ? 'flat' : basis === 'pct' ? 'pct' : 'hours',
-         basis === 'flat' ? 0 : hours, rateCents, pct, amountCents,
+         storedHours, rateCents, pct, amountCents,
          userId, displayName, ctx.user.id,
          flagged ? new Date() : null, flagged ? ctx.user.id : null,
          flagged ? ctx.user.name : null]);
