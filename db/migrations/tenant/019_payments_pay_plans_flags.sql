@@ -12,6 +12,11 @@
 --     anything with an estimate behind it. One row per person per job type.
 --  3. Flagging — `ro_labour` gains a flag stamp, so the trades on a file are
 --     settled while the car is still here instead of at the close.
+--
+-- Every statement here is written to be run twice. DDL does not roll back in
+-- MariaDB, so a migration that fails halfway leaves the earlier statements
+-- applied — `IF NOT EXISTS` and guarded UPDATEs are what make the retry clean
+-- rather than a hand-repair job.
 
 -- ===========================================================================
 -- Payments
@@ -22,7 +27,7 @@
 -- the same file, which is what catches a payment entered twice. It is NULL for
 -- a method that carries no number, and MySQL allows any number of NULLs in a
 -- unique index, so cash and card are unaffected.
-CREATE TABLE ro_payments (
+CREATE TABLE IF NOT EXISTS ro_payments (
   id              BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
   ro_id           BIGINT UNSIGNED NOT NULL,
   invoice_id      BIGINT UNSIGNED NULL COMMENT 'the invoicing port fills this; a receipt can sit against both',
@@ -51,13 +56,13 @@ CREATE TABLE ro_payments (
 -- read a balance without summing the payments table per row. Written by the
 -- payment endpoints and by nothing else.
 ALTER TABLE repair_orders
-  ADD COLUMN paid_cents BIGINT NOT NULL DEFAULT 0
+  ADD COLUMN IF NOT EXISTS paid_cents BIGINT NOT NULL DEFAULT 0
     COMMENT 'sum of live payments; paid is (paid_cents >= amount_cents)' AFTER paid;
 
 -- Files already marked paid by hand keep their flag and get no payment rows.
 -- The flag is what the old close wrote; inventing receipts for it would put
 -- money in the record that nobody ever took.
-UPDATE repair_orders SET paid_cents = amount_cents WHERE paid = 1;
+UPDATE repair_orders SET paid_cents = amount_cents WHERE paid = 1 AND paid_cents = 0;
 
 -- ===========================================================================
 -- Pay plans, per job type
@@ -72,7 +77,7 @@ UPDATE repair_orders SET paid_cents = amount_cents WHERE paid = 1;
 -- approved amount **after any parts we bought come out at cost** — a $450 car
 -- with no parts pays 12.5% of $450; a $6,482.19 file carrying $1,900 of parts
 -- runs off $4,582.19.
-CREATE TABLE staff_pay_plans (
+CREATE TABLE IF NOT EXISTS staff_pay_plans (
   user_id         BIGINT UNSIGNED NOT NULL,
   job_type        ENUM('wholesale','insurance','cash') NOT NULL,
   basis           ENUM('pct','hours','flat') NOT NULL DEFAULT 'hours',
@@ -87,7 +92,10 @@ CREATE TABLE staff_pay_plans (
 -- Everyone on the floor starts on what they are already on, for all three job
 -- types. Nothing changes until somebody sets a percentage, which is the point:
 -- this migration must not move a single figure on its own.
-INSERT INTO staff_pay_plans (user_id, job_type, basis, pct_paint, pct_nopaint, rate_cents)
+-- INSERT IGNORE rather than ON DUPLICATE KEY UPDATE: MariaDB will not take an
+-- ON DUPLICATE clause on an INSERT ... SELECT here, and "leave what is already
+-- there alone" is exactly what IGNORE means.
+INSERT IGNORE INTO staff_pay_plans (user_id, job_type, basis, pct_paint, pct_nopaint, rate_cents)
 SELECT s.user_id, j.job_type,
        CASE WHEN s.pay_basis = 'flat' THEN 'flat'
             WHEN s.pay_basis = 'pct'  THEN 'pct'
@@ -98,8 +106,7 @@ SELECT s.user_id, j.job_type,
   FROM staff s
   JOIN (SELECT 'wholesale' AS job_type UNION ALL
         SELECT 'insurance' UNION ALL
-        SELECT 'cash') j
-ON DUPLICATE KEY UPDATE staff_pay_plans.user_id = staff_pay_plans.user_id;
+        SELECT 'cash') j;
 
 -- ===========================================================================
 -- Flagging
@@ -114,13 +121,13 @@ ON DUPLICATE KEY UPDATE staff_pay_plans.user_id = staff_pay_plans.user_id;
 -- is against the approval, or against the approval net of parts at cost, which
 -- is what the tech plans use.
 ALTER TABLE ro_labour
-  ADD COLUMN pct_base ENUM('approval','after_parts') NOT NULL DEFAULT 'approval'
+  ADD COLUMN IF NOT EXISTS pct_base ENUM('approval','after_parts') NOT NULL DEFAULT 'approval'
     AFTER pct_after_costs,
-  ADD COLUMN flagged_at DATETIME NULL COMMENT 'set when the trade is flagged, cleared when it is unflagged',
-  ADD COLUMN flagged_by BIGINT UNSIGNED NULL,
-  ADD COLUMN flagged_by_name VARCHAR(120) NULL;
+  ADD COLUMN IF NOT EXISTS flagged_at DATETIME NULL COMMENT 'set when the trade is flagged, cleared when it is unflagged',
+  ADD COLUMN IF NOT EXISTS flagged_by BIGINT UNSIGNED NULL,
+  ADD COLUMN IF NOT EXISTS flagged_by_name VARCHAR(120) NULL;
 
-ALTER TABLE ro_labour ADD KEY ix_labour_flagged (ro_id, flagged_at);
+ALTER TABLE ro_labour ADD KEY IF NOT EXISTS ix_labour_flagged (ro_id, flagged_at);
 
 -- Rows written by a close that already happened are flagged, by definition:
 -- the file settled on them.
