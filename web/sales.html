@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <title>Sales — Easy Shop</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/shell.css?v=7">
+<link rel="stylesheet" href="/shell.css?v=8">
 <style>
   body { overflow:auto; }
   .phone { max-width:520px; margin:0 auto; width:100%; }
@@ -74,6 +74,29 @@
     border:1px solid var(--line); border-radius:4px; padding:10px; min-height:44px;
   }
   .tabbar button.sel { color:var(--acc); border-color:var(--acc); background:rgba(217,164,65,.09); }
+
+  /* This is a phone screen. It was drawn as one, the tab bar is thumb-height and
+     sits at the bottom, and the photo steps expect a camera — so on a desktop
+     width it says so and stops, rather than rendering a form that is wrong on
+     the machine it is being read on. The cut is width, not user agent: a phone
+     held sideways and a small window both get the real screen. */
+  .deskonly { display:none; }
+  @media (min-width:900px) {
+    .phone { display:none; }
+    .deskonly {
+      display:block; max-width:440px; margin:64px auto 0; padding:0 20px;
+      text-align:center;
+    }
+    .deskonly h1 { font:500 19px var(--font); margin:0 0 10px; }
+    .deskonly p { font:400 13px/1.65 var(--font); color:var(--muted); margin:0 0 18px; }
+    .deskonly .where {
+      display:inline-block; font:500 12.5px var(--font); color:var(--acc2);
+      padding:9px 14px; border:1px solid var(--line); border-radius:5px;
+      background:var(--surf);
+    }
+    .deskonly .alt { font:400 12px var(--font); color:var(--dim); margin-top:18px; line-height:1.6; }
+    .deskonly .alt a { color:var(--acc2); }
+  }
 </style>
 </head>
 <body>
@@ -87,6 +110,17 @@
   <button class="ghostbtn" id="signout">Sign out</button>
 </div>
 
+<div class="deskonly">
+  <h1>Sales is a phone screen</h1>
+  <p>Writing a lead up means standing next to the car — the form asks for photos,
+    the damage and the customer while they are in front of you. It is built for a
+    phone and it is not drawn for this width.</p>
+  <div class="where">Open easyshop on your phone and sign in</div>
+  <div class="alt">Everything a lead turns into is here on the desktop:
+    <a href="/leads.html">Leads</a> for the list and the follow-ups,
+    <a href="/board.html">the board</a> once it becomes a file.</div>
+</div>
+
 <div class="phone">
   <div class="tabbar">
     <button id="tabNew" class="sel">Write one</button>
@@ -97,7 +131,7 @@
 </div>
 
 <script src="/photos.js?v=5"></script>
-<script src="/shell.js?v=8"></script>
+<script src="/shell.js?v=9"></script>
 <script>
 (function () {
   var api = Shell.api, esc = Shell.esc;

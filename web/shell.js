@@ -19,8 +19,11 @@ window.Shell = (function () {
     { key: 'import',   href: '/import.html',   label: 'Import',   feature: 'ems',     cap: 'acceptImports' },
     { key: 'closed',   href: '/closed.html',   label: 'Closed',   feature: 'board',   cap: 'closeRepairOrders' },
     { key: 'reports',  href: '/reports.html',  label: 'Reports',  feature: 'reports', cap: 'viewReports' },
-    { key: 'sales',    href: '/sales.html',    label: 'Sales',    feature: 'msales',  cap: 'manageLeads' },
-    { key: 'checkin',  href: '/checkin.html',  label: 'Check-in', feature: 'mcheck' },
+    /* Phone screens. Sales is written standing next to the car and check-in runs
+       off the camera, so neither earns a slot in the desktop nav — the link is
+       hidden above 900px, the same width the screens themselves cut at. */
+    { key: 'sales',    href: '/sales.html',    label: 'Sales',    feature: 'msales',  cap: 'manageLeads', phone: true },
+    { key: 'checkin',  href: '/checkin.html',  label: 'Check-in', feature: 'mcheck',  phone: true },
     /* Roles and Sales pay are Admin's, reached from its tab strip — they are not
        daily work and do not earn a slot in the main nav. */
     { key: 'admin',    href: '/admin.html',    label: 'Admin',    feature: 'board',   cap: 'admin' }
@@ -153,7 +156,8 @@ window.Shell = (function () {
         if (n.cap && !ME.caps[n.cap]) return false;
         return true;
       }).map(function (n) {
-        return '<a href="' + n.href + '" class="navlink' + (n.key === active ? ' sel' : '') + '"' +
+        return '<a href="' + n.href + '" class="navlink' + (n.key === active ? ' sel' : '') +
+          (n.phone ? ' phoneonly' : '') + '"' +
           (n.key === active ? ' aria-current="page"' : '') + '>' +
           esc(n.label) + '</a>';
       }).join('');

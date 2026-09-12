@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <title>Check-in — Easy Shop</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/shell.css?v=7">
+<link rel="stylesheet" href="/shell.css?v=8">
 <style>
   /* The shell sizes body to exactly one viewport and scrolls an inner pane. A
      phone form cannot live in that: focus a field, the keyboard takes half the
@@ -150,6 +150,30 @@
   }
   .formerr:empty { display:none; padding:0; border:none; margin:0; }
   input[aria-invalid="true"], select[aria-invalid="true"] { border-color:var(--stopped); }
+
+  /* Check-in is a phone screen: it runs off the camera for the VIN and the
+     intake photos, and it is held next to the car. Above 900px it says so and
+     stops rather than offering a scanner to a machine with no camera pointed at
+     anything. The cut is width, not user agent, so a small window still gets the
+     real form. This block stays inside the AA rules the rest of the page is held
+     to — a real heading, text at full contrast, and the link reachable by
+     keyboard. */
+  .deskonly { display:none; }
+  @media (min-width:900px) {
+    .phone, .skip { display:none; }
+    .deskonly {
+      display:block; max-width:460px; margin:64px auto 0; padding:0 20px; text-align:center;
+    }
+    .deskonly h1 { font:500 19px var(--font); color:var(--text); margin:0 0 10px; }
+    .deskonly p { font:400 13px/1.65 var(--font); color:var(--muted); margin:0 0 18px; }
+    .deskonly .where {
+      display:inline-block; font:500 12.5px var(--font); color:var(--acc2);
+      padding:9px 14px; border:1px solid var(--line); border-radius:5px; background:var(--surf);
+    }
+    .deskonly .alt { font:400 12px var(--font); color:var(--dim); margin-top:18px; line-height:1.6; }
+    .deskonly .alt a { color:var(--acc2); }
+    .deskonly .alt a:focus-visible { outline:2px solid var(--acc); outline-offset:2px; }
+  }
 </style>
 </head>
 <body>
@@ -166,6 +190,17 @@
   <button class="ghostbtn" id="signout">Sign out</button>
 </div>
 
+<main class="deskonly" id="deskmain">
+  <h1>Check-in is a phone screen</h1>
+  <p>It scans the VIN off the door jamb and takes the intake photos, so it is
+    built to be held next to the car. This width has no camera pointed at
+    anything.</p>
+  <div class="where">Open easyshop on your phone and sign in</div>
+  <div class="alt">To start a file from the desk instead, use
+    <a href="/new-ro.html">New RO</a>; <a href="/board.html">the board</a> has
+    everything already checked in.</div>
+</main>
+
 <main class="phone" id="main">
   <div class="crumbs" id="crumbs"></div>
   <p class="sr-only" id="stepAnnounce" role="status" aria-live="polite"></p>
@@ -174,7 +209,7 @@
 </main>
 
 <script src="/photos.js?v=5"></script>
-<script src="/shell.js?v=8"></script>
+<script src="/shell.js?v=9"></script>
 <script>
 (function () {
   var api = Shell.api, esc = Shell.esc;

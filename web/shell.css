@@ -411,3 +411,11 @@ tbody tr.clickable:hover td:first-child { box-shadow:inset 2px 0 0 var(--acc); }
   }
   .sheetrow:active { background:var(--whisper); }
 }
+
+/* The phone screens' nav links. Hidden at the width their own screens stop at,
+   so the desktop nav does not offer a page that will only tell you to pick up
+   your phone. A narrow window still gets them, which is the point of cutting on
+   width rather than user agent. */
+@media (min-width:900px) {
+  .navlink.phoneonly { display:none; }
+}
