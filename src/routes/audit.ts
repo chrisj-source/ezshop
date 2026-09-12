@@ -139,7 +139,7 @@ export async function registerAudit(app: FastifyInstance): Promise<void> {
        span at all, and how much of it nobody wrote a note about. */
     const [tally] = await attempt('counts', () => tq<RowDataPacket[]>(cid, `
       SELECT COUNT(*) AS total,
-             /* `sensitive` is a reserved word in MariaDB — unquoted, it is a
+             /* "sensitive" is a reserved word in MariaDB — unquoted, it is a
                 syntax error and takes the whole reader down with it. */
              SUM(a.is_sensitive = 1) AS \`sensitive\`,
              SUM(a.note IS NULL OR a.note = '') AS silent
