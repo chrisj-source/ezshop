@@ -87,7 +87,30 @@ export async function registerAudit(app: FastifyInstance): Promise<void> {
     const baseWhere = where.slice(), baseArgs = args.slice();
     if (q.before) { where.push('a.id < ?'); args.push(Number(q.before)); }
 
-    const rows = await tq<RowDataPacket[]>(cid, `
+    /*
+     * The reader has 500'd on a live shop and taken the whole screen with it,
+     * which is the wrong failure: an audit log that cannot draw is worse than
+     * one drawing fewer columns. Each piece below is attempted, and a failure
+     * is caught, named, and handed back with whatever did work — so the screen
+     * says what is wrong instead of "Something went wrong", and the reason is
+     * readable without SSH.
+     */
+    const trouble: string[] = [];
+
+    /* The fallback is a function, not a value: a second query must only run
+       when the first one actually failed. */
+    async function attempt<T>(what: string, run: () => Promise<T>, fallback: () => Promise<T> | T): Promise<T> {
+      try {
+        return await run();
+      } catch (e) {
+        const msg = (e as Error).message ?? String(e);
+        req.log.error({ err: e, what }, 'audit read failed');
+        trouble.push(`${what}: ${msg}`);
+        return fallback();
+      }
+    }
+
+    const rows = await attempt('entries', () => tq<RowDataPacket[]>(cid, `
       SELECT a.id, a.user_id, a.user_name, a.actor_role, a.entity, a.entity_id,
              COALESCE(a.ro_id, CASE WHEN a.entity = 'repair_order' THEN a.entity_id END) AS ro_id,
              a.action, ${AREA_SQL} AS area, ${LABEL_SQL} AS label,
@@ -100,18 +123,29 @@ export async function registerAudit(app: FastifyInstance): Promise<void> {
       LEFT JOIN leads l ON l.id = a.entity_id AND a.entity = 'lead'
       ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
       ORDER BY a.id DESC
-      LIMIT ${limit}`, args);
+      LIMIT ${limit}`, args),
+      /* The same list without the joins, the derived columns or `detail`. If
+         the full query is what breaks, the entries themselves still arrive and
+         the screen still reads. */
+      () => attempt('entries (plain)', () => tq<RowDataPacket[]>(cid, `
+        SELECT a.id, a.user_id, a.user_name, a.actor_role, a.entity, a.entity_id,
+               a.ro_id, a.action, a.area, a.label, a.changes, a.note,
+               a.is_sensitive, a.source, a.created_at
+          FROM audit_log a
+         ORDER BY a.id DESC
+         LIMIT ${limit}`), () => [] as RowDataPacket[]));
 
     /* Two counts the header needs and the rows cannot give: how much is in this
        span at all, and how much of it nobody wrote a note about. */
-    const [tally] = await tq<RowDataPacket[]>(cid, `
+    const [tally] = await attempt('counts', () => tq<RowDataPacket[]>(cid, `
       SELECT COUNT(*) AS total,
              SUM(a.is_sensitive = 1) AS sensitive,
              SUM(a.note IS NULL OR a.note = '') AS silent
       FROM audit_log a
       LEFT JOIN repair_orders r
              ON r.id = COALESCE(a.ro_id, CASE WHEN a.entity = 'repair_order' THEN a.entity_id END)
-      ${baseWhere.length ? 'WHERE ' + baseWhere.join(' AND ') : ''}`, baseArgs);
+      ${baseWhere.length ? 'WHERE ' + baseWhere.join(' AND ') : ''}`, baseArgs),
+      () => [] as RowDataPacket[]);
 
     return {
       items: rows.map(r => ({
@@ -133,11 +167,14 @@ export async function registerAudit(app: FastifyInstance): Promise<void> {
         changes: parseJson(r.changes) ?? [],
         detail: parseJson(r.detail)
       })),
+      /* Null when everything worked. A sentence when it did not — the screen
+         shows it rather than replacing the page with an apology. */
+      trouble: trouble.length ? trouble.join(' · ') : null,
       total: Number(tally?.total ?? 0),
       sensitiveCount: Number(tally?.sensitive ?? 0),
       silentCount: Number(tally?.silent ?? 0),
       areas: AREAS,
-      people: await auditActors(cid),
+      people: await attempt('people', () => auditActors(cid), () => []),
       /* The oldest id in the page, so "load more" can carry on from it. */
       nextBefore: rows.length === limit ? rows[rows.length - 1].id : null
     };

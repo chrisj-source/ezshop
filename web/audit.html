@@ -269,6 +269,16 @@
 
   function renderHead() {
     var d = new Date();
+    /* The reader now degrades rather than dying, so a part that failed says so
+       here instead of replacing the whole screen with an apology. */
+    if (DATA.trouble) {
+      $('headmeta').innerHTML = '<span style="color:var(--stopped)">Some of this could not be read — ' +
+        esc(DATA.trouble) + '</span>';
+      $('clear').hidden = !(F.q || F.who || F.area || F.sensitive || F.span !== 'today');
+      $('sens').innerHTML = 'Sensitive only <span style="opacity:.7">' +
+        (DATA.sensitiveCount || 0) + '</span>';
+      return;
+    }
     $('headmeta').textContent =
       d.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }) +
       ' · ' + DATA.total + ' entries in this view · ' + DATA.silentCount +
