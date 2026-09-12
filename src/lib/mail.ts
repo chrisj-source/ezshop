@@ -206,11 +206,13 @@ export async function emailableUser(
   event?: string,
   assignedToFile?: () => Promise<boolean>
 ): Promise<{ email: string; name: string } | null> {
-  const row = await mqOne<{ email: string | null; name: string; email_opt_in: number; last_email_at: Date | null } & Record<string, unknown>>(
+  const row = await mqOne<RowDataPacket>(
     `SELECT email, name, email_opt_in, last_email_at FROM users WHERE id = ? AND status = 'active'`,
     [userId]
   );
   if (!row || !row.email || row.email_opt_in !== 1) return null;
+  const email = String(row.email);
+  const name = String(row.name);
 
   if (event) {
     const prefs = await eventPrefs(userId);
@@ -228,7 +230,7 @@ export async function emailableUser(
     const since = Date.now() - new Date(row.last_email_at).getTime();
     if (since < config.mail.throttleMinutes * 60 * 1000) return null;
   }
-  return { email: row.email, name: row.name };
+  return { email, name };
 }
 
 export async function stampEmailed(userId: number): Promise<void> {
