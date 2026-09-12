@@ -358,7 +358,10 @@
         '<div class="sb">' + esc([c.city, c.plan_code, c.shop_type].filter(Boolean).join(' · ')) + '</div></div>' +
         '</div>';
     }).join('');
-    Array.prototype.forEach.call($('list').children, function (el) {
+    /* The rows, not the column — #list also holds the New shop / Demo / People
+       bar now, and binding to its children made those buttons select a company
+       with no id, which is what left the pane on "Loading…". */
+    Array.prototype.forEach.call($('listrows').children, function (el) {
       el.addEventListener('click', function () { select(Number(el.dataset.id)); });
     });
   }
