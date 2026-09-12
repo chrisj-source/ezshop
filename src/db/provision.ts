@@ -73,6 +73,23 @@ export async function provisionCompany(input: ProvisionInput): Promise<Provision
     await admin.query(`USE \`${dbName}\``);
     await admin.query(schema);
 
+    /*
+     * And then every tenant migration, in order, on top.
+     *
+     * `tenant.sql` is the schema as somebody remembered to write it down;
+     * the migrations are the schema as it actually grew. The two drift — a
+     * column added in a migration and never folded back in is invisible until
+     * somebody provisions a new shop months later and a screen 500s on a
+     * column that exists everywhere else. That is exactly how the demo shop
+     * arrived without `documents.is_image`.
+     *
+     * So the base file is loaded and the migrations are replayed over it.
+     * Anything already present says "duplicate" and is skipped, which is the
+     * same tolerance `npm run migrate` has always had. A new shop now lands at
+     * the same version as every other one, whatever the base file forgot.
+     */
+    const applied = await applyTenantMigrations(admin);
+
     /* This shop's own MySQL login, scoped to this database and nothing else.
        Created before the row is written, so a failure here rolls the whole
        provision back rather than leaving a shop pointed at a login that does
@@ -91,8 +108,8 @@ export async function provisionCompany(input: ProvisionInput): Promise<Provision
 
     await mexec(
       `INSERT INTO company_databases (company_id, db_host, db_port, db_name, db_user, secret_ref, schema_version, migrated_at)
-       VALUES (?, ?, ?, ?, ?, ?, 1, NOW())`,
-      [companyId, config.db.host, config.db.port, dbName, dbUser, secretRef]
+       VALUES (?, ?, ?, ?, ?, ?, ?, NOW())`,
+      [companyId, config.db.host, config.db.port, dbName, dbUser, secretRef, applied]
     );
 
     const statusCount = await seedTenant(admin, dbName, input.shopType);
@@ -133,6 +150,56 @@ export async function provisionCompany(input: ProvisionInput): Promise<Provision
   } finally {
     await admin.end().catch(() => {});
   }
+}
+
+/**
+ * Replay every numbered tenant migration onto a database that has just been
+ * created from `tenant.sql`. Returns the version it ends up at, which is what
+ * `company_databases.schema_version` records — so `npm run migrate` afterwards
+ * has nothing left to do for this shop.
+ *
+ * Duplicate columns, keys and tables are skipped rather than fatal: most of
+ * what a migration adds is already in the base file, and the ones that are not
+ * are precisely the point of doing this.
+ */
+async function applyTenantMigrations(admin: Connection): Promise<number> {
+  const dir = path.join(__dirname, '..', '..', 'db', 'migrations', 'tenant');
+  let names: string[];
+  try {
+    names = await fs.readdir(dir);
+  } catch {
+    return 1;
+  }
+
+  const steps = names
+    .filter(n => /^\d+.*\.sql$/i.test(n))
+    .map(n => ({ version: Number(n.split('_')[0]), name: n }))
+    .sort((a, b) => a.version - b.version);
+
+  let at = 1;
+  for (const step of steps) {
+    const sql = await fs.readFile(path.join(dir, step.name), 'utf8');
+    for (const stmt of splitStatements(sql)) {
+      try {
+        await admin.query(stmt);
+      } catch (e) {
+        const msg = (e as Error).message;
+        if (!/Duplicate column|Duplicate key name|Duplicate entry|already exists|check that column\/key exists/i.test(msg)) {
+          throw new Error(`${step.name}: ${msg}`);
+        }
+      }
+    }
+    at = step.version;
+  }
+  return at;
+}
+
+/** Statements out of a .sql file: semicolons, minus the ones inside strings. */
+function splitStatements(sql: string): string[] {
+  return sql
+    .split(/;\s*$/m)
+    .map(s => s.replace(/^\s*--.*$/gm, '').trim())
+    .filter(Boolean);
 }
 
 /** Seeds lanes, status groups, statuses and the notification groups. */

@@ -317,6 +317,11 @@ CREATE TABLE documents (
   label           VARCHAR(190)  NOT NULL,
   storage_key     VARCHAR(255)  NOT NULL COMMENT 'path on disk or object key',
   mime_type       VARCHAR(96)   NULL,
+  source_mime     VARCHAR(100)  NULL COMMENT 'what the browser sent, when we converted it',
+  width           INT           NULL,
+  height          INT           NULL,
+  is_image        TINYINT(1)    NOT NULL DEFAULT 0,
+  is_pdf          TINYINT(1)    NOT NULL DEFAULT 0,
   size_bytes      BIGINT        NOT NULL DEFAULT 0,
   is_money_doc    TINYINT(1)    NOT NULL DEFAULT 0 COMMENT 'hidden from roles without money access',
   version_of      BIGINT UNSIGNED NULL,
@@ -325,6 +330,7 @@ CREATE TABLE documents (
   created_at      DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
   deleted_at      DATETIME      NULL,
   KEY ix_doc_ro (ro_id, created_at),
+  KEY ix_doc_images (ro_id, is_image, created_at),
   CONSTRAINT fk_doc_ro FOREIGN KEY (ro_id) REFERENCES repair_orders(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
