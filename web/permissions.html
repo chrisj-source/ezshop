@@ -311,7 +311,9 @@
         if (VIEW === 'routing' && RTDIRTY &&
             !confirm('The routing grid has unsaved changes. Leave them?')) return;
         VIEW = b.dataset.view;
-        if (VIEW === 'routing') loadRouting(); else { RTDIRTY = false; render(); }
+        RTDIRTY = false;
+        render();
+        if (VIEW === 'routing') loadRouting();
       });
     });
   }
@@ -523,7 +525,14 @@
       });
       RTDIRTY = false;
       render();
-    }).catch(function (e) { say(e.message); });
+    }).catch(function (e) {
+      RT = null;
+      $('list').innerHTML = '<div class="empty">Status messages could not load — ' +
+        esc(e.message) + '<br><br>This grid needs the a0.2.9 server: ' +
+        '<span style="color:var(--muted)">npm run build &amp;&amp; npm run migrate &amp;&amp; ' +
+        'sudo systemctl restart easyshop</span>. The page itself is served off disk, so the ' +
+        'screen updates without it while the endpoint behind it does not.</div>';
+    });
   }
 
   function rtRows() {
