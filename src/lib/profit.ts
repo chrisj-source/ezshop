@@ -424,22 +424,38 @@ export async function suggestLabour(companyId: number, roId: number): Promise<La
   });
 }
 
-/** Write the entries and the settled profit. Called as part of closing. */
+/**
+ * Write the entries and the settled profit. Called as part of closing.
+ *
+ * Closing **flags** what it settles. Payroll pays off the flag, not the close,
+ * so a trade flagged on the floor in March is paid in March and a trade first
+ * settled here at close is paid this week — and a row that was already flagged
+ * keeps the moment it was flagged, so closing does not drag old money into the
+ * current period.
+ */
 export async function saveCloseout(
   companyId: number,
   roId: number,
   entries: LabourEntry[],
   actorId: number
 ): Promise<Profit | null> {
+  const flagged = new Map<string, string>();
+  for (const r of await tq<Array<RowDataPacket & { position_key: string; flagged_at: Date | null }>>(
+    companyId, 'SELECT position_key, flagged_at FROM ro_labour WHERE ro_id = ?', [roId])) {
+    if (r.flagged_at) flagged.set(r.position_key, new Date(r.flagged_at).toISOString().slice(0, 19).replace('T', ' '));
+  }
+
   await texec(companyId, 'DELETE FROM ro_labour WHERE ro_id = ?', [roId]);
   for (const e of entries) {
     await texec(companyId, `
       INSERT INTO ro_labour
         (ro_id, position_key, basis, hours, rate_cents, rate_pct, pct_after_costs,
-         cost_cents, user_id, display_name, entered_by)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         cost_cents, user_id, display_name, entered_by,
+         flagged_at, flagged_by, flagged_by_name)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, NOW()), ?, ?)`,
       [roId, e.positionKey, e.basis, e.hours, e.rateCents, e.ratePct,
-       e.pctAfterCosts ? 1 : 0, e.costCents, e.userId, e.displayName, actorId]);
+       e.pctAfterCosts ? 1 : 0, e.costCents, e.userId, e.displayName, actorId,
+       flagged.get(e.positionKey) ?? null, actorId, null]);
   }
 
   const p = await profitFor(companyId, roId, entries);

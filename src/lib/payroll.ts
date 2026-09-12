@@ -2,10 +2,13 @@
  * Payroll for everyone who is not on a sales plan.
  *
  * The week closes on a day and at a time the shop picks — Wednesday at four, so
- * cheques can be cut that evening. A file counts for the week if it was MARKED
- * closed before that moment. `closed_at` is the moment somebody clicked Close;
- * `close_date` is the books date and can be moved by hand, so it is the wrong
- * thing to pay off. Anything closed after the cutoff waits for the next week and
+ * cheques can be cut that evening. A car counts for the week if it was FLAGGED
+ * before that moment — not closed. Flagging is the shop saying "this is what he
+ * earned on this car", and it happens while the car is still in the shop; a file
+ * can sit unclosed for weeks waiting on an insurance draft, and the tech who
+ * finished it in March should not be paid in May. `close_date` is the books date
+ * and can be moved by hand, so it was never the right thing to pay off either.
+ * Anything flagged after the cutoff waits for the next week and
  * is paid once, there.
  *
  * Nothing here works out what a car should pay. That was settled at close and
@@ -87,7 +90,11 @@ export interface CarRow {
   roNumber: string;
   vehicle: string;
   client: string | null;
-  closedAt: string;
+  /** When the trade was flagged — what the pay period is worked out from. */
+  flaggedAt: string;
+  /** Null while the car is still in the shop: a flag does not need a close. */
+  closedAt: string | null;
+  open: boolean;
   positionKey: string;
   basis: 'hours' | 'flat' | 'ems' | 'pct';
   hours: number;
@@ -107,12 +114,13 @@ export async function linesBetween(
   toAt: string
 ): Promise<Map<number, CarRow[]>> {
   const rows = await tq<Array<RowDataPacket & {
-    user_id: number; ro_id: number; ro_number: string; closed_at: string;
+    user_id: number; ro_id: number; ro_number: string;
+    closed_at: string | null; flagged_at: string;
     position_key: string; basis: CarRow['basis']; hours: string; rate_cents: number;
     cost_cents: number; year: number | null; make: string | null; model: string | null;
     client: string | null; total_loss_at: Date | null;
   }>>(companyId, `
-    SELECT l.user_id, l.ro_id, r.ro_number, r.closed_at, l.position_key, l.basis,
+    SELECT l.user_id, l.ro_id, r.ro_number, r.closed_at, l.flagged_at, l.position_key, l.basis,
            l.hours, l.rate_cents, l.cost_cents,
            v.year, v.make, v.model, c.name AS client, r.total_loss_at
     FROM ro_labour l
@@ -120,10 +128,10 @@ export async function linesBetween(
     LEFT JOIN vehicles v ON v.id = r.vehicle_id
     LEFT JOIN clients c ON c.id = r.client_id
     WHERE l.user_id IS NOT NULL
-      AND r.closed_at IS NOT NULL
+      AND l.flagged_at IS NOT NULL
       AND r.voided_at IS NULL
-      AND r.closed_at > ? AND r.closed_at <= ?
-    ORDER BY r.closed_at DESC, r.ro_number DESC`, [fromAt, toAt]);
+      AND l.flagged_at > ? AND l.flagged_at <= ?
+    ORDER BY l.flagged_at DESC, r.ro_number DESC`, [fromAt, toAt]);
 
   const out = new Map<number, CarRow[]>();
   for (const r of rows) {
@@ -132,7 +140,11 @@ export async function linesBetween(
       roNumber: r.ro_number,
       vehicle: [r.year || '', r.make || '', r.model || ''].join(' ').trim() || '—',
       client: r.client,
-      closedAt: String(r.closed_at),
+      /* What the sheet dates a line by is the flag. `closedAt` stays on the row
+         for the screens that show it, and is null on a car still in the shop. */
+      flaggedAt: String(r.flagged_at),
+      closedAt: r.closed_at ? String(r.closed_at) : null,
+      open: !r.closed_at,
       positionKey: r.position_key,
       basis: r.basis,
       hours: Number(r.hours) || 0,

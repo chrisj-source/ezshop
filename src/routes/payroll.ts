@@ -159,14 +159,16 @@ export async function registerPayroll(app: FastifyInstance): Promise<void> {
          no money on it to send. */
       cars: cars.map(c => ({
         roId: c.roId, roNumber: c.roNumber, vehicle: c.vehicle, client: c.client,
-        closedAt: c.closedAt, positionKey: c.positionKey, totalLoss: c.totalLoss,
+        flaggedAt: c.flaggedAt, closedAt: c.closedAt, open: c.open,
+        positionKey: c.positionKey, totalLoss: c.totalLoss,
         basis: salaried ? null : c.basis,
         hours: c.basis === 'flat' || c.basis === 'pct' ? null : c.hours,
         rateCents: salaried ? null : (c.basis === 'flat' || c.basis === 'pct' ? null : c.rateCents),
         costCents: salaried ? null : c.costCents
       })),
       rolled: rolled.map(c => ({
-        roNumber: c.roNumber, vehicle: c.vehicle, closedAt: c.closedAt
+        roNumber: c.roNumber, vehicle: c.vehicle,
+        flaggedAt: c.flaggedAt, closedAt: c.closedAt, open: c.open
       })),
       summary: {
         cars: cars.length,
@@ -375,7 +377,13 @@ export async function registerPayroll(app: FastifyInstance): Promise<void> {
       const car: CarRow = {
         roId: r.ro_id, roNumber: r.ro_number,
         vehicle: [r.year || '', r.make || '', r.model || ''].join(' ').trim() || '—',
-        client: r.client, closedAt: String(r.closed_at), positionKey: r.position_key,
+        client: r.client,
+        /* A paid period's snapshot predates the flag column; the closed date is
+           what it kept, and a car paid while still open has none. */
+        flaggedAt: String(r.closed_at ?? ''),
+        closedAt: r.closed_at ? String(r.closed_at) : null,
+        open: !r.closed_at,
+        positionKey: r.position_key,
         basis: r.basis, hours: Number(r.hours) || 0, rateCents: Number(r.rate_cents) || 0,
         costCents: Number(r.cost_cents) || 0, totalLoss: !!r.total_loss_at
       };

@@ -21,10 +21,17 @@ export const METHOD_LABEL: Record<Method, string> = {
   writeoff: 'Write-off / discount'
 };
 
-/** The two methods that carry a number, and what that number is called. */
-export const REF_LABEL: Partial<Record<Method, string>> = {
-  check: 'Check number',
-  draft: 'Draft number'
+/**
+ * What the reference field is called on each method, and whether it is
+ * required. A check and a draft have a number you can go and look up, so the
+ * form insists on it; a card has a transaction id that is useful and often not
+ * to hand; cash and a write-off have no number at all and take the note
+ * everything else also takes.
+ */
+export const REF_FIELD: Partial<Record<Method, { label: string; required: boolean }>> = {
+  check: { label: 'Check number', required: true },
+  draft: { label: 'Draft number', required: true },
+  card: { label: 'Transaction ID', required: false }
 };
 
 export interface Payment {
@@ -165,8 +172,9 @@ export function checkPayment(p: Partial<NewPayment>): string | null {
     return 'An amount is required.';
   }
   if (Number(p.amountCents) < 0) return 'A payment cannot be negative.';
-  if (REF_LABEL[p.method] && !String(p.reference ?? '').trim()) {
-    return `${REF_LABEL[p.method]} is required for a ${METHOD_LABEL[p.method].toLowerCase()}.`;
+  const ref = REF_FIELD[p.method];
+  if (ref && ref.required && !String(p.reference ?? '').trim()) {
+    return `${ref.label} is required for a ${METHOD_LABEL[p.method].toLowerCase()}.`;
   }
   if (!/^\d{4}-\d{2}-\d{2}$/.test(String(p.receivedAt ?? ''))) {
     return 'A received date is required.';

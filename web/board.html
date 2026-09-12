@@ -3126,8 +3126,13 @@
 
   var MONEY = null, FLAGS = null, MDLG = null;
 
-  function payMethodNeedsRef(m) { return m === 'check' || m === 'draft'; }
-  function refLabel(m) { return m === 'check' ? 'Check number' : 'Draft number'; }
+  /* What the reference field is called, and whether it is insisted on, comes
+     from the server with the method list — so this screen and the closed board
+     cannot drift apart on it. Cash and a write-off carry no number at all. */
+  function refFor(method) {
+    var m = (MONEY.methods || []).filter(function (x) { return x.key === method; })[0];
+    return (m && m.ref) || null;
+  }
 
   function loadMoney() {
     MONEY = null; FLAGS = null;
@@ -3211,8 +3216,9 @@
         (void_ ? ' · voided: ' + esc(p.voidReason || '') : '') +
         (p.note ? ' · ' + esc(p.note) : '') + '</div></div>' +
         '<div class="mdnum" style="font:400 13px var(--font)">' + esc(money(p.amountCents)) + '</div>' +
-        (!void_ && MONEY.canRecord
-          ? '<button class="visbtn" data-payvoid="' + p.id + '" title="Void this payment">Void</button>'
+        (!void_ && MONEY.canEdit
+          ? '<button class="visbtn" data-payedit="' + p.id + '">Edit</button>' +
+            '<button class="visbtn" data-payvoid="' + p.id + '" title="Void this payment">Void</button>'
           : '') + '</div>';
     });
 
@@ -3220,6 +3226,14 @@
     el.innerHTML = h;
 
     on('payAdd', 'click', function () { openPayDlg({}); });
+    Array.prototype.forEach.call(el.querySelectorAll('[data-payedit]'), function (btn) {
+      btn.addEventListener('click', function () {
+        var p = MONEY.payments.filter(function (x) {
+          return String(x.id) === btn.dataset.payedit;
+        })[0];
+        if (p) openPayDlg({ edit: p });
+      });
+    });
     Array.prototype.forEach.call(el.querySelectorAll('[data-payvoid]'), function (btn) {
       btn.addEventListener('click', function () {
         var why = prompt('Voiding leaves the row in the record and takes the money off the ' +
@@ -3321,14 +3335,21 @@
     var b = MONEY.balance;
     var owed = Math.max(0, b.balanceCents);
 
+    var editing = opts.edit || null;
+
     openMdlg(
       '<div class="mdhead">' +
-        '<div class="mdtitle">' + (closing ? 'Closing RO ' + esc(MONEY.roNumber) : 'Record payment') + '</div>' +
+        '<div class="mdtitle">' + (closing
+          ? 'Closing RO ' + esc(MONEY.roNumber)
+          : editing ? 'Edit payment' : 'Record payment') + '</div>' +
         '<div class="mdsub">' + (closing
           ? esc(money(owed)) + ' is still owed. Enter every payment that came in — ' +
             'Save and add another keeps the form open for the next check.'
-          : 'RO ' + esc(MONEY.roNumber) + ' · ' + esc(money(b.paidCents)) + ' of ' +
-            esc(money(b.approvalCents)) + ' received') + '</div>' +
+          : editing
+            ? 'RO ' + esc(MONEY.roNumber) + ' · the correction is kept in the activity log ' +
+              'with what it was before'
+            : 'RO ' + esc(MONEY.roNumber) + ' · ' + esc(money(b.paidCents)) + ' of ' +
+              esc(money(b.approvalCents)) + ' received') + '</div>' +
       '</div>' +
       '<div class="mdbody">' +
         '<div class="mdrow"><span class="sub" style="text-transform:none;letter-spacing:0">Balance</span>' +
@@ -3357,8 +3378,8 @@
         '</div>' +
 
         '<div class="mdf" id="pdRefWrap">' +
-          '<div class="k"><span id="pdRefK">Check number</span> ' +
-          '<span style="color:var(--acc2)">required</span></div>' +
+          '<div class="k"><span id="pdRefK">Check number</span>' +
+          '<span id="pdRefReq" style="color:var(--acc2)"> required</span></div>' +
           '<input id="pdRef" placeholder="e.g. 10428"></div>' +
         '<div class="mdf"><div class="k">Note <span style="opacity:.75">optional</span></div>' +
           '<input id="pdNote" placeholder="Anything worth remembering about this payment"></div>' +
@@ -3376,22 +3397,40 @@
       '</div>' +
       '<div class="mdfoot">' +
         '<button class="btn" id="pdCancel">' + (closing ? 'Back' : 'Cancel') + '</button>' +
-        (closing
+        (editing
+          ? '<button class="btn btn-solid" id="pdSave" style="margin-left:auto">Save changes</button>'
+          : closing
           ? '<button class="btn" id="pdUnpaid" style="margin-left:auto">Close unpaid</button>' +
             '<button class="btn" id="pdAgain">Save and add another</button>' +
             '<button class="btn btn-solid" id="pdSave">Record and close file</button>'
-          : '<button class="btn btn-solid" id="pdSave" style="margin-left:auto">Record payment</button>') +
+            : '<button class="btn btn-solid" id="pdSave" style="margin-left:auto">Record payment</button>') +
       '</div>');
 
-    var payer = 'customer';
+    var payer = editing ? editing.payer : 'customer';
+
+    if (editing) {
+      $('pdAmt').value = dollars(editing.amountCents);
+      $('pdDate').value = editing.receivedAt;
+      $('pdMethod').value = editing.method;
+      $('pdNote').value = editing.note || '';
+      Array.prototype.forEach.call($('pdPayer').children, function (c) {
+        c.classList.toggle('on', c.dataset.payer === payer);
+      });
+    }
 
     function syncRef() {
-      var m = $('pdMethod').value;
-      $('pdRefWrap').hidden = !payMethodNeedsRef(m);
-      if (payMethodNeedsRef(m)) $('pdRefK').textContent = refLabel(m);
+      var ref = refFor($('pdMethod').value);
+      $('pdRefWrap').hidden = !ref;
+      if (ref) {
+        $('pdRefK').textContent = ref.label;
+        $('pdRefReq').textContent = ref.required ? ' required' : ' optional';
+        $('pdRefReq').style.color = ref.required ? 'var(--acc2)' : 'var(--dim)';
+        $('pdRef').placeholder = ref.required ? 'e.g. 10428' : 'if you have it';
+      }
     }
     syncRef();
 
+    if (editing && $('pdRef')) $('pdRef').value = editing.reference || '';
     $('pdMethod').addEventListener('change', syncRef);
     Array.prototype.forEach.call($('pdPayer').querySelectorAll('[data-payer]'), function (btn) {
       btn.addEventListener('click', function () {
@@ -3420,8 +3459,8 @@
     function record(then) {
       var btns = MDLG.querySelectorAll('.mdfoot button');
       Array.prototype.forEach.call(btns, function (b2) { b2.disabled = true; });
-      return api('/api/ro/' + OPEN + '/payments', {
-        method: 'POST', body: JSON.stringify(body())
+      return api(editing ? '/api/payments/' + editing.id : '/api/ro/' + OPEN + '/payments', {
+        method: editing ? 'PATCH' : 'POST', body: JSON.stringify(body())
       }).then(function (d) {
         MONEY.balance = d.balance;
         MONEY.payments = d.payments;
@@ -3472,7 +3511,7 @@
       record(function () {
         if (!closing) {
           closeMdlg();
-          Shell.announce('Payment recorded.');
+          Shell.announce(editing ? 'Payment corrected.' : 'Payment recorded.');
           load();
           return;
         }

@@ -70,6 +70,11 @@ export const CAP_DEFS: CapDef[] = [
   { key: 'parts_money',   label: 'Parts cost and margin',      section: 'Money',    see: 'partsMoney',       change: 'editPartsMoney' },
   { key: 'labour_money',  label: 'Labour hours, paint and PDR', section: 'Money',   see: 'labourMoney',      change: 'editLabourMoney' },
   { key: 'commission',    label: 'Commission',                 section: 'Money',    see: 'commissionMoney' },
+  /* Payments are three separate answers, not one: the desk that takes a check
+     is not always the desk allowed to change one after the fact. See and add
+     are a see/change pair; editing and voiding is its own tick. */
+  { key: 'payments',      label: 'Payments on a file',         section: 'Money',    see: 'viewPayments',     change: 'recordPayments' },
+  { key: 'payment_edit',  label: 'Edit or void a payment',     section: 'Money',    see: 'editPayments' },
 
   { key: 'sees_all',      label: 'Sees files on the board',    section: 'Files',    see: 'seesRepairOrders' },
   { key: 'notes',         label: 'Notes and history on a file', section: 'Files',   see: 'viewNotes',        change: 'addNotes' },
@@ -112,6 +117,12 @@ export interface Caps {
   labourMoney: boolean;
   editLabourMoney: boolean;
   commissionMoney: boolean;
+  /** See what has been paid on a file, and the balance. */
+  viewPayments: boolean;
+  /** Record a payment. */
+  recordPayments: boolean;
+  /** Change or void a payment that has already been recorded. */
+  editPayments: boolean;
   /* files */
   seesRepairOrders: boolean;
   /** The notes and history block on a file. Its own tick because it is the one
@@ -160,7 +171,7 @@ export interface Caps {
 
 const CAPS_FIELDS: Array<keyof Caps> = [
   'money', 'editMoney', 'partsMoney', 'editPartsMoney', 'labourMoney', 'editLabourMoney',
-  'commissionMoney', 'seesRepairOrders', 'viewNotes', 'addNotes', 'seesAllRepairOrders', 'ownWorkOnly',
+  'commissionMoney', 'viewPayments', 'recordPayments', 'editPayments', 'seesRepairOrders', 'viewNotes', 'addNotes', 'seesAllRepairOrders', 'ownWorkOnly',
   'editRepairOrders', 'anyStatus', 'markTotalLoss', 'voidRepairOrders', 'closeRepairOrders',
   'uncloseRepairOrders', 'manageWholesaleClients', 'viewLeads', 'manageLeads', 'deleteLeads', 'viewPaperwork',
   'uploadPaperwork', 'deleteDocuments', 'acceptImports', 'editAssignments', 'manageParts',
@@ -225,10 +236,12 @@ export function capsFromRows(roleKeys: string[], roles: RoleRow[], caps: CapRow[
 const LEGACY: Record<string, Array<[string, 0 | 1, 0 | 1]>> = {
   owner: CAP_KEYS.map(k => [k, 1, 1] as [string, 1, 1]),
   accounting: [['ro_totals', 1, 1], ['parts_money', 1, 0], ['labour_money', 1, 0], ['commission', 1, 1],
+    ['payments', 1, 1], ['payment_edit', 1, 0],
     ['sees_all', 1, 0], ['close_ro', 1, 1], ['unclose', 1, 1], ['wholesale_clients', 1, 1],
     ['leads', 1, 0], ['paperwork', 1, 1],
     ['reports', 1, 1], ['money_reports', 1, 0], ['pay_plans', 1, 1], ['notes', 1, 1]],
   estimator: [['ro_totals', 1, 1], ['parts_money', 1, 1], ['labour_money', 1, 1], ['commission', 1, 0],
+    ['payments', 1, 0],
     ['sees_all', 1, 0], ['edit_ro', 1, 1], ['any_status', 1, 1], ['total_loss', 1, 1], ['close_ro', 1, 0],
     ['leads', 1, 1], ['del_lead', 1, 1], ['paperwork', 1, 1], ['del_doc', 1, 1], ['imports', 1, 1],
     ['assign', 1, 1], ['parts', 1, 1], ['sublet', 1, 1], ['reports', 1, 0], ['money_reports', 1, 0],
@@ -238,7 +251,7 @@ const LEGACY: Record<string, Array<[string, 0 | 1, 0 | 1]>> = {
     ['sublet', 1, 1], ['reports', 1, 0], ['notes', 1, 1]],
   parts_manager: [['parts_money', 1, 1], ['sees_all', 1, 0], ['paperwork', 1, 0], ['parts', 1, 1],
     ['sublet', 1, 1], ['notes', 1, 1]],
-  front_office: [['ro_totals', 1, 0], ['sees_all', 1, 0], ['edit_ro', 1, 1], ['any_status', 1, 1],
+  front_office: [['ro_totals', 1, 0], ['payments', 1, 1], ['sees_all', 1, 0], ['edit_ro', 1, 1], ['any_status', 1, 1],
     ['close_ro', 1, 1], ['leads', 1, 1], ['del_lead', 1, 0], ['paperwork', 1, 1], ['notes', 1, 1]],
   salesperson: [['sees_all', 1, 0], ['leads', 1, 1], ['paperwork', 1, 0], ['notes', 1, 1]],
   technician: [['sees_all', 1, 0], ['labour_money', 1, 0], ['notes', 1, 1]]

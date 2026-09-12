@@ -223,8 +223,15 @@
     return new Date(iso + 'T00:00:00').toLocaleDateString('en-US',
       { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
   }
+  /* A line is dated by when it was flagged, because that is what the week is
+     worked out from. A car flagged before it closed says so. */
+  function flagDate(c) {
+    return closedAt(c.flaggedAt || c.closedAt) + (c.open ? ' · in shop' : '');
+  }
   function closedAt(v) {
+    if (!v) return '—';
     var d = new Date(String(v).replace(' ', 'T'));
+    if (isNaN(d.getTime())) return '—';
     return d.toLocaleDateString('en-US', { weekday: 'short' }) + ' ' +
       d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }).toLowerCase();
   }
@@ -435,7 +442,7 @@
         '<div class="tro">' + esc(c.roNumber) + '</div>' +
         '<div class="tcell">' + esc(c.vehicle) +
         (c.totalLoss ? ' <span class="tl">total loss</span>' : '') + '</div>' +
-        '<div class="tcell" style="color:var(--dim)">' + esc(closedAt(c.closedAt)) + '</div>' +
+        '<div class="tcell" style="color:var(--dim)">' + esc(flagDate(c)) + '</div>' +
         (salaried ? '' : '<div class="basis' + (flat ? ' flat' : '') + '">' +
           (flat ? 'Flat price' : 'Hours') + '</div>') +
         '<div class="tcell num">' + (c.hours === null ? '—' : hrs(c.hours)) + '</div>' +
@@ -458,7 +465,7 @@
     SHEET.rolled.forEach(function (c) {
       h.push('<div class="rolledrow"><div>' + esc(c.roNumber) + '</div>' +
         '<div class="tcell">' + esc(c.vehicle) + '</div>' +
-        '<div class="tcell">' + esc(closedAt(c.closedAt)) + '</div>' +
+        '<div class="tcell">' + esc(flagDate(c)) + '</div>' +
         '<div style="text-align:right;font:400 11px var(--font);color:var(--dim)">next week</div></div>');
     });
     h.push('</div></div>');
@@ -530,7 +537,7 @@
     sheet.cars.forEach(function (c) {
       var flat = c.basis === 'flat' || c.basis === 'pct';
       h.push('<tr><td>' + esc(c.roNumber) + '</td><td>' + esc(c.vehicle) + '</td>' +
-        '<td>' + esc(closedAt(c.closedAt)) + '</td>' +
+        '<td>' + esc(flagDate(c)) + '</td>' +
         (salaried ? '' : '<td>' + (flat ? 'Flat price' : 'Hours') + '</td>') +
         '<td class="r">' + (c.hours === null ? '—' : hrs(c.hours)) + '</td>' +
         (salaried ? '' :
@@ -565,7 +572,7 @@
       h.push('<div class="rollbox"><div class="pk">Closed after the cutoff — pays next week</div>' +
         sheet.rolled.map(function (c) {
           return '<div class="rollline">' + esc(c.roNumber) + ' · ' + esc(c.vehicle) +
-            ' · closed ' + esc(closedAt(c.closedAt)) + '</div>';
+            ' · flagged ' + esc(flagDate(c)) + '</div>';
         }).join('') + '</div>');
     }
 

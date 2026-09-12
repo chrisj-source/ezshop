@@ -134,6 +134,14 @@
      A file's parts lines, as a modal over the list. It replaced an expansion
      under the row: seventeen lines pushed every other file off the screen, and
      what the desk came to read arrived flat and undifferentiated. */
+  /* The costs drawer is opened from inside the file modal, so it has to sit
+     above it — the shared chrome puts a drawer at 21, which is under the modal's
+     70 and left Costs rendering behind the thing that opened it. Raised here
+     rather than in shell.css: this is the only screen with a full-screen modal
+     that opens a drawer. */
+  .scrim.open { z-index:80; }
+  .drawer { z-index:81; }
+
   .fmscrim { position:fixed; inset:0; background:rgba(6,10,18,.66); z-index:70; }
   .fmscrim[hidden], .fmodal[hidden] { display:none; }
   .fmodal {

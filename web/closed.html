@@ -122,6 +122,12 @@
   .paybal .out { color:#f0bdb2; }
   .paybal .in { color:#a9d8c2; }
   .paybal .sub2 { display:block; font:400 11px var(--font); color:var(--dim); margin-top:3px; }
+  .payline {
+    display:flex; align-items:center; gap:8px; margin-top:6px; padding-top:6px;
+    border-top:1px solid var(--whisper); font:400 11.5px var(--font); color:var(--muted);
+  }
+  .payline .num { font-variant-numeric:tabular-nums; }
+  #pyRefReq { color:var(--dim); }
   .payg { display:grid; grid-template-columns:1fr 1fr; gap:9px; margin-top:10px; }
   .payg label, #dlgPayForm label { font:400 11px var(--font); color:var(--dim); }
   .dinput.num { text-align:right; font-variant-numeric:tabular-nums; }
@@ -203,7 +209,7 @@
           </select></label>
         </div>
         <label id="pyRefWrap" style="display:block;margin-top:9px">
-          <span id="pyRefK">Check number</span>
+          <span id="pyRefK">Check number</span><span id="pyRefReq"> required</span>
           <input class="dinput" id="pyRef" placeholder="e.g. 10428">
         </label>
         <label style="display:block;margin-top:9px">Note — optional
@@ -560,6 +566,8 @@
       if (!EDIT || EDIT.id !== id) return;
       PAYSTATE = d;
       paintBalance();
+      /* The button offers a new payment; editing one is reached from its own
+         line, so a paid file still lets a wrong figure be corrected. */
       $('dlgPayOpen').hidden = !d.canRecord || d.balance.balanceCents <= 0;
     }).catch(function (e) {
       $('dlgBal').textContent = e.message;
@@ -574,12 +582,26 @@
       ? '<span class="out">' + esc(usd(b.balanceCents)) + ' owed</span>'
       : '<span class="in">Paid in full</span>') +
       '<span class="sub2">' + esc(usd(b.paidCents)) + ' of ' + esc(usd(b.approvalCents)) +
-      ' received' + (live.length
-        ? ' · ' + live.map(function (p) {
-            return esc(p.receivedAt) + ' ' + esc(p.methodLabel) +
-              (p.reference ? ' ' + esc(p.reference) : '') + ' ' + esc(usd(p.amountCents));
-          }).join(' · ')
-        : ' · nothing recorded') + '</span>';
+      ' received' + (live.length ? '' : ' · nothing recorded') + '</span>' +
+      live.map(function (p) {
+        return '<div class="payline">' +
+          '<span style="flex:1">' + esc(p.receivedAt) + ' · ' + esc(p.methodLabel) +
+          (p.reference ? ' ' + esc(p.reference) : '') +
+          ' · ' + (p.payer === 'insurer' ? 'insurer' : 'customer') + '</span>' +
+          '<span class="num">' + esc(usd(p.amountCents)) + '</span>' +
+          (PAYSTATE.canEdit
+            ? '<button class="ghostbtn" data-payedit="' + p.id + '">Edit</button>'
+            : '') + '</div>';
+      }).join('');
+
+    Array.prototype.forEach.call($('dlgBal').querySelectorAll('[data-payedit]'), function (btn) {
+      btn.addEventListener('click', function () {
+        var p = PAYSTATE.payments.filter(function (x) {
+          return String(x.id) === btn.dataset.payedit;
+        })[0];
+        if (p) startEdit(p);
+      });
+    });
   }
 
   function closeEdit() {
@@ -588,31 +610,61 @@
     EDIT = null;
   }
 
+  /* The field follows the method, and the server sends both the label and
+     whether it is insisted on — check and draft have a number worth chasing,
+     a card has a transaction id that is often not to hand, cash has neither. */
   function syncRef() {
-    var m = $('pyMethod').value;
-    var needs = m === 'check' || m === 'draft';
-    $('pyRefWrap').hidden = !needs;
-    if (needs) $('pyRefK').textContent = m === 'check' ? 'Check number' : 'Draft number';
+    var m = (PAYSTATE.methods || []).filter(function (x) { return x.key === $('pyMethod').value; })[0];
+    var ref = (m && m.ref) || null;
+    $('pyRefWrap').hidden = !ref;
+    if (ref) {
+      $('pyRefK').textContent = ref.label;
+      $('pyRefReq').textContent = ref.required ? ' — required' : ' — optional';
+      $('pyRef').placeholder = ref.required ? 'e.g. 10428' : 'if you have it';
+    }
   }
   $('pyMethod').addEventListener('change', syncRef);
 
+  /* Which payment the form is editing, or null when it is a new one. */
+  var PYEDIT = null;
+
   $('dlgPayOpen').addEventListener('click', function () {
     if (!PAYSTATE) return;
+    PYEDIT = null;
     $('dlgPayForm').hidden = false;
     $('dlgPaySave').hidden = false;
+    $('dlgPaySave').textContent = 'Record';
     this.hidden = true;
     $('pyAmt').value = (Math.max(0, PAYSTATE.balance.balanceCents) / 100).toFixed(2);
     $('pyDate').value = new Date().toISOString().slice(0, 10);
+    $('pyRef').value = '';
+    $('pyNote').value = '';
     syncRef();
     $('pyAmt').focus();
   });
+
+  function startEdit(p) {
+    PYEDIT = p;
+    $('dlgPayForm').hidden = false;
+    $('dlgPaySave').hidden = false;
+    $('dlgPaySave').textContent = 'Save changes';
+    $('dlgPayOpen').hidden = true;
+    $('pyAmt').value = (p.amountCents / 100).toFixed(2);
+    $('pyDate').value = p.receivedAt;
+    $('pyMethod').value = p.method;
+    $('pyPayer').value = p.payer;
+    $('pyRef').value = p.reference || '';
+    $('pyNote').value = p.note || '';
+    syncRef();
+    $('pyAmt').focus();
+  }
 
   $('dlgPaySave').addEventListener('click', function () {
     if (!EDIT) return;
     var btn = this;
     btn.disabled = true;
-    api('/api/ro/' + EDIT.id + '/payments', {
-      method: 'POST',
+    api(PYEDIT ? '/api/payments/' + PYEDIT.id : '/api/ro/' + EDIT.id + '/payments', {
+      method: PYEDIT ? 'PATCH' : 'POST',
       body: JSON.stringify({
         amountCents: Math.round(Number($('pyAmt').value || 0) * 100),
         method: $('pyMethod').value,
@@ -629,13 +681,16 @@
       $('pyRef').value = '';
       $('pyNote').value = '';
       $('pyAmt').value = (Math.max(0, d.balance.balanceCents) / 100).toFixed(2);
-      if (d.balance.balanceCents <= 0) {
+      if (d.balance.balanceCents <= 0 && !PYEDIT) {
         $('dlgPayForm').hidden = true;
         $('dlgPaySave').hidden = true;
       }
-      $('dlgMsg').textContent = d.balance.balanceCents > 0
-        ? 'Recorded. ' + usd(d.balance.balanceCents) + ' still owed.'
-        : 'Recorded. This file is paid.';
+      $('dlgMsg').textContent = (PYEDIT ? 'Corrected. ' : 'Recorded. ') +
+        (d.balance.balanceCents > 0
+          ? usd(d.balance.balanceCents) + ' still owed.'
+          : 'This file is paid.');
+      PYEDIT = null;
+      $('dlgPaySave').textContent = 'Record';
       $('dlgMsg').className = 'msg ok';
       return load();
     }).catch(function (e) {

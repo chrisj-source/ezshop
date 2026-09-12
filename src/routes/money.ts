@@ -2,10 +2,10 @@ import { FastifyInstance } from 'fastify';
 import { RowDataPacket } from 'mysql2/promise';
 import { tq, tqOne, texec } from '../db/tenant';
 import { requireCompany } from '../middleware/context';
-import { audit } from '../lib/audit';
+import { audit, diff } from '../lib/audit';
 import { actorFrom } from './audit';
 import {
-  METHODS, METHOD_LABEL, Method, balanceFor, checkPayment, duplicateOf,
+  METHODS, METHOD_LABEL, REF_FIELD, Method, balanceFor, checkPayment, duplicateOf,
   paymentsFor, recount
 } from '../lib/payments';
 import {
@@ -42,7 +42,9 @@ export async function registerMoney(app: FastifyInstance): Promise<void> {
   app.get('/api/ro/:id/payments', async (req, reply) => {
     const ctx = requireCompany(req, reply);
     if (!ctx) return;
-    if (!ctx.caps.money) return reply.code(403).send({ error: 'Payments are money.' });
+    if (!ctx.caps.viewPayments) {
+      return reply.code(403).send({ error: 'Payments are their own permission.' });
+    }
 
     const id = Number((req.params as { id: string }).id);
     const cid = ctx.company!.id;
@@ -53,8 +55,14 @@ export async function registerMoney(app: FastifyInstance): Promise<void> {
       roNumber: ro.ro_number,
       balance: await balanceFor(cid, id),
       payments: await paymentsFor(cid, id),
-      methods: METHODS.map(m => ({ key: m, label: METHOD_LABEL[m] })),
-      canRecord: ctx.caps.editMoney
+      methods: METHODS.map(m => ({
+        key: m,
+        label: METHOD_LABEL[m],
+        /* null where the method carries no number: cash and a write-off. */
+        ref: REF_FIELD[m] ?? null
+      })),
+      canRecord: ctx.caps.recordPayments,
+      canEdit: ctx.caps.editPayments
     };
   });
 
@@ -66,8 +74,8 @@ export async function registerMoney(app: FastifyInstance): Promise<void> {
   app.post('/api/ro/:id/payments', async (req, reply) => {
     const ctx = requireCompany(req, reply);
     if (!ctx) return;
-    if (!ctx.caps.editMoney) {
-      return reply.code(403).send({ error: 'Recording a payment is the desk’s and accounting’s.' });
+    if (!ctx.caps.recordPayments) {
+      return reply.code(403).send({ error: 'Recording a payment is not one of your permissions.' });
     }
 
     const id = Number((req.params as { id: string }).id);
@@ -128,7 +136,9 @@ export async function registerMoney(app: FastifyInstance): Promise<void> {
   app.post('/api/payments/:id/void', async (req, reply) => {
     const ctx = requireCompany(req, reply);
     if (!ctx) return;
-    if (!ctx.caps.editMoney) return reply.code(403).send({ error: 'Not permitted' });
+    if (!ctx.caps.editPayments) {
+      return reply.code(403).send({ error: 'Voiding a payment is its own permission.' });
+    }
 
     const id = Number((req.params as { id: string }).id);
     const cid = ctx.company!.id;
@@ -156,6 +166,107 @@ export async function registerMoney(app: FastifyInstance): Promise<void> {
     });
 
     return { balance, payments: await paymentsFor(cid, Number(pay.ro_id)) };
+  });
+
+  /**
+   * Change a payment that is already recorded. A correction is a change with a
+   * before and an after in the log, not a delete and a re-entry — the figure
+   * that was wrong is part of the record too.
+   */
+  app.patch('/api/payments/:id', async (req, reply) => {
+    const ctx = requireCompany(req, reply);
+    if (!ctx) return;
+    if (!ctx.caps.editPayments) {
+      return reply.code(403).send({ error: 'Editing a payment is its own permission.' });
+    }
+
+    const id = Number((req.params as { id: string }).id);
+    const cid = ctx.company!.id;
+
+    const was = await tqOne<RowDataPacket>(cid, `
+      SELECT id, ro_id, amount_cents, method, payer, reference, note, received_at, voided_at
+        FROM ro_payments WHERE id = ?`, [id]);
+    if (!was) return reply.code(404).send({ error: 'No such payment' });
+    if (was.voided_at) {
+      return reply.code(400).send({ error: 'That payment is void. Record a new one instead.' });
+    }
+
+    const b = req.body as {
+      amountCents?: number; method?: Method; payer?: string;
+      reference?: string; note?: string; receivedAt?: string;
+    };
+
+    const next = {
+      amountCents: b.amountCents === undefined
+        ? Number(was.amount_cents) : Math.round(Number(b.amountCents) || 0),
+      method: (b.method ?? was.method) as Method,
+      payer: (b.payer === undefined
+        ? was.payer
+        : b.payer === 'insurer' ? 'insurer' : 'customer') as 'customer' | 'insurer',
+      reference: b.reference === undefined
+        ? (was.reference ?? null)
+        : (String(b.reference).trim().slice(0, 64) || null),
+      note: b.note === undefined
+        ? (was.note ?? null)
+        : (String(b.note).trim().slice(0, 255) || null),
+      receivedAt: b.receivedAt === undefined
+        ? String(was.received_at).slice(0, 10)
+        : String(b.receivedAt).slice(0, 10)
+    };
+
+    const bad = checkPayment(next);
+    if (bad) return reply.code(400).send({ error: bad });
+
+    /* The same number twice on one file is still the rule — but a payment is
+       allowed to keep its own number. */
+    const keptOwn = next.method === was.method && next.reference === (was.reference ?? null);
+    const clash = keptOwn
+      ? null
+      : await duplicateOf(cid, Number(was.ro_id), next.method, next.reference);
+    if (clash) {
+      return reply.code(409).send({
+        error: `${METHOD_LABEL[next.method]} ${next.reference} is already on this file, ` +
+          `on ${clash.receivedAt} for ${money(clash.amountCents)}.`
+      });
+    }
+
+    await texec(cid, `
+      UPDATE ro_payments
+         SET amount_cents = ?, method = ?, payer = ?, reference = ?, note = ?, received_at = ?
+       WHERE id = ?`,
+      [next.amountCents, next.method, next.payer, next.reference, next.note,
+       next.receivedAt, id]);
+
+    const balance = await recount(cid, Number(was.ro_id));
+    const ro = await roFor(cid, Number(was.ro_id));
+
+    const changes = diff({
+      amount: money(Number(was.amount_cents)),
+      method: METHOD_LABEL[was.method as Method],
+      payer: String(was.payer),
+      reference: was.reference ?? '',
+      note: was.note ?? '',
+      received: String(was.received_at).slice(0, 10)
+    }, {
+      amount: money(next.amountCents),
+      method: METHOD_LABEL[next.method],
+      payer: next.payer,
+      reference: next.reference ?? '',
+      note: next.note ?? '',
+      received: next.receivedAt
+    });
+
+    await audit(cid, actorFrom(req), {
+      entity: 'payment', entityId: id, roId: Number(was.ro_id), action: 'edited', area: 'Money',
+      label: `Payment corrected on RO ${ro?.ro_number ?? ''} — ` +
+        (changes.length
+          ? changes.map(c => `${c.field} ${c.from} → ${c.to}`).join(', ')
+          : 'nothing moved'),
+      changes,
+      sensitive: true
+    });
+
+    return { balance, payments: await paymentsFor(cid, Number(was.ro_id)) };
   });
 
   /* ---------------------------------------------------------- pay plans */
@@ -370,7 +481,7 @@ export async function registerMoney(app: FastifyInstance): Promise<void> {
     const cid = ctx.company!.id;
 
     const out: Record<string, unknown> = {};
-    if (ctx.caps.money) out.balance = await balanceFor(cid, id);
+    if (ctx.caps.viewPayments) out.balance = await balanceFor(cid, id);
     if (ctx.caps.labourMoney) {
       const { rows } = await flagRowsFor(cid, id);
       out.flags = {
@@ -386,7 +497,7 @@ export async function registerMoney(app: FastifyInstance): Promise<void> {
   app.get('/api/receivables', async (req, reply) => {
     const ctx = requireCompany(req, reply);
     if (!ctx) return;
-    if (!ctx.caps.money) return reply.code(403).send({ error: 'Not permitted' });
+    if (!ctx.caps.viewPayments) return reply.code(403).send({ error: 'Not permitted' });
 
     const rows = await tq<RowDataPacket[]>(ctx.company!.id, `
       SELECT r.id, r.ro_number, r.amount_cents, r.paid_cents, r.close_date,
