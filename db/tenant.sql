@@ -179,7 +179,8 @@ CREATE TABLE repair_orders (
   adjuster_phone    VARCHAR(32)   NULL,
   adjuster_email    VARCHAR(190)  NULL,
   amount_cents      BIGINT        NOT NULL DEFAULT 0,
-  deductible_cents  BIGINT        NOT NULL DEFAULT 0,
+  /* deductible_cents lives with the close-out columns further down — it was
+     declared twice here, which is why provisioning a new shop failed. */
   deductible_waived TINYINT(1)    NOT NULL DEFAULT 0,
   parts_cost_cents  BIGINT        NOT NULL DEFAULT 0,
   sublet_cost_cents BIGINT        NOT NULL DEFAULT 0,
