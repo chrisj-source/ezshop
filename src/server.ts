@@ -36,6 +36,7 @@ import { registerPayroll } from './routes/payroll';
 import { registerCalendar } from './routes/gcal';
 import { registerMoney } from './routes/money';
 import { purgeExpiredSessions } from './auth/session';
+import { startDemoReset } from './lib/demo';
 import { closeQueue, startWorker } from './queue';
 import { makeDerivatives } from './jobs/derivatives';
 import { prunePageCache } from './jobs/page-cache';
@@ -156,6 +157,11 @@ async function main(): Promise<void> {
     `heif-convert: ${tools.heifConvert ? 'yes' : 'no'}, mutool: ${tools.mutool ? 'yes' : 'no'}` +
     (tools.sharp && tools.mutool ? '' : ' (see INSTALL-MEDIA.md)')
   );
+
+  /* The demo shop goes back to its seed at 2am Central. Checked on a timer
+     rather than scheduled to the second, so a box that was asleep or
+     restarting at 2am still gets its reset. */
+  startDemoReset(app.log);
 
   /* Rendered PDF pages nobody has opened in a month. */
   const pageSweep = setInterval(() => {

@@ -11,8 +11,20 @@ import {
 
 export interface UserRow extends RowDataPacket {
   id: number; email: string | null; name: string;
-  is_platform_owner: number; status: string; must_change_pw: number;
+  is_platform_owner: number; platform_role: PlatformRole;
+  status: string; must_change_pw: number;
 }
+
+/**
+ * What somebody is on the platform, as opposed to inside a shop.
+ *
+ *  - `admin` runs the platform day to day: shops, features, entering a shop,
+ *    resetting a shop owner's password.
+ *  - `root` is the break-glass account. It can do everything an admin can,
+ *    plus manage admins and delete a shop, and it cannot sign in at all unless
+ *    ROOT_ENABLED is set on the box.
+ */
+export type PlatformRole = 'none' | 'admin' | 'root';
 
 export interface CompanyRow extends RowDataPacket {
   id: number; slug: string; name: string; shop_type: string;
@@ -23,6 +35,8 @@ export interface Ctx {
   sessionId: string;
   user: UserRow;
   isPlatformOwner: boolean;
+  /** What they are on the platform: none, admin, or the break-glass root. */
+  platformRole: PlatformRole;
   impersonating: boolean;
   company: CompanyRow | null;
   /** Primary role — the highest-ranked one held. Display and notifications. */
@@ -85,7 +99,8 @@ export async function attachContext(req: FastifyRequest): Promise<void> {
   if (!sess) return;
 
   const user = await mqOne<UserRow>(
-    `SELECT id, email, name, is_platform_owner, status, must_change_pw FROM users WHERE id = ?`,
+    `SELECT id, email, name, is_platform_owner, platform_role, status, must_change_pw
+       FROM users WHERE id = ?`,
     [sess.user_id]
   );
   if (!user || user.status !== 'active') return;
@@ -159,7 +174,8 @@ export async function attachContext(req: FastifyRequest): Promise<void> {
   req.ctx = {
     sessionId: sess.id,
     user,
-    isPlatformOwner: user.is_platform_owner === 1,
+    isPlatformOwner: user.is_platform_owner === 1 || user.platform_role !== 'none',
+    platformRole: (user.platform_role ?? 'none') as PlatformRole,
     impersonating: sess.impersonating === 1,
     company,
     role,
@@ -238,6 +254,20 @@ export function requirePlatformOwner(req: FastifyRequest, reply: FastifyReply): 
   const ctx = requireUser(req, reply);
   if (!ctx) return null;
   if (!ctx.isPlatformOwner) { void reply.code(403).send({ error: 'Platform access required' }); return null; }
+  return ctx;
+}
+
+/**
+ * Root only. Two things are root's alone: managing platform admins, and
+ * deleting a shop. Everything else an admin can do too.
+ */
+export function requireRoot(req: FastifyRequest, reply: FastifyReply): Ctx | null {
+  const ctx = requireUser(req, reply);
+  if (!ctx) return null;
+  if (ctx.platformRole !== 'root') {
+    void reply.code(403).send({ error: 'That is the root account’s, and only while it is enabled.' });
+    return null;
+  }
   return ctx;
 }
 

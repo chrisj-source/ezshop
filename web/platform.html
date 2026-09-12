@@ -66,8 +66,21 @@
   </div>
 </div>
 
+<div id="rootbar" hidden style="background:rgba(208,126,111,.16);border-bottom:1px solid rgba(208,126,111,.5);
+  padding:9px 16px;font:500 11.5px var(--font);color:#f0bdb2;display:flex;align-items:center;gap:10px">
+  <span>Signed in as <strong>root</strong> — the break-glass account. Every sign-in is in the platform log.</span>
+  <span style="margin-left:auto;color:#f0bdb2;opacity:.8">Set ROOT_ENABLED=0 and restart when you are done.</span>
+</div>
+
 <div class="main">
-  <div class="list" id="list"></div>
+  <div class="list" id="list">
+    <div style="padding:10px 12px;border-bottom:1px solid var(--line);display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn" id="newShop" style="border:1px solid var(--acc);color:var(--acc);padding:5px 10px">New shop</button>
+      <button class="btn" id="demoBtn" style="border:1px solid var(--line);color:var(--dim);padding:5px 10px">Demo</button>
+      <button class="btn" id="peopleBtn" hidden style="border:1px solid var(--line);color:var(--dim);padding:5px 10px">Platform people</button>
+    </div>
+    <div id="listrows"></div>
+  </div>
   <div class="pane" id="pane"><div class="empty">Loading…</div></div>
 </div>
 
@@ -86,9 +99,20 @@
   }
   var TONE = { active: 'var(--done)', trial: 'var(--move)', suspended: 'var(--stopped)' };
 
+  var PLAT = null;
+
   api('/api/me').then(function (me) {
     if (!me.isPlatformOwner) { location.href = '/board.html'; return; }
-    $('who').textContent = me.user.name + ' · platform owner';
+    $('who').textContent = me.user.name + ' · platform';
+    return api('/api/platform/me');
+  }).then(function (p) {
+    if (!p) return;
+    PLAT = p;
+    /* Root is the account nobody uses until something has gone wrong, so it
+       says so on every screen for as long as the session lasts. */
+    $('rootbar').hidden = p.role !== 'root';
+    $('peopleBtn').hidden = p.role !== 'root';
+    $('who').textContent = $('who').textContent.replace('platform', p.role === 'root' ? 'ROOT' : 'platform admin');
     return api('/api/platform/companies');
   }).then(function (d) {
     if (!d) return;
@@ -98,8 +122,206 @@
     else $('pane').innerHTML = '<div class="empty">No companies yet.</div>';
   }).catch(function (e) { if (e.message !== 'out') console.error(e); });
 
+  /* ---------------------------------------------------------------- panels
+     Three things that are not a company: making one, the demo shop, and who
+     else holds the platform. Each takes over the right-hand pane rather than
+     opening a dialog — there is nothing to lose by leaving one. */
+
+  function paneMsg(t, bad) {
+    var el = $('paneMsg');
+    if (!el) return;
+    el.innerHTML = esc(t);
+    el.style.color = bad ? 'var(--stopped)' : 'var(--done)';
+  }
+
+  function field(id, label, extra) {
+    return '<label style="display:block;margin-bottom:10px">' +
+      '<span style="display:block;font:400 10.5px var(--font);color:var(--dim);margin-bottom:4px">' +
+      esc(label) + '</span>' +
+      '<input id="' + id + '" ' + (extra || '') +
+      ' style="width:100%;padding:7px 9px;font:400 12.5px var(--font);color:var(--text);' +
+      'background:var(--surf);border:1px solid var(--line);border-radius:4px"></label>';
+  }
+
+  function newShopPane() {
+    SEL = null;
+    renderList();
+    $('pane').innerHTML =
+      '<div style="padding:18px;max-width:520px">' +
+      '<div style="font:500 15px var(--font);margin-bottom:4px">New shop</div>' +
+      '<div style="font:400 11.5px/1.6 var(--font);color:var(--dim);margin-bottom:16px">' +
+      'Provisions a database, seeds the board from the shop type, and creates the owner. ' +
+      'The owner\u2019s first password is shown once here and must be changed at first sign-in.</div>' +
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:0 12px">' +
+        field('nsName', 'Shop name') +
+        field('nsSlug', 'Slug \u2014 lowercase, becomes the database name') +
+        field('nsCity', 'City') +
+        field('nsState', 'State', 'maxlength="2"') +
+        '<label style="display:block;margin-bottom:10px">' +
+          '<span style="display:block;font:400 10.5px var(--font);color:var(--dim);margin-bottom:4px">Shop type</span>' +
+          '<select id="nsType" style="width:100%;padding:7px 9px;font:400 12.5px var(--font);color:var(--text);background:var(--surf);border:1px solid var(--line);border-radius:4px">' +
+          '<option value="both">Collision and PDR</option><option value="collision">Collision</option>' +
+          '<option value="pdr">PDR and hail</option><option value="detail">Detail only</option></select></label>' +
+        field('nsSeats', 'Seats', 'type="number" value="10"') +
+        field('nsOwner', 'Owner name') +
+        field('nsEmail', 'Owner email', 'type="email"') +
+      '</div>' +
+      '<div style="display:flex;gap:9px;align-items:center;margin-top:10px">' +
+        '<button class="btn" id="nsGo" style="border:1px solid var(--acc);color:var(--acc);padding:7px 12px">Create the shop</button>' +
+        '<div id="paneMsg" style="font:400 11.5px var(--font)"></div>' +
+      '</div></div>';
+
+    $('nsGo').addEventListener('click', function () {
+      var btn = this;
+      btn.disabled = true;
+      api('/api/platform/companies', {
+        method: 'POST',
+        body: JSON.stringify({
+          name: $('nsName').value.trim(),
+          slug: $('nsSlug').value.trim().toLowerCase(),
+          city: $('nsCity').value.trim(),
+          state: $('nsState').value.trim().toUpperCase(),
+          shopType: $('nsType').value,
+          seats: Number($('nsSeats').value) || 10,
+          ownerName: $('nsOwner').value.trim(),
+          ownerEmail: $('nsEmail').value.trim()
+        })
+      }).then(function (r) {
+        btn.disabled = false;
+        paneMsg('Created. ' + (r.tempPassword
+          ? 'Owner password: ' + r.tempPassword + ' \u2014 shown once.'
+          : '') + ' ' + r.statusCount + ' statuses seeded.');
+        return api('/api/platform/companies').then(function (d) {
+          COS = d.companies; renderList();
+        });
+      }).catch(function (e) { btn.disabled = false; paneMsg(e.message, true); });
+    });
+  }
+
+  function demoPane() {
+    SEL = null;
+    renderList();
+    var d = PLAT && PLAT.demo;
+    $('pane').innerHTML =
+      '<div style="padding:18px;max-width:560px">' +
+      '<div style="font:500 15px var(--font);margin-bottom:4px">The demo shop</div>' +
+      '<div style="font:400 11.5px/1.6 var(--font);color:var(--dim);margin-bottom:16px">' +
+      (d
+        ? esc(d.name) + ' \u2014 a real shop on this box, seeded with work at every stage. ' +
+          'It goes back to the seed at 2am Central every night, and whenever you press ' +
+          'Reset now. Anything a visitor did to it goes with the reset.' +
+          (d.resetAt ? ' Last reset ' + esc(String(d.resetAt).replace('T', ' ').slice(0, 16)) + '.' : '')
+        : 'There is no demo shop on this box yet. Reset now will build it \u2014 ' +
+          'Bob\u2019s Body Barn, Testingville, Texas.') +
+      '</div>' +
+      '<div style="display:flex;gap:9px;flex-wrap:wrap;margin-bottom:14px">' +
+        '<button class="btn" id="dmReset" style="border:1px solid var(--acc);color:var(--acc);padding:7px 12px">Reset now</button>' +
+        '<button class="btn" id="dmPw" style="border:1px solid var(--line);color:var(--dim);padding:7px 12px">New Tester password</button>' +
+      '</div>' +
+      '<div style="font:400 11px/1.6 var(--font);color:var(--dim)">The shared login is ' +
+      '<strong style="color:var(--text)">tester@bobsbodybarn.demo</strong>. Change its password ' +
+      'before each demo \u2014 the new one is shown once, here.</div>' +
+      '<div id="paneMsg" style="font:400 12px var(--font);margin-top:12px"></div></div>';
+
+    $('dmReset').addEventListener('click', function () {
+      if (!confirm('Put the demo shop back to its seed? Anything anyone did to it is lost.')) return;
+      var btn = this;
+      btn.disabled = true;
+      paneMsg('Working\u2026');
+      api('/api/platform/demo/reset', { method: 'POST' }).then(function (r) {
+        btn.disabled = false;
+        paneMsg(r.note + (r.testerPassword
+          ? ' Tester password: ' + r.testerPassword + ' \u2014 shown once.' : ''));
+      }).catch(function (e) { btn.disabled = false; paneMsg(e.message, true); });
+    });
+
+    $('dmPw').addEventListener('click', function () {
+      var btn = this;
+      btn.disabled = true;
+      api('/api/platform/demo/tester-password', { method: 'POST', body: JSON.stringify({}) })
+        .then(function (r) {
+          btn.disabled = false;
+          paneMsg('Tester password is now ' + r.password + ' \u2014 write it down, it is shown once.');
+        }).catch(function (e) { btn.disabled = false; paneMsg(e.message, true); });
+    });
+  }
+
+  function peoplePane() {
+    SEL = null;
+    renderList();
+    $('pane').innerHTML = '<div class="empty">Loading\u2026</div>';
+    api('/api/platform/people').then(function (d) {
+      $('pane').innerHTML =
+        '<div style="padding:18px;max-width:620px">' +
+        '<div style="font:500 15px var(--font);margin-bottom:4px">Platform people</div>' +
+        '<div style="font:400 11.5px/1.6 var(--font);color:var(--dim);margin-bottom:16px">' +
+        'Admins run the platform day to day. They cannot see this screen, and they cannot ' +
+        'delete a shop \u2014 only suspend one. Root cannot be removed or demoted, by anyone, ' +
+        'including itself.</div>' +
+        d.people.map(function (p) {
+          return '<div style="display:flex;align-items:center;gap:10px;padding:9px 0;border-top:1px solid var(--whisper)">' +
+            '<div style="flex:1;min-width:0">' +
+              '<div style="font:500 12.5px var(--font)">' + esc(p.name) +
+              (p.role === 'root'
+                ? ' <span style="font:500 9px var(--font);letter-spacing:.08em;text-transform:uppercase;color:#f0bdb2;border:1px solid rgba(208,126,111,.5);border-radius:3px;padding:1px 5px">root</span>'
+                : '') + '</div>' +
+              '<div style="font:400 11px var(--font);color:var(--dim)">' + esc(p.email || 'no email') +
+              (p.lastLogin ? ' \u00b7 last in ' + esc(String(p.lastLogin).replace('T', ' ').slice(0, 16)) : ' \u00b7 never signed in') +
+              '</div></div>' +
+            '<button class="btn" data-pw="' + p.id + '" style="border:1px solid var(--line);color:var(--dim);padding:4px 9px;font-size:10.5px">New password</button>' +
+            (p.locked ? '' :
+              '<button class="btn" data-rm="' + p.id + '" style="border:1px solid var(--stopped);color:var(--stopped);padding:4px 9px;font-size:10.5px">Remove</button>') +
+          '</div>';
+        }).join('') +
+        '<div style="margin-top:18px;padding-top:14px;border-top:1px solid var(--line)">' +
+        '<div style="font:500 12.5px var(--font);margin-bottom:10px">Add a platform admin</div>' +
+        field('paName', 'Name') + field('paEmail', 'Email', 'type="email"') +
+        '<div style="display:flex;gap:9px;align-items:center">' +
+        '<button class="btn" id="paGo" style="border:1px solid var(--acc);color:var(--acc);padding:7px 12px">Add</button>' +
+        '<div id="paneMsg" style="font:400 11.5px var(--font)"></div></div></div></div>';
+
+      $('paGo').addEventListener('click', function () {
+        var btn = this;
+        btn.disabled = true;
+        api('/api/platform/people', {
+          method: 'POST',
+          body: JSON.stringify({ name: $('paName').value.trim(), email: $('paEmail').value.trim() })
+        }).then(function (r) {
+          btn.disabled = false;
+          paneMsg(r.note + (r.tempPassword ? ' Password: ' + r.tempPassword : ''));
+          setTimeout(peoplePane, 1800);
+        }).catch(function (e) { btn.disabled = false; paneMsg(e.message, true); });
+      });
+
+      Array.prototype.forEach.call($('pane').querySelectorAll('[data-pw]'), function (b) {
+        b.addEventListener('click', function () {
+          api('/api/platform/people/' + b.dataset.pw + '/password', {
+            method: 'POST', body: JSON.stringify({})
+          }).then(function (r) { paneMsg('New password: ' + r.password + ' \u2014 ' + r.note); })
+            .catch(function (e) { paneMsg(e.message, true); });
+        });
+      });
+
+      Array.prototype.forEach.call($('pane').querySelectorAll('[data-rm]'), function (b) {
+        b.addEventListener('click', function () {
+          if (!confirm('Take the platform off this person? They are signed out immediately. ' +
+            'Any shop access they have is untouched.')) return;
+          api('/api/platform/people/' + b.dataset.rm, { method: 'DELETE' })
+            .then(function (r) { paneMsg(r.note); setTimeout(peoplePane, 1200); })
+            .catch(function (e) { paneMsg(e.message, true); });
+        });
+      });
+    }).catch(function (e) {
+      $('pane').innerHTML = '<div class="empty">' + esc(e.message) + '</div>';
+    });
+  }
+
+  $('newShop').addEventListener('click', newShopPane);
+  $('demoBtn').addEventListener('click', demoPane);
+  $('peopleBtn').addEventListener('click', peoplePane);
+
   function renderList() {
-    $('list').innerHTML = COS.map(function (c) {
+    $('listrows').innerHTML = COS.map(function (c) {
       return '<div class="item' + (c.id === SEL ? ' sel' : '') + '" data-id="' + c.id + '">' +
         '<div class="dot" style="background:' + (TONE[c.status] || 'var(--dim)') + '"></div>' +
         '<div style="min-width:0;flex:1"><div class="nm">' + esc(c.name) + '</div>' +

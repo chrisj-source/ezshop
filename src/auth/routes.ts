@@ -11,6 +11,7 @@ import { ROLE_LABEL, Role } from '../permissions';
 interface LoginUser extends RowDataPacket {
   id: number; email: string | null; password_hash: string | null; login_code: string | null;
   login_code_expires: Date | null; name: string; is_platform_owner: number;
+  platform_role: 'none' | 'admin' | 'root';
   status: string; must_change_pw: number; failed_logins: number; locked_until: Date | null;
 }
 
@@ -63,6 +64,34 @@ export async function registerAuth(app: FastifyInstance): Promise<void> {
       }
     }
 
+    /*
+     * Root is the break-glass account and is switched off at the box, not in
+     * the database: with ROOT_ENABLED unset it cannot sign in however correct
+     * the password is. That is the whole point — knowing root's password is not
+     * enough to reach it from the internet.
+     *
+     * When it is on, the sign-in is loud: a row in the platform audit naming
+     * the address it came from, every time, and a banner on screen for as long
+     * as the session lasts.
+     */
+    if (user.platform_role === 'root') {
+      if (!config.rootEnabled) {
+        await mexec(
+          `INSERT INTO platform_audit (actor_user_id, company_id, action, detail)
+           VALUES (?, NULL, 'root.refused', ?)`,
+          [user.id, JSON.stringify({ ip, userAgent: String(ua) })]
+        ).catch(() => undefined);
+        return reply.code(403).send({
+          error: 'The root account is switched off. Set ROOT_ENABLED=1 on the server and restart.'
+        });
+      }
+      await mexec(
+        `INSERT INTO platform_audit (actor_user_id, company_id, action, detail)
+         VALUES (?, NULL, 'root.signin', ?)`,
+        [user.id, JSON.stringify({ ip, userAgent: String(ua) })]
+      ).catch(() => undefined);
+    }
+
     const memberships = await mq<Array<RowDataPacket & { company_id: number; role: Role; name: string; status: string; company_status: string }>>(
       `SELECT m.company_id, m.role, m.status, c.name, c.status AS company_status
        FROM memberships m JOIN companies c ON c.id = m.company_id
@@ -87,7 +116,8 @@ export async function registerAuth(app: FastifyInstance): Promise<void> {
 
     return {
       user: { id: user.id, name: user.name, email: user.email, mustChangePassword: user.must_change_pw === 1 },
-      isPlatformOwner: user.is_platform_owner === 1,
+      isPlatformOwner: user.is_platform_owner === 1 || user.platform_role !== 'none',
+      platformRole: user.platform_role ?? 'none',
       companies: usable.map(m => ({ id: m.company_id, name: m.name, role: m.role, roleLabel: ROLE_LABEL[m.role] ?? m.role })),
       companyId,
       suspended: memberships.filter(m => m.company_status === 'suspended').map(m => m.name)

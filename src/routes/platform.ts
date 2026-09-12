@@ -1,13 +1,166 @@
 import { FastifyInstance } from 'fastify';
 import { RowDataPacket } from 'mysql2/promise';
 import { mexec, mq, mqOne } from '../db/master';
-import { provisionCompany } from '../db/provision';
-import { invalidateFeatures, requirePlatformOwner } from '../middleware/context';
+import { destroyCompany, provisionCompany } from '../db/provision';
+import { invalidateFeatures, requirePlatformOwner, requireRoot } from '../middleware/context';
+import { hashPassword, randomPassword } from '../auth/password';
+import { revokeAllForUser } from '../auth/session';
+import { config } from '../config';
+import { demoCompany, resetDemo, setDemoTesterPassword } from '../lib/demo';
 import { revokeAllForCompany, switchSessionCompany } from '../auth/session';
 import { forgetTenant } from '../db/tenant';
 import { ShopType } from '../db/status-template';
 
 export async function registerPlatform(app: FastifyInstance): Promise<void> {
+
+  /** Who is looking, and what the box will let them do today. */
+  app.get('/api/platform/me', async (req, reply) => {
+    const ctx = requirePlatformOwner(req, reply);
+    if (!ctx) return;
+    const demo = await demoCompany();
+    return {
+      role: ctx.platformRole,
+      isRoot: ctx.platformRole === 'root',
+      /* Shown on the platform screen so it is obvious whether the break-glass
+         door is standing open. */
+      rootEnabled: config.rootEnabled,
+      demo: demo ? {
+        companyId: demo.id, name: demo.name, slug: demo.slug,
+        resetAt: demo.demo_reset_at ?? null
+      } : null
+    };
+  });
+
+  /* ------------------------------------------------- platform people (root) */
+
+  /**
+   * Platform admins. Root's alone, deliberately: an admin who could make
+   * another admin is an admin who could keep themselves in after being removed.
+   */
+  app.get('/api/platform/people', async (req, reply) => {
+    const ctx = requireRoot(req, reply);
+    if (!ctx) return;
+    const rows = await mq<RowDataPacket[]>(
+      `SELECT id, name, email, platform_role, status, last_login_at, created_at
+         FROM users WHERE platform_role <> 'none' ORDER BY platform_role DESC, name`);
+    return {
+      people: rows.map(r => ({
+        id: r.id, name: r.name, email: r.email, role: r.platform_role,
+        status: r.status, lastLogin: r.last_login_at, createdAt: r.created_at,
+        /* Root is not removable and not demotable — including by itself. */
+        locked: r.platform_role === 'root'
+      }))
+    };
+  });
+
+  app.post('/api/platform/people', async (req, reply) => {
+    const ctx = requireRoot(req, reply);
+    if (!ctx) return;
+    const b = req.body as { name?: string; email?: string; password?: string };
+    const name = String(b.name ?? '').trim();
+    const email = String(b.email ?? '').trim().toLowerCase();
+    if (!name || !email) return reply.code(400).send({ error: 'A name and an email are required.' });
+
+    const existing = await mqOne<RowDataPacket>('SELECT id, platform_role FROM users WHERE email = ?', [email]);
+    const password = b.password?.trim() || randomPassword();
+
+    let userId: number;
+    if (existing) {
+      /* Somebody who already works in a shop can be given the platform too;
+         their shop access is untouched. */
+      userId = Number(existing.id);
+      await mexec(
+        `UPDATE users SET platform_role = 'admin', is_platform_owner = 1 WHERE id = ?`, [userId]);
+    } else {
+      const res = await mexec(
+        `INSERT INTO users (email, password_hash, name, is_platform_owner, platform_role, must_change_pw)
+         VALUES (?, ?, ?, 1, 'admin', 1)`,
+        [email, await hashPassword(password), name]);
+      userId = res.insertId;
+    }
+
+    await audit(ctx.user.id, null, 'platform.admin.added', { userId, email, existing: !!existing });
+    return {
+      ok: true, userId,
+      tempPassword: existing ? null : password,
+      note: existing
+        ? `${email} already had an account; they are a platform admin now.`
+        : 'Created. The password is shown once, and they must change it at first sign-in.'
+    };
+  });
+
+  /** Take the platform off somebody. Their shop access, if any, stays. */
+  app.delete('/api/platform/people/:id', async (req, reply) => {
+    const ctx = requireRoot(req, reply);
+    if (!ctx) return;
+    const id = Number((req.params as { id: string }).id);
+
+    const who = await mqOne<RowDataPacket>('SELECT id, name, email, platform_role FROM users WHERE id = ?', [id]);
+    if (!who) return reply.code(404).send({ error: 'Nobody by that id.' });
+    if (who.platform_role === 'root') {
+      return reply.code(400).send({ error: 'Root cannot be removed. That is what makes it root.' });
+    }
+
+    await mexec(`UPDATE users SET platform_role = 'none', is_platform_owner = 0 WHERE id = ?`, [id]);
+    /* Removing the platform from somebody who is signed in should take effect
+       now, not whenever their session happens to expire. */
+    await revokeAllForUser(id);
+    await audit(ctx.user.id, null, 'platform.admin.removed', { userId: id, email: who.email });
+    return { ok: true, note: `${who.name} is no longer a platform admin, and is signed out.` };
+  });
+
+  /** A new password for a platform admin, shown once. */
+  app.post('/api/platform/people/:id/password', async (req, reply) => {
+    const ctx = requireRoot(req, reply);
+    if (!ctx) return;
+    const id = Number((req.params as { id: string }).id);
+    const who = await mqOne<RowDataPacket>('SELECT id, name, platform_role FROM users WHERE id = ?', [id]);
+    if (!who) return reply.code(404).send({ error: 'Nobody by that id.' });
+
+    const password = String((req.body as { password?: string })?.password ?? '').trim() || randomPassword();
+    await mexec('UPDATE users SET password_hash = ?, must_change_pw = 1 WHERE id = ?',
+      [await hashPassword(password), id]);
+    await revokeAllForUser(id);
+    await audit(ctx.user.id, null, 'platform.admin.password', { userId: id });
+    return { ok: true, password, note: 'Shown once. Every session they had has ended.' };
+  });
+
+  /* ------------------------------------------------------------- the demo */
+
+  /**
+   * Put the demo shop back to its seed. Anything a visitor did to it goes.
+   * Refuses any company not marked `is_demo`, so this can never be pointed at
+   * a real shop by passing an id.
+   */
+  app.post('/api/platform/demo/reset', async (req, reply) => {
+    const ctx = requirePlatformOwner(req, reply);
+    if (!ctx) return;
+    try {
+      const out = await resetDemo(ctx.user.id);
+      await audit(ctx.user.id, out.companyId, 'demo.reset', { by: 'button' });
+      return out;
+    } catch (e) {
+      req.log.error(e);
+      return reply.code(400).send({ error: (e as Error).message });
+    }
+  });
+
+  /**
+   * The Tester password, changed before each demo. Generated here and shown
+   * once rather than typed, so it is never something that was reused.
+   */
+  app.post('/api/platform/demo/tester-password', async (req, reply) => {
+    const ctx = requirePlatformOwner(req, reply);
+    if (!ctx) return;
+    const wanted = String((req.body as { password?: string })?.password ?? '').trim();
+    try {
+      const out = await setDemoTesterPassword(wanted || null);
+      await audit(ctx.user.id, out.companyId, 'demo.tester.password', {});
+      return out;
+    } catch (e) {
+      return reply.code(400).send({ error: (e as Error).message });
+    }
+  });
 
   app.get('/api/platform/companies', async (req, reply) => {
     const ctx = requirePlatformOwner(req, reply);
@@ -79,6 +232,31 @@ export async function registerPlatform(app: FastifyInstance): Promise<void> {
       req.log.error(e);
       return reply.code(400).send({ error: (e as Error).message });
     }
+  });
+
+  /**
+   * Delete a shop and its database. Root's alone — an admin may suspend one,
+   * which is reversible, and that is the difference between the two jobs.
+   * The slug has to be typed to confirm, because a click is not enough.
+   */
+  app.delete('/api/platform/companies/:id', async (req, reply) => {
+    const ctx = requireRoot(req, reply);
+    if (!ctx) return;
+    const id = Number((req.params as { id: string }).id);
+    const typed = String((req.body as { slug?: string })?.slug ?? '').trim().toLowerCase();
+
+    const co = await mqOne<RowDataPacket>('SELECT id, slug, name FROM companies WHERE id = ?', [id]);
+    if (!co) return reply.code(404).send({ error: 'No such shop' });
+    if (typed !== String(co.slug)) {
+      return reply.code(400).send({ error: `Type the slug (${co.slug}) to confirm.` });
+    }
+
+    await revokeAllForCompany(id);
+    forgetTenant(id);
+    await destroyCompany(id);
+    await mexec('DELETE FROM companies WHERE id = ?', [id]);
+    await audit(ctx.user.id, null, 'company.deleted', { slug: co.slug, name: co.name });
+    return { ok: true, note: `${co.name} and its database are gone.` };
   });
 
   app.patch('/api/platform/companies/:id', async (req, reply) => {

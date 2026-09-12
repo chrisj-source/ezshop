@@ -9,6 +9,7 @@
     "dev": "tsc -w -p tsconfig.json",
     "start": "node dist/server.js",
     "bootstrap": "node dist/scripts/bootstrap.js",
+    "platform": "node dist/scripts/platform.js",
     "migrate": "node dist/scripts/migrate.js",
     "tenant-creds": "node dist/scripts/tenant-creds.js",
     "backfill-thumbs": "node dist/scripts/backfill-thumbs.js"

@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import { hash, verify } from '@node-rs/argon2';
 
 /** argon2id, tuned for a 2 vCPU box: ~50-80ms per hash. */
@@ -24,4 +25,13 @@ export function passwordProblem(p: string): string | null {
   if (p.length > 200) return 'Password is too long.';
   if (/^\d+$/.test(p)) return 'Password cannot be only digits.';
   return null;
+}
+
+/**
+ * A password to hand somebody once. No I, l, O or 0 — it gets read aloud down a
+ * phone and written on the back of a card.
+ */
+export function randomPassword(len = 18): string {
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
+  return Array.from(crypto.randomBytes(len)).map(b => alphabet[b % alphabet.length]).join('');
 }

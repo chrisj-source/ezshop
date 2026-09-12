@@ -76,6 +76,27 @@ export const config = {
     purgeYears: Number(process.env.RETENTION_PURGE_YEARS ?? 10)
   },
 
+  /**
+   * The break-glass account. Root cannot sign in at all unless this is set on
+   * the box and the service restarted — so reaching it from the internet alone
+   * is not possible, whatever anybody knows or guesses about the password. Turn
+   * it on, do the thing, turn it off.
+   */
+  rootEnabled: process.env.ROOT_ENABLED === '1',
+
+  /**
+   * The demo shop. Seeded with work at every stage, wiped back to the seed
+   * nightly — anything a visitor did to it goes with the reset.
+   */
+  demo: {
+    /** Local hour of the nightly reset. 2am Central by default. */
+    resetHour: Number(process.env.DEMO_RESET_HOUR ?? 2),
+    /** Off switches the schedule only; Reset now on the platform screen stays. */
+    scheduled: process.env.DEMO_RESET_SCHEDULED !== '0',
+    /** What one demo visitor may upload before the box says no. */
+    maxUploads: Number(process.env.DEMO_MAX_UPLOADS ?? 40)
+  },
+
   media: {
     /** Jobs at once. Two is right for a shop box; raise it if the box is idle. */
     concurrency: Number(process.env.MEDIA_CONCURRENCY ?? 2),

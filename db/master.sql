@@ -40,6 +40,8 @@ CREATE TABLE IF NOT EXISTS companies (
   shop_type       ENUM('pdr','collision','both','detail') NOT NULL DEFAULT 'both',
   plan_code       VARCHAR(32)   NOT NULL DEFAULT 'trial',
   status          ENUM('trial','active','suspended','closed') NOT NULL DEFAULT 'trial',
+  is_demo         TINYINT(1)    NOT NULL DEFAULT 0 COMMENT 'seeded, resettable, never a real shop',
+  demo_reset_at   DATETIME      NULL COMMENT 'when the seed was last put back',
   seats           INT           NOT NULL DEFAULT 5,
   owner_email     VARCHAR(190)  NULL,
   suspended_at    DATETIME      NULL,
@@ -130,6 +132,8 @@ CREATE TABLE IF NOT EXISTS users (
   name              VARCHAR(120)  NOT NULL,
   phone             VARCHAR(32)   NULL,
   is_platform_owner TINYINT(1)    NOT NULL DEFAULT 0,
+  platform_role     ENUM('none','admin','root') NOT NULL DEFAULT 'none'
+                    COMMENT 'none | admin (runs the platform) | root (break-glass, ROOT_ENABLED only)',
   status            ENUM('active','disabled') NOT NULL DEFAULT 'active',
   must_change_pw    TINYINT(1)    NOT NULL DEFAULT 0,
   failed_logins     INT           NOT NULL DEFAULT 0,
