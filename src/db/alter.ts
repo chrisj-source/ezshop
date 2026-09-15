@@ -72,6 +72,60 @@ export function splitAlterClauses(stmt: string): string[] | null {
   return parts.map(p => head + p);
 }
 
+/**
+ * Split a multi-row `INSERT ... VALUES (a,b),(c,d)` into one INSERT per row.
+ *
+ * The same atomicity trap as a multi-clause ALTER, for data: migration 011
+ * seeds `role_caps` as one INSERT of ~90 rows, and `tenant.sql` seeds many of
+ * the same rows. One duplicate rejects the whole statement, the tolerance
+ * swallows it, and the rows that were NOT already present never land — a shop
+ * quietly missing permission rows nobody will notice until somebody cannot see
+ * a screen they should.
+ *
+ * Returns null when this is not a multi-row INSERT.
+ */
+export function splitInsertRows(stmt: string): string[] | null {
+  const m = /^(\s*INSERT\s+(?:IGNORE\s+)?INTO[\s\S]*?VALUES\s*)([\s\S]*)$/i.exec(stmt);
+  if (!m) return null;
+
+  const head = m[1];
+  const rest = m[2];
+
+  /* Trailing clauses (ON DUPLICATE KEY UPDATE ...) must ride along on every
+     row rather than being treated as part of the last tuple. */
+  const tailAt = rest.search(/\)\s*ON\s+DUPLICATE\s+KEY/i);
+  const tuplesPart = tailAt >= 0 ? rest.slice(0, tailAt + 1) : rest;
+  const tail = tailAt >= 0 ? rest.slice(tailAt + 1) : '';
+
+  const tuples: string[] = [];
+  let buf = '';
+  let depth = 0;
+  let quote: string | null = null;
+
+  for (let i = 0; i < tuplesPart.length; i++) {
+    const c = tuplesPart[i];
+    if (quote) {
+      buf += c;
+      if (c === '\\') { buf += tuplesPart[++i] ?? ''; continue; }
+      if (c === quote) quote = null;
+      continue;
+    }
+    if (c === "'" || c === '"' || c === '`') { quote = c; buf += c; continue; }
+    if (c === '(') { depth++; buf += c; continue; }
+    if (c === ')') {
+      depth--;
+      buf += c;
+      if (depth === 0) { tuples.push(buf.trim()); buf = ''; }
+      continue;
+    }
+    if (depth === 0) continue;   // commas and whitespace between tuples
+    buf += c;
+  }
+
+  if (tuples.length < 2) return null;
+  return tuples.map(t => head + t + tail);
+}
+
 export interface TolerantResult {
   /** The statement ran clean. */
   ok: boolean;
@@ -96,7 +150,7 @@ export async function runTolerant(
   } catch (e) {
     if (!isAlreadyThere(e)) throw e;
 
-    const clauses = splitAlterClauses(stmt);
+    const clauses = splitAlterClauses(stmt) ?? splitInsertRows(stmt);
     if (!clauses) {
       /* A single-clause statement that is already there. Genuinely nothing to
          do — this is the case the old tolerance was written for. */

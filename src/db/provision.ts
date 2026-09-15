@@ -208,7 +208,24 @@ function splitStatements(sql: string): string[] {
     .filter(Boolean);
 }
 
-/** Seeds lanes, status groups, statuses and the notification groups. */
+/**
+ * Seeds lanes, status groups, statuses and the notification groups.
+ *
+ * **Every insert here upserts, and the template wins.**
+ *
+ * This runs AFTER the migrations have been replayed, and some migrations seed
+ * data as well as schema — migration 010 adds the sublet lane, the `lane_sublet`
+ * status group and its four statuses, because it had to add them to shops that
+ * already existed. On a new shop the template supplies those too, so a plain
+ * INSERT collided: `Duplicate entry 'sublet' for key 'PRIMARY'`, and no shop
+ * could be created (reported 15 Sep 2026, the second failure of this kind).
+ *
+ * The template is the authority for a new shop — it knows the shop type, and a
+ * migration written for existing shops does not. So a collision overwrites with
+ * the template's values rather than being ignored, which also keeps sort_order
+ * coherent: migration 010 appends sublet at whatever the end was, the template
+ * places it where it belongs.
+ */
 async function seedTenant(admin: Connection, dbName: string, shopType: ShopType): Promise<number> {
   const { groups, lanes } = buildTemplate(shopType);
   await admin.query(`USE \`${dbName}\``);
@@ -217,7 +234,11 @@ async function seedTenant(admin: Connection, dbName: string, shopType: ShopType)
   for (const l of lanes) {
     await admin.query(
       `INSERT INTO lanes (lane_key, label, enabled, parts_gate, owner_role, module_tag, sort_order)
-       VALUES (?, ?, 1, ?, ?, ?, ?)`,
+       VALUES (?, ?, 1, ?, ?, ?, ?)
+       ON DUPLICATE KEY UPDATE
+         label = VALUES(label), enabled = 1, parts_gate = VALUES(parts_gate),
+         owner_role = VALUES(owner_role), module_tag = VALUES(module_tag),
+         sort_order = VALUES(sort_order)`,
       [l.key, l.name, l.gate, l.owner, l.mod, ++laneOrder]
     );
   }
@@ -226,7 +247,9 @@ async function seedTenant(admin: Connection, dbName: string, shopType: ShopType)
   let count = 0;
   for (const g of groups) {
     await admin.query(
-      'INSERT INTO status_groups (group_id, label, sort_order, note) VALUES (?, ?, ?, ?)',
+      `INSERT INTO status_groups (group_id, label, sort_order, note) VALUES (?, ?, ?, ?)
+       ON DUPLICATE KEY UPDATE
+         label = VALUES(label), sort_order = VALUES(sort_order), note = VALUES(note)`,
       [g.id, g.name, ++groupOrder, g.note || null]
     );
     let sub = 0;
@@ -235,7 +258,15 @@ async function seedTenant(admin: Connection, dbName: string, shopType: ShopType)
         `INSERT INTO statuses
            (slot_id, group_id, lane_key, label, customer_label, kind, owner_role,
             age_yellow_hours, age_red_hours, follow_up_hours, module_tags, sort_order)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE
+           group_id = VALUES(group_id), lane_key = VALUES(lane_key),
+           label = VALUES(label), customer_label = VALUES(customer_label),
+           kind = VALUES(kind), owner_role = VALUES(owner_role),
+           age_yellow_hours = VALUES(age_yellow_hours),
+           age_red_hours = VALUES(age_red_hours),
+           follow_up_hours = VALUES(follow_up_hours),
+           module_tags = VALUES(module_tags), sort_order = VALUES(sort_order)`,
         [s[0], g.id, laneKeyForSlot(s[0]), s[1], s[2] || null, s[3], s[4],
          toHours(s[5]), toHours(s[6]), toHours(s[7]), s[8] || null, ++sub]
       );
