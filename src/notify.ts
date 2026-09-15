@@ -2,6 +2,7 @@ import { PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { tenantPool, texec, tq, tqOne } from './db/tenant';
 import { recipientsForStatus, routingConfigured } from './lib/status-routes';
 import { emailableUser, letter, sendMail, stampEmailed } from './lib/mail';
+import { unsubscribeUrl } from './lib/suppression';
 import { mqOne } from './db/master';
 import { config } from './config';
 
@@ -206,14 +207,19 @@ async function mirrorToEmail(
 
     const body = letter(input.title, [input.body], input.roId
       ? { label: 'Open the file', url: `${config.appUrl}/board.html?ro=${input.roId}` }
-      : undefined);
+      : undefined,
+      /* The footer link. Signed against this shop and this address, so it works
+         without a sign-in and keeps working if the customer record changes. */
+      unsubscribeUrl(companyId, 'email', who.email));
 
     const sent = await sendMail({
       to: who.email,
       subject: input.title,
       text: body.text,
       html: body.html,
-      shopName: shop?.name ? String(shop.name) : null
+      shopName: shop?.name ? String(shop.name) : null,
+      companyId,
+      context: input.event
     });
 
     if (note) {
@@ -221,7 +227,11 @@ async function mirrorToEmail(
         INSERT INTO notification_deliveries
           (notification_id, user_id, channel, address, state, sent_at, error)
         VALUES (?, ?, 'email', ?, ?, NOW(), ?)`,
-        [note.id, userId, who.email, sent.ok ? 'sent' : 'failed',
+        [note.id, userId, who.email,
+         /* A refusal is its own state. Recording it as 'failed' would put it in
+            the same bucket as a provider outage and invite somebody to retry
+            it, which is the one thing that must not happen. */
+         sent.ok ? 'sent' : sent.suppressed ? 'suppressed' : 'failed',
          sent.ok ? null : (sent.error ?? '').slice(0, 190)]).catch(() => undefined);
     }
 

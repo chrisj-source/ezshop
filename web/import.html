@@ -118,7 +118,7 @@
 
   api('/api/me').then(function (me) {
     ME = me;
-    if (!me.company) { location.href = '/'; return null; }
+    if (!me.company) { location.href = '/signin.html'; return null; }
     if (me.features.indexOf('ems') < 0) {
       document.body.innerHTML = '<div class="empty">Estimate import is not switched on for this shop.</div>';
       return null;

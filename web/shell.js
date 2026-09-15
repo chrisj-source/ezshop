@@ -48,7 +48,7 @@ window.Shell = (function () {
     if (o.body != null && !o.headers['content-type']) o.headers['content-type'] = 'application/json';
 
     return fetch(path, o).then(function (r) {
-      if (r.status === 401) { location.href = '/'; throw new Error('signed out'); }
+      if (r.status === 401) { location.href = '/signin.html'; throw new Error('signed out'); }
       if (r.status === 204) return {};
       return r.text().then(function (text) {
         var j = {};
@@ -217,7 +217,7 @@ window.Shell = (function () {
 
     var out = document.getElementById('signout');
     if (out) out.addEventListener('click', function () {
-      api('/api/auth/logout', { method: 'POST' }).then(function () { location.href = '/'; });
+      api('/api/auth/logout', { method: 'POST' }).then(function () { location.href = '/signin.html'; });
     });
 
     var plat = document.getElementById('platformLink');
@@ -306,7 +306,7 @@ window.Shell = (function () {
     });
     sheet.addEventListener('click', function (e) { if (e.target === sheet) sheet.hidden = true; });
     document.getElementById('sheetOut').addEventListener('click', function () {
-      api('/api/auth/logout', { method: 'POST' }).then(function () { location.href = '/'; });
+      api('/api/auth/logout', { method: 'POST' }).then(function () { location.href = '/signin.html'; });
     });
   }
 

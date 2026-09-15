@@ -35,6 +35,7 @@ import { registerAudit } from './routes/audit';
 import { registerPayroll } from './routes/payroll';
 import { registerCalendar } from './routes/gcal';
 import { registerMoney } from './routes/money';
+import { registerUnsubscribe } from './routes/unsubscribe';
 import { purgeExpiredSessions } from './auth/session';
 import { startDemoReset } from './lib/demo';
 import { closeQueue, startWorker } from './queue';
@@ -91,6 +92,10 @@ async function main(): Promise<void> {
   await registerPayroll(app);
   await registerCalendar(app);
   await registerMoney(app);
+  /* Public and unauthenticated by design: the person clicking unsubscribe in a
+     status email usually has no account. Authority is the signature on the
+     link, not a session. */
+  await registerUnsubscribe(app);
 
   app.get('/api/health', async () => {
     const [r] = await master().query('SELECT 1 AS ok');

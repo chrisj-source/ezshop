@@ -1,0 +1,48 @@
+# Easy Shop — https://easyshopauto.com
+#
+# The marketing pages are meant to be found. Everything else is a shop's own
+# records and is disallowed here AND served with a noindex header
+# (src/middleware/security.ts) — the header is what actually enforces it;
+# this file just saves crawlers the request.
+
+User-agent: *
+Allow: /$
+Allow: /index.html
+Allow: /about.html
+Allow: /privacy.html
+Allow: /sms-terms.html
+Allow: /terms.html
+Allow: /site.css
+Allow: /img/
+
+# The CRM itself.
+Disallow: /signin.html
+Disallow: /board.html
+Disallow: /choose.html
+Disallow: /clients.html
+Disallow: /closed.html
+Disallow: /leads.html
+Disallow: /messages.html
+Disallow: /new-ro.html
+Disallow: /parts.html
+Disallow: /pay.html
+Disallow: /payroll.html
+Disallow: /permissions.html
+Disallow: /platform.html
+Disallow: /reports.html
+Disallow: /sales.html
+Disallow: /schedule.html
+Disallow: /admin.html
+Disallow: /audit.html
+Disallow: /import.html
+Disallow: /reset.html
+Disallow: /set-password.html
+
+# Public, but not for indexing: one is a shop's intake form, the other is
+# reached from a signed link in a message.
+Disallow: /checkin.html
+Disallow: /unsubscribe.html
+
+Disallow: /api/
+
+Sitemap: https://easyshopauto.com/sitemap.xml

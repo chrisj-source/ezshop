@@ -7,6 +7,7 @@ import { notify } from '../notify';
 import { daysBetweenSql, shopToday, tzOffset } from '../lib/shoptime';
 import { audit } from '../lib/audit';
 import { actorFrom } from './audit';
+import { isSuppressed, noteSuppressionHit, refuseEmail } from '../lib/suppression';
 
 const SOURCES = ['phone', 'walk-in', 'website', 'referral', 'google', 'scheduler', 'sales app', 'other'];
 const STATES = ['new', 'contacted', 'estimate_written', 'estimate_sent', 'appraisal_booked', 'won', 'lost'];
@@ -405,6 +406,13 @@ export async function registerLeads(app: FastifyInstance): Promise<void> {
     }
 
     const cid = ctx.company!.id;
+
+    /* Typed at the counter, so it is refused here the same way it would be on a
+       client record — this is the desk entering an address, not the customer
+       giving one. */
+    const refused = await refuseEmail(cid, b.email, 'new lead');
+    if (refused) return reply.code(409).send({ error: refused, field: 'email' });
+
     const id = await withTenantTx(cid, async (c) => {
       const [seq] = await c.query<RowDataPacket[]>(
         `SELECT COALESCE(MAX(CAST(SUBSTRING(lead_number, 2) AS UNSIGNED)), 0) + 1 AS n FROM leads`);
@@ -645,9 +653,16 @@ export async function registerLeads(app: FastifyInstance): Promise<void> {
 
     const roId = await withTenantTx(cid, async (c) => {
       const name = [lead.first_name, lead.last_name].filter(Boolean).join(' ') || 'Customer';
+      /* The address carries across as it is. A conversion is not the moment to
+         refuse an address — the car is being taken in — so an unsubscribed one
+         travels onto the file and is recorded as a hit instead, and simply never
+         receives anything. */
       const [cl] = await c.query<ResultSetHeader>(
         `INSERT INTO clients (kind, name, phone, email) VALUES ('retail', ?, ?, ?)`,
         [name, lead.phone ?? null, lead.email ?? null]);
+      if (lead.email && await isSuppressed('email', String(lead.email), cid)) {
+        await noteSuppressionHit(cid, 'email', String(lead.email), 'carried from a converted lead');
+      }
 
       const text = String(lead.vehicle_text ?? '').split(' ');
       const [vh] = await c.query<ResultSetHeader>(

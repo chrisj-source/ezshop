@@ -15,6 +15,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { RowDataPacket } from 'mysql2/promise';
 import { adminConnection, closeMaster, master, mexec, mq } from '../db/master';
+import { runTolerant } from '../db/alter';
 
 const DIR = path.join(__dirname, '..', '..', 'db', 'migrations');
 
@@ -103,17 +104,12 @@ async function runTenants(): Promise<void> {
       for (const s of pending) {
         console.log(`${db.db_name}  ${String(s.version).padStart(3, '0')}  ${s.name}`);
         for (const stmt of statements(s.sql)) {
-          try {
-            await conn.query(stmt);
-          } catch (e) {
-            const msg = (e as Error).message;
-            // Re-running a partially applied migration should not stop the world.
-            if (/Duplicate column|Duplicate key name|already exists/i.test(msg)) {
-              console.log(`  (skipped: ${msg})`);
-              continue;
-            }
-            throw e;
-          }
+          /* Per-clause tolerance — see db/alter.ts. Re-running a partially
+             applied migration should not stop the world, and a multi-column
+             ALTER whose first column already exists must still add the rest. */
+          const res = await runTolerant(conn, stmt);
+          for (const r of res.recovered) console.log(`  (applied: ${r})`);
+          for (const k of res.skipped) console.log(`  (skipped: ${k})`);
         }
         await mexec('UPDATE company_databases SET schema_version = ?, migrated_at = NOW() WHERE company_id = ?',
           [s.version, db.company_id]);

@@ -37,6 +37,44 @@ function csp(): string {
   ].join('; ');
 }
 
+/**
+ * The public marketing site, and nothing else.
+ *
+ * Everything in Easy Shop was `noindex` until 15 Sep 2026, which was right when
+ * every page was a shop's private records. The marketing pages have to be the
+ * exception or they cannot rank — so the allowlist is explicit and narrow, and
+ * anything not named here stays cloaked. A new CRM screen is invisible to
+ * crawlers by default; a new marketing page has to be added here on purpose.
+ *
+ * Keep this in step with `web/robots.txt` and `web/sitemap.xml`.
+ */
+const PUBLIC_PAGES = new Set([
+  '/', '/index.html',
+  '/about.html',
+  '/privacy.html',
+  '/sms-terms.html',
+  '/terms.html',
+  '/robots.txt', '/sitemap.xml',
+  '/site.css',
+  '/favicon.ico'
+]);
+
+/**
+ * Public, but deliberately NOT indexed.
+ *
+ * `checkin.html` and `unsubscribe.html` need no sign-in, which is not the same
+ * as wanting them in a search index — one is a shop's intake form and the other
+ * is reached from a signed link. They stay cloaked with the CRM.
+ */
+function isPublicPage(url: string): boolean {
+  const path = url.split('?')[0];
+  /* The marketing pages' own images. A noindex header on an image keeps it out
+     of image search and out of a rich result's thumbnail, so the screenshots
+     have to be allowed alongside the pages that use them. */
+  if (path.startsWith('/img/')) return true;
+  return PUBLIC_PAGES.has(path);
+}
+
 function applyHeaders(req: FastifyRequest, reply: FastifyReply): void {
   reply.header('content-security-policy', csp());
   reply.header('x-content-type-options', 'nosniff');
@@ -46,9 +84,16 @@ function applyHeaders(req: FastifyRequest, reply: FastifyReply): void {
   reply.header('cross-origin-resource-policy', 'same-origin');
   reply.header('permissions-policy', 'camera=(self), geolocation=(), microphone=()');
 
-  /* Nothing here is public. Shops' customer names should never turn up in a
-     search index, whatever a crawler finds its way to. */
-  reply.header('x-robots-tag', 'noindex, nofollow, noarchive');
+  if (isPublicPage(req.url)) {
+    /* The marketing pages are meant to be found. `max-image-preview:large`
+       lets Google use a full-size thumbnail in results, which is worth having
+       and costs nothing. */
+    reply.header('x-robots-tag', 'index, follow, max-image-preview:large, max-snippet:-1');
+  } else {
+    /* Everything else is a shop's records. Customer names must never turn up
+       in a search index, whatever a crawler finds its way to. */
+    reply.header('x-robots-tag', 'noindex, nofollow, noarchive');
+  }
 
   /* Two years, subdomains included. Only in production — sending this from a
      dev box pins localhost to HTTPS in your browser for two years. */

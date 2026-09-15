@@ -2,198 +2,486 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Easy Shop</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+
+<title>Easy Shop — Automotive Production Management &amp; CRM for Collision and Hail Repair</title>
+<meta name="description" content="Easy Shop is a modular automotive service solution: production management and CRM for auto collision, auto hail and mechanical repair shops. Seven modules come with every shop; add invoicing, parts tracking and SMS when you need them. Built by a shop operator. Book a demo.">
+<link rel="canonical" href="https://easyshopauto.com/">
+<meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1">
+<meta name="theme-color" content="#161826">
+
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Easy Shop">
+<meta property="og:url" content="https://easyshopauto.com/">
+<meta property="og:title" content="Easy Shop — Automotive Production Management &amp; CRM for Collision and Hail Repair">
+<meta property="og:description" content="Auto collision, auto hail and mechanical repair, on one production board. Seven modules come with every shop; add the rest when the work calls for them. Built by a shop operator.">
+<meta property="og:image" content="https://easyshopauto.com/img/board-hero.webp">
+<meta property="og:image:alt" content="The Easy Shop job board showing every vehicle in the shop by repair stage">
+<meta name="twitter:card" content="summary_large_image">
+
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
-<style>
-  :root {
-    --bg: #131c2e; --surf: #1c2740; --text: #e7eaf2; --muted: #aab3c4;
-    --dim: #7f8ca4; --line: #2c3a55; --acc: #d9a441; --acc2: #e5bf68;
-    --bad: #d07e6f; --good: #6fae8c;
-    --font: 'Inter', system-ui, -apple-system, sans-serif;
-  }
-  * { box-sizing: border-box; }
-  body {
-    margin: 0; min-height: 100vh; background: var(--bg); color: var(--text);
-    font-family: var(--font); display: grid; place-items: center; padding: 24px;
-  }
-  a { color: var(--acc2); }
-  a:hover { color: var(--acc); }
-  .card { width: 100%; max-width: 380px; }
-  .brand { display: flex; align-items: center; gap: 10px; margin-bottom: 34px; }
-  .mark {
-    width: 26px; height: 26px; border: 1px solid var(--acc); border-radius: 5px;
-    display: grid; place-items: center; font: 600 10px var(--font); color: var(--acc);
-  }
-  .wordmark { font: 600 14px var(--font); letter-spacing: .14em; text-transform: uppercase; }
-  h1 { font: 500 22px var(--font); margin: 0 0 6px; }
-  .sub { font: 400 12.5px var(--font); color: var(--dim); margin-bottom: 26px; line-height: 1.5; }
-  label {
-    display: block; font: 600 8.5px var(--font); letter-spacing: .13em;
-    text-transform: uppercase; color: var(--acc2); margin-bottom: 6px;
-  }
-  input {
-    width: 100%; background: transparent; border: 1px solid var(--line); border-radius: 4px;
-    color: var(--text); font: 400 13px var(--font); padding: 10px 11px; margin-bottom: 16px;
-  }
-  input:focus-visible { outline: 2px solid var(--acc); outline-offset: 1px; border-color: var(--acc); }
-  button {
-    width: 100%; font: 500 12.5px var(--font); color: var(--bg); background: var(--acc);
-    border: 1px solid var(--acc); border-radius: 4px; padding: 11px; cursor: pointer;
-  }
-  button:hover { background: var(--acc2); border-color: var(--acc2); }
-  button:disabled { opacity: .5; cursor: default; }
-  .alt {
-    background: none; color: var(--dim); border: none; margin-top: 14px;
-    font: 400 11.5px var(--font); padding: 6px;
-  }
-  .alt:hover { color: var(--text); background: none; }
-  .msg {
-    font: 400 11.5px var(--font); line-height: 1.5; padding: 10px 12px;
-    border-radius: 4px; margin-bottom: 18px; display: none;
-  }
-  .msg.err { display: block; color: var(--bad); border: 1px solid var(--bad); }
-  .msg.ok  { display: block; color: var(--good); border: 1px solid var(--good); }
-  .foot { margin-top: 30px; font: 400 10.5px var(--font); color: var(--dim); line-height: 1.6; }
-</style>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="site.css">
+
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "Organization",
+      "@id": "https://easyshopauto.com/#org",
+      "name": "Storm Rider Solutions LLC",
+      "alternateName": "Easy Shop",
+      "url": "https://easyshopauto.com/",
+      "email": "Contact@stormrsolutions.com",
+      "telephone": "+1-401-203-5823",
+      "sameAs": ["https://stormrsolutions.com"],
+      "parentOrganization": { "@type": "Organization", "name": "Storm Rider Solutions", "url": "https://stormrsolutions.com" },
+      "address": { "@type": "PostalAddress", "addressLocality": "Plano", "addressRegion": "TX", "addressCountry": "US" },
+      "founder": { "@type": "Person", "name": "Chris Johnson", "jobTitle": "Founder" }
+    },
+    {
+      "@type": "WebSite",
+      "@id": "https://easyshopauto.com/#site",
+      "url": "https://easyshopauto.com/",
+      "name": "Easy Shop",
+      "publisher": { "@id": "https://easyshopauto.com/#org" },
+      "inLanguage": "en-US"
+    },
+    {
+      "@type": "SoftwareApplication",
+      "name": "Easy Shop",
+      "applicationCategory": "BusinessApplication",
+      "applicationSubCategory": "Automotive production management software and auto CRM",
+      "operatingSystem": "Web browser, iOS, Android",
+      "url": "https://easyshopauto.com/",
+      "publisher": { "@id": "https://easyshopauto.com/#org" },
+      "description": "A modular automotive service solution for auto collision, auto hail and mechanical repair shops — automotive production management and CRM in one system: job board, customer check-in, leads, wholesale accounts, insurance work, estimate importing from CCC One and Mitchell, reporting, invoicing, parts tracking and customer notifications.",
+      "featureList": [
+        "Customer check-in",
+        "Job board",
+        "Leads",
+        "Wholesale accounts",
+        "Insurance work",
+        "Estimate importing from CCC One and Mitchell",
+        "Reporting",
+        "Sales",
+        "Invoicing",
+        "Parts tracking",
+        "Customer and staff SMS updates",
+        "Multi-shop administration"
+      ],
+      "keywords": "auto collision software, auto hail software, auto CRM, automotive CRM, automotive service solution, production management, automotive production management, collision repair shop software, body shop management software, PDR hail management, paintless dent repair software, repair order management, auto body shop CRM",
+      "audience": { "@type": "BusinessAudience", "audienceType": "Auto collision, auto hail and automotive repair shops" }
+    },
+    {
+      "@type": "FAQPage",
+      "@id": "https://easyshopauto.com/#faq",
+      "mainEntity": [
+        {
+          "@type": "Question",
+          "name": "Can I add modules later?",
+          "acceptedAnswer": { "@type": "Answer", "text": "Yes, and that is the point. Start with the seven every shop gets and turn on the others the month the work calls for them. Adding one does not move you to a different product or reset anything you have already entered, and turning one off again keeps the records it created." }
+        },
+        {
+          "@type": "Question",
+          "name": "How long does setup take?",
+          "acceptedAnswer": { "@type": "Answer", "text": "It depends on the shop. A single-location shop with clean customer records is quick; a shop with years of history, several locations or a wholesale book to bring across takes longer. We will tell you what yours looks like after the demo rather than quote you a number now." }
+        },
+        {
+          "@type": "Question",
+          "name": "Does it work on a phone or tablet in the bay?",
+          "acceptedAnswer": { "@type": "Answer", "text": "Yes. The board, the file, parts and check-in all work on a phone, and the sales screen is built for a phone on purpose. Technician logins work the same way, so a tech can see their own cars without walking to the office." }
+        },
+        {
+          "@type": "Question",
+          "name": "Who owns my data?",
+          "acceptedAnswer": { "@type": "Answer", "text": "You do. The shop's data is only theirs, there is no cross over, and no one else has access to your customer and client information. Each shop has its own separate database." }
+        },
+        {
+          "@type": "Question",
+          "name": "What happens to old closed jobs?",
+          "acceptedAnswer": { "@type": "Answer", "text": "A closed file is kept as a record. After a year it moves to archival storage, and personal details have a ten-year outer limit. The accounting shell — the RO number, the dates, the amounts and the labour — is never purged, because that is your business record. Wholesale and insurance client records are never purged." }
+        }
+      ]
+    }
+  ]
+}
+</script>
 </head>
 <body>
-<div class="card">
-  <div class="brand">
-    <div class="mark">ES</div>
-    <div class="wordmark">Easy Shop</div>
+
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="nav">
+  <a class="brand" href="index.html">Easy Shop</a>
+  <nav aria-label="Main">
+    <ul>
+      <li><a href="#modules">Modules</a></li>
+      <li><a href="#features">Features</a></li>
+      <li><a href="about.html">About</a></li>
+      <li><a class="btn" href="signin.html">Sign in</a></li>
+      <li><a class="btn btn-primary" href="#demo">Book a demo</a></li>
+    </ul>
+  </nav>
+</header>
+
+<main id="main">
+
+  <section>
+    <div class="wrap split">
+      <div class="stack">
+        <h1>Software that fits the shop you actually run</h1>
+        <p class="lede">Easy Shop is an automotive service solution for auto collision, auto hail and mechanical repair. Most shop systems hand you every screen they have ever built and let you find your way; this one starts with seven modules every shop needs, and you add the rest when the work calls for them.</p>
+        <div class="actions">
+          <a class="btn btn-primary btn-lg" href="#demo">Book a demo</a>
+          <a class="btn btn-ghost btn-lg" href="#modules">What's included</a>
+        </div>
+        <p class="muted" style="font-size:13px;margin:0">Built by a collision and repair operator. In daily use in a working shop.</p>
+      </div>
+      <div class="frame">
+        <img src="img/board-hero.webp" width="828" height="356" alt="The Easy Shop job board: every vehicle in the shop listed by repair stage, with its age and assigned technician" fetchpriority="high">
+      </div>
+    </div>
+  </section>
+
+  <section class="ruled">
+    <div class="wrap">
+      <p class="kicker">Production management</p>
+      <h2>The questions you ask all day, answered on the screen</h2>
+      <p class="lede" style="margin:14px 0 28px">Nobody should have to walk the shop, call the parts desk and open a spreadsheet to find out where the week stands. The information is already in the system. It shows it to you.</p>
+      <div class="cols-3">
+        <div class="card">
+          <h3 style="font-size:17px;color:var(--accent-300);margin-bottom:8px">What do I have in the shop?</h3>
+          <p class="muted" style="font-size:14px;margin:0">The board, one screen, every car in the building with its stage, its age and who is on it. No walking the floor to find out.</p>
+        </div>
+        <div class="card">
+          <h3 style="font-size:17px;color:var(--accent-300);margin-bottom:8px">What did we run this month?</h3>
+          <p class="muted" style="font-size:14px;margin:0">Closed files book to a date you set, so the month's revenue, cycle times and counts are a report rather than a reconstruction.</p>
+        </div>
+        <div class="card">
+          <h3 style="font-size:17px;color:var(--accent-300);margin-bottom:8px">How much do we need to collect?</h3>
+          <p class="muted" style="font-size:14px;margin:0">Every file carries what was billed and what has been paid. Unpaid closed files are a list you can work down, not a surprise.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="tint" id="modules">
+    <div class="wrap">
+      <p class="kicker">Twelve modules</p>
+      <h2>Seven you're given. Five you choose.</h2>
+      <p class="lede" style="margin:14px 0 32px">Every module shares one set of customers, cars and jobs, so nothing is entered twice and nothing has to be kept in step by hand. There is no tier to climb out of — a module is either running in your shop or it isn't.</p>
+
+      <div class="modules">
+        <div>
+          <div class="head"><span class="tag tag-accent">Included</span> <span class="muted" style="font-size:13px">Every shop, from day one</span></div>
+          <h3 class="muted" style="position:absolute;left:-9999px">Modules included with every shop</h3>
+          <ul>
+            <li><div><b>Customer check-in</b><span>The one screen your customers touch. Keys, contact, and what they came in for.</span></div></li>
+            <li><div><b>Job board</b><span>Every car in the shop on one board, moved by dragging it into its next status.</span></div></li>
+            <li><div><b>Leads</b><span>Everyone who came by for an estimate, and when it is time to reach back out.</span></div></li>
+            <li><div><b>Wholesale accounts</b><span>Trade customers, their rates, and what each of them owes you.</span></div></li>
+            <li><div><b>Insurance work</b><span>Claim, adjuster, supplements and approval dates carried on the job.</span></div></li>
+            <li><div><b>Estimate importing</b><span>Import estimates from CCC One and Mitchell — parts, labour hours, and the claim details.</span></div></li>
+            <li><div><b>Reporting</b><span>What came in, what went out, and where the week actually went.</span></div></li>
+          </ul>
+        </div>
+        <div class="optional">
+          <div class="head"><span class="tag tag-outline">Add when needed</span> <span class="muted" style="font-size:13px">Switch on, switch off</span></div>
+          <h3 class="muted" style="position:absolute;left:-9999px">Optional modules</h3>
+          <ul>
+            <li><div><b>Sales</b><span>Sales can be anywhere — at the doors, on the phone, in the parking lot. One screen, one hand.</span></div></li>
+            <li><div><b>Invoicing</b><span>Retail, insurance and wholesale invoices off the job record, with statements and aging.</span></div></li>
+            <li><div><b>Parts tracking</b><span>What is ordered, what has landed, what the board is waiting on, and what it cost.</span></div></li>
+            <li><div><b>Customer and staff updates via SMS</b><span>Keep everyone informed of where the vehicle is in the process.</span></div></li>
+            <li><div><b>Multi-shop administration</b><span>Two or more locations under one sign-in, each with its own database.</span></div></li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="features">
+    <div class="wrap">
+      <p class="kicker">Automotive production management</p>
+      <h2 style="margin-bottom:clamp(36px,6vw,72px)">What the modules actually do</h2>
+
+      <article class="feature split">
+        <div class="stack">
+          <span class="tag tag-accent">Included</span>
+          <h3>The board is the shop</h3>
+          <p class="muted" style="margin:0;max-width:50ch">Every open file sits in its real stage — teardown, PDR, body, paint, reassembly, QC, ready. Drag a car forward and everyone who needs to know is told. This is the production management half of the system, and it is the screen most of the shop lives on.</p>
+          <ul>
+            <li>Collision, hail and combination shops each get their own lane and status set</li>
+            <li>Lanes and statuses are yours to name and reorder</li>
+            <li>Total losses sort to the top and turn red</li>
+            <li>Filter to one technician, or to the cars with nobody on them</li>
+            <li>Print exactly what is filtered on screen</li>
+          </ul>
+        </div>
+        <div class="frame"><img src="img/job-board.webp" width="862" height="382" alt="Easy Shop job board grouped by repair stage, with vehicle age and assigned technician on each row" loading="lazy"></div>
+      </article>
+
+      <article class="feature split">
+        <div class="stack">
+          <span class="tag tag-accent">Included</span>
+          <h3>Leads, without a form to fill out</h3>
+          <p class="muted" style="margin:0;max-width:50ch">Somebody comes by for an evaluation or an estimate. You take their information once, at the counter, and the system tells you when it is time to reach back out.</p>
+          <ul>
+            <li>Write the estimate on the lead at the counter, and the amount stays with it</li>
+            <li>A configurable stretch of silence flags the lead for chasing</li>
+            <li>Book the appointment from the lead itself</li>
+            <li>Won and lost are counted against what was quoted, not guessed at</li>
+          </ul>
+        </div>
+        <div class="frame"><img src="img/leads.webp" width="862" height="428" alt="The Easy Shop leads screen, showing each lead's state, age and who owns the follow-up" loading="lazy"></div>
+      </article>
+
+      <article class="feature split">
+        <div class="stack">
+          <span class="tag tag-outline">Add when needed</span>
+          <h3>Parts, from ordered to on the car</h3>
+          <p class="muted" style="margin:0;max-width:50ch">Lines grouped by what is happening to them — to order, on order, back order, received — with the order number, the vendor and the ETA on every one.</p>
+          <ul>
+            <li>Late ETAs go red with the days they are late</li>
+            <li>A short shipment stays on order for what is still owed</li>
+            <li>Cost goes in when the invoice turns up, not before</li>
+            <li>Pull sheets print for ordering, for what is out, and for what came in</li>
+          </ul>
+        </div>
+        <div class="frame"><img src="img/parts-tracking.webp" width="862" height="397" alt="Parts tracking in Easy Shop, with lines grouped by order status and their vendor, order number and ETA" loading="lazy"></div>
+      </article>
+
+      <article class="feature split">
+        <div class="stack">
+          <span class="tag tag-accent">Included</span>
+          <h3>Wholesale accounts that bill the way you quote</h3>
+          <p class="muted" style="margin:0;max-width:50ch">Trade work is not retail work. Wholesale customers keep their own rates, their own invoices and their own balance, and nothing about them has to be re-typed per job.</p>
+          <ul>
+            <li>One client directory shared with the rest of the system</li>
+            <li>Descriptions are remembered; prices never are</li>
+            <li>Statements and aging per account</li>
+            <li>Wholesale records are kept as your business record, not aged out</li>
+          </ul>
+        </div>
+        <div class="frame"><img src="img/wholesale-accounts.webp" width="1080" height="517" alt="The Easy Shop client directory listing wholesale trade accounts alongside retail customers" loading="lazy"></div>
+      </article>
+
+      <article class="feature split">
+        <div class="stack">
+          <span class="tag tag-accent">Included</span>
+          <h3>Insurance work with the claim on the file</h3>
+          <p class="muted" style="margin:0;max-width:50ch">Carrier, policy, claim number, deductible, date of loss, adjuster and estimator ride on the job. Import the estimate from CCC One or Mitchell and they fill themselves in, along with the parts lines and the labour hours.</p>
+          <ul>
+            <li>Supplements tracked as their own checkpoints in each lane</li>
+            <li>Approved amounts overwrite the guess, and every change is recorded</li>
+            <li>Estimate written and estimate sent are separate states</li>
+            <li>Nothing is overwritten quietly — before and after are both kept</li>
+          </ul>
+        </div>
+        <div class="frame"><img src="img/insurance-claim.webp" width="1080" height="603" alt="A repair order in Easy Shop showing carrier, claim number, deductible and adjuster details on the file" loading="lazy"></div>
+      </article>
+
+      <article class="feature split">
+        <div class="stack">
+          <span class="tag tag-outline">Add when needed</span>
+          <h3>People find out without being told</h3>
+          <p class="muted" style="margin:0;max-width:50ch">A status change, a part arriving, a lead going quiet — the person who needs that fact gets it, and nobody else is copied for the sake of it.</p>
+          <ul>
+            <li>Every event is a switch each person sets for themselves</li>
+            <li>Status changes can be scoped to only the cars you are on</li>
+            <li>Sends are capped so a busy morning is not fifty emails</li>
+            <li>Text messages are next, sharing the same wording</li>
+          </ul>
+        </div>
+        <div class="frame"><img src="img/notifications.webp" width="1080" height="531" alt="Per-event notification settings in Easy Shop, one switch per kind of notification" loading="lazy"></div>
+      </article>
+
+      <article class="feature split">
+        <div class="stack">
+          <span class="tag tag-accent">Included</span>
+          <h3>Reporting you can stand behind</h3>
+          <p class="muted" style="margin:0;max-width:50ch">The numbers come off the same records the shop runs on, so a report is never a second set of books somebody has to keep in step.</p>
+          <ul>
+            <li>Closed files keyed on the date you book them to</li>
+            <li>Cycle time in-to-ready, rental in-to-picked-up, A/R picked-up-to-paid</li>
+            <li>Parts margin per file and per line</li>
+            <li>Payroll and commission run off what the close-out actually settled</li>
+          </ul>
+        </div>
+        <div class="frame"><img src="img/reports.webp" width="1080" height="479" alt="The Easy Shop reports screen, showing closed files, revenue and cycle time for a chosen date range" loading="lazy"></div>
+      </article>
+    </div>
+  </section>
+
+  <section class="tint">
+    <div class="wrap split" style="align-items:start">
+      <div>
+        <p class="kicker">Access</p>
+        <h2>Every permission is yours to set</h2>
+        <p class="muted" style="margin:14px 0 14px;max-width:52ch">There are no fixed job titles to squeeze your people into. You define the roles your shop actually has, name them what you call them, and tick exactly what each one may see and change.</p>
+        <p class="muted" style="margin:0;max-width:52ch">Technicians get their own logins. A tech can be given the hours on a car without being shown what it bills, and can be limited to the cars assigned to them. Someone holding two roles gets the sum of both.</p>
+      </div>
+      <div style="display:grid;gap:10px;min-width:0">
+        <div class="card"><b style="font-weight:500;font-size:15px">Roles you define</b><br><span class="muted" style="font-size:13px">Owner and Technician are the only fixed ones, and you can rename both. Everything else is a row you name, tick and delete.</span></div>
+        <div class="card"><b style="font-weight:500;font-size:15px">Technician logins</b><br><span class="muted" style="font-size:13px">Every tech signs in as themselves. Their work, their hours, their cars.</span></div>
+        <div class="card"><b style="font-weight:500;font-size:15px">Money is not one switch</b><br><span class="muted" style="font-size:13px">File totals, parts cost and margin, and commission are three separate ticks. Labour hours is a fourth, separate from money entirely.</span></div>
+        <div class="card"><b style="font-weight:500;font-size:15px">Only their own work</b><br><span class="muted" style="font-size:13px">One tick per role narrows the board, the leads and the schedule to what that person is assigned.</span></div>
+        <div class="card"><b style="font-weight:500;font-size:15px">Every change is recorded</b><br><span class="muted" style="font-size:13px">Who changed what, when, and what it was before. Append-only, and nobody can edit it.</span></div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap" style="border:1px dashed var(--n-800);border-radius:var(--radius-lg);padding:clamp(22px,4vw,40px)">
+      <div style="display:flex;flex-wrap:wrap;align-items:baseline;gap:14px;margin-bottom:18px">
+        <h2 style="font-size:22px">Coming next</h2>
+        <span class="muted" style="font-size:13px">In build, not yet live</span>
+      </div>
+      <div class="cols-3">
+        <div><b style="font-weight:500;font-size:15px">Online forms into Leads</b><br><span class="muted" style="font-size:13px">A form on your own site that posts straight into your leads, with the same follow-up clock.</span></div>
+        <div><b style="font-weight:500;font-size:15px">Leads from funnels</b><br><span class="muted" style="font-size:13px">Ad and funnel traffic arriving as leads, tagged with where it came from so you can see what works.</span></div>
+        <div><b style="font-weight:500;font-size:15px">Online scheduling</b><br><span class="muted" style="font-size:13px">A customer picks a slot and it lands on your schedule.</span></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="ruled">
+    <div class="wrap split" style="align-items:start">
+      <div>
+        <p class="kicker">About</p>
+        <h2>Built by someone who has run the shop</h2>
+        <p class="muted" style="margin:14px 0 14px;max-width:54ch">Easy Shop is directed and built by Chris Johnson, who has spent nearly two decades in the industry. He has worked with the major collision repairers, run operations for multi-million-dollar companies, and consults with repair shops on how they run.</p>
+        <p class="muted" style="margin:0 0 20px;max-width:54ch">In 2022 he opened his own repair company, which is still running today — and still running on this software.</p>
+        <a class="btn btn-ghost" href="about.html">Read the whole story</a>
+      </div>
+      <div class="frame">
+        <img src="img/chris-johnson.webp" width="838" height="1048" alt="Chris Johnson, founder of Easy Shop and Storm Rider Solutions" loading="lazy">
+      </div>
+    </div>
+  </section>
+
+  <section class="tint" id="faq">
+    <div class="narrow">
+      <p class="kicker">Questions</p>
+      <h2 style="margin-bottom:28px">Before you ask</h2>
+
+      <details class="faq" open>
+        <summary><span>Can I add modules later?</span></summary>
+        <p>Yes, and that is the point. Start with the seven every shop gets and turn on the others the month the work calls for them. Adding one does not move you to a different product or reset anything you have already entered, and turning one off again keeps the records it created.</p>
+      </details>
+      <details class="faq">
+        <summary><span>How long does setup take?</span></summary>
+        <p>It depends on the shop. A single-location shop with clean customer records is quick; a shop with years of history, several locations or a wholesale book to bring across takes longer. We will tell you what yours looks like after the demo rather than quote you a number now.</p>
+      </details>
+      <details class="faq">
+        <summary><span>Does it work on a phone or tablet in the bay?</span></summary>
+        <p>Yes. The board, the file, parts and check-in all work on a phone, and the sales screen is built for a phone on purpose. Technician logins work the same way, so a tech can see their own cars without walking to the office.</p>
+      </details>
+      <details class="faq">
+        <summary><span>Who owns my data?</span></summary>
+        <p>You do. The shop's data is only theirs, there is no cross over, and no one else has access to your customer and client information. Each shop has its own separate database.</p>
+      </details>
+      <details class="faq">
+        <summary><span>What happens to old closed jobs?</span></summary>
+        <p>A closed file is kept as a record. After a year it moves to archival storage, and personal details have a ten-year outer limit. The accounting shell — the RO number, the dates, the amounts and the labour — is never purged, because that is your business record. Wholesale and insurance client records are never purged.</p>
+      </details>
+    </div>
+  </section>
+
+  <section id="demo">
+    <div class="wrap split" style="align-items:start">
+      <div>
+        <p class="kicker">Book a demo</p>
+        <h2>See it on your own shop's work</h2>
+        <p class="muted" style="margin:14px 0 22px;max-width:50ch">Tell us how the shop runs and which modules sound like they'd earn their place. We'll walk the screens with you rather than show you a slide deck.</p>
+        <ul style="list-style:none;padding:0;margin:0;display:grid;gap:8px;font-size:14px">
+          <li><a href="tel:+14012035823">401-203-5823</a></li>
+          <li><a href="mailto:Contact@stormrsolutions.com">Contact@stormrsolutions.com</a></li>
+        </ul>
+      </div>
+
+      <form class="card" id="demoForm" style="padding:clamp(18px,3vw,30px);display:grid;gap:14px;min-width:0">
+        <div class="grid-2">
+          <label class="field"><span>Your name</span><input name="name" type="text" autocomplete="name"></label>
+          <label class="field"><span>Shop name</span><input name="shop" type="text" autocomplete="organization"></label>
+          <label class="field"><span>Email</span><input name="email" type="email" autocomplete="email"></label>
+          <label class="field"><span>Phone</span><input name="phone" type="tel" autocomplete="tel"></label>
+          <label class="field"><span>City and state</span><input name="city" type="text"></label>
+          <label class="field"><span>What you use now</span><input name="current" type="text"></label>
+        </div>
+        <label class="field"><span>Anything else worth knowing</span><textarea name="note" rows="4"></textarea></label>
+        <div style="display:flex;flex-wrap:wrap;align-items:center;gap:12px">
+          <button class="btn btn-primary btn-lg" type="submit">Send it</button>
+          <span class="muted" style="font-size:12px">Opens an email to us with what you've typed. Nothing is sent until you send it.</span>
+        </div>
+      </form>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  <div class="cols">
+    <div>
+      <h2>Easy Shop</h2>
+      <p class="muted" style="font-size:13px;margin:0">Automotive production management and CRM for auto collision, auto hail and mechanical repair shops. Built and supported by <a href="https://stormrsolutions.com" rel="noopener">Storm Rider Solutions LLC</a>.</p>
+    </div>
+    <div>
+      <h2 class="kicker" style="margin-bottom:10px">Contact</h2>
+      <ul>
+        <li>Chris Johnson, Founder</li>
+        <li><a href="tel:+14012035823">401-203-5823</a></li>
+        <li><a href="mailto:Contact@stormrsolutions.com">Contact@stormrsolutions.com</a></li>
+        <li class="muted">Plano, Texas</li>
+      </ul>
+    </div>
+    <div>
+      <h2 class="kicker" style="margin-bottom:10px">The product</h2>
+      <ul>
+        <li><a href="#modules">Modules</a></li>
+        <li><a href="#features">Features</a></li>
+        <li><a href="about.html">About</a></li>
+        <li><a href="#faq">Questions</a></li>
+        <li><a href="signin.html">Sign in</a></li>
+      </ul>
+    </div>
+    <div>
+      <h2 class="kicker" style="margin-bottom:10px">Legal</h2>
+      <ul>
+        <li><a href="privacy.html">Privacy policy</a></li>
+        <li><a href="privacy.html#cookies">Cookies</a></li>
+        <li><a href="terms.html">Terms of use</a></li>
+        <li><a href="sms-terms.html">Text message terms</a></li>
+        <li><a href="unsubscribe.html">Unsubscribe</a></li>
+      </ul>
+    </div>
   </div>
-
-  <h1 id="title">Sign in</h1>
-  <div class="sub" id="subtitle">Your shop, its files and everything on the board.</div>
-
-  <div class="msg" id="msg"></div>
-
-  <form id="form" autocomplete="on">
-    <div id="pwFields">
-      <label for="email">Email</label>
-      <input id="email" name="email" type="email" autocomplete="username" required>
-      <label for="password">Password</label>
-      <input id="password" name="password" type="password" autocomplete="current-password" required>
-    </div>
-
-    <div id="codeFields" style="display:none">
-      <label for="code">Access code</label>
-      <input id="code" name="code" type="text" autocomplete="off" maxlength="8" style="letter-spacing:.2em;text-transform:uppercase">
-    </div>
-
-    <button type="submit" id="submit">Sign in</button>
-  </form>
-
-  <button type="button" id="forgot" style="display:block;width:100%;margin-top:14px;
-    background:transparent;border:none;font:400 12px var(--font);color:var(--dim);cursor:pointer">
-    Forgot your password?</button>
-
-  <button class="alt" id="toggle" type="button">Use an access code instead</button>
-
-  <div class="foot" id="foot"></div>
-</div>
+  <div class="base">
+    <span>&copy; 2026 <a href="https://stormrsolutions.com" rel="noopener" style="color:inherit">Storm Rider Solutions LLC</a>. Founded in Plano, Texas.</span>
+    <span>No cookies. No tracking. <a href="privacy.html#cookies">Why</a>.</span>
+  </div>
+</footer>
 
 <script>
-(function () {
-  var mode = 'password';
-  var form = document.getElementById('form');
-  var msg = document.getElementById('msg');
-  var submit = document.getElementById('submit');
-  var toggle = document.getElementById('toggle');
-
-  function say(text, kind) {
-    msg.textContent = text;
-    msg.className = 'msg ' + (kind || 'err');
-  }
-
-  document.getElementById('forgot').addEventListener('click', function () {
-    var email = document.getElementById('email').value.trim();
-    if (!email) {
-      document.getElementById('email').focus();
-      return say('Type your email address first, then press it again.');
-    }
-    var btn = this;
-    btn.disabled = true;
-    fetch('/api/auth/forgot', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ email: email })
-    }).then(function (r) { return r.json().catch(function () { return {}; }); })
-      .then(function (j) {
-        btn.disabled = false;
-        /* The same answer either way — telling somebody which addresses have
-           accounts is not a favour worth doing. */
-        say(j.note || 'If that address has an account, a link is on its way.', 'ok');
-      }).catch(function () {
-        btn.disabled = false;
-        say('Could not reach the server.');
-      });
-  });
-
-  toggle.addEventListener('click', function () {
-    mode = mode === 'password' ? 'code' : 'password';
-    document.getElementById('pwFields').style.display = mode === 'password' ? '' : 'none';
-    document.getElementById('codeFields').style.display = mode === 'code' ? '' : 'none';
-    document.getElementById('email').required = mode === 'password';
-    document.getElementById('password').required = mode === 'password';
-    toggle.textContent = mode === 'password' ? 'Use an access code instead' : 'Sign in with email and password';
-    msg.className = 'msg';
-  });
-
-  form.addEventListener('submit', function (e) {
-    e.preventDefault();
-    submit.disabled = true;
-    msg.className = 'msg';
-
-    var body = mode === 'password'
-      ? { email: document.getElementById('email').value, password: document.getElementById('password').value }
-      : { code: document.getElementById('code').value };
-
-    fetch('/api/auth/login', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(body)
-    })
-      .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
-      .then(function (res) {
-        submit.disabled = false;
-        if (!res.ok) return say(res.j.error || 'Sign-in failed.');
-
-        if (res.j.user.mustChangePassword) {
-          say('Signed in. You need to set a new password.', 'ok');
-          setTimeout(function () { location.href = '/set-password.html'; }, 600);
-          return;
-        }
-        if (!res.j.companyId && res.j.companies.length > 1) {
-          location.href = '/choose.html';
-          return;
-        }
-        if (!res.j.companyId && res.j.isPlatformOwner) {
-          location.href = '/platform.html';
-          return;
-        }
-        if (!res.j.companyId) {
-          return say('Your account is not attached to a shop yet.');
-        }
-        location.href = '/board.html';
-      })
-      .catch(function () {
-        submit.disabled = false;
-        say('Could not reach the server.');
-      });
-  });
-
-  fetch('/api/me').then(function (r) {
-    if (r.ok) return r.json();
-    throw new Error('anon');
-  }).then(function (me) {
-    if (me.company) location.href = '/board.html';
-    else if (me.isPlatformOwner) location.href = '/platform.html';
-  }).catch(function () { /* not signed in — stay here */ });
-})();
+/* The demo form opens the visitor's own mail client. No endpoint, no stored
+   personal data, nothing to breach — and it works with JavaScript disabled
+   too, because the address is a plain mailto link above it. */
+document.getElementById('demoForm').addEventListener('submit', function (e) {
+  e.preventDefault();
+  var f = new FormData(e.target);
+  var line = function (label, key) { return f.get(key) ? label + ': ' + f.get(key) + '\n' : ''; };
+  var body = line('Name', 'name') + line('Shop', 'shop') + line('Email', 'email') +
+             line('Phone', 'phone') + line('City and state', 'city') +
+             line('Currently using', 'current') +
+             (f.get('note') ? '\n' + f.get('note') + '\n' : '');
+  var subject = 'Easy Shop demo request' + (f.get('shop') ? ' \u2014 ' + f.get('shop') : '');
+  location.href = 'mailto:Contact@stormrsolutions.com?subject=' +
+    encodeURIComponent(subject) + '&body=' +
+    encodeURIComponent(body || "I'd like to see a demo.");
+});
 </script>
 </body>
 </html>

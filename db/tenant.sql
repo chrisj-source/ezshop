@@ -203,6 +203,8 @@ CREATE TABLE repair_orders (
   approved_at       DATETIME      NULL,
   delivered_at      DATETIME      NULL,
   closed_at         DATETIME      NULL,
+  archived_at       DATETIME      NULL COMMENT 'derivatives dropped, record intact',
+  purged_at         DATETIME      NULL COMMENT 'personal data erased, accounting shell kept',
   close_date        DATE          NULL COMMENT 'the books date, set and re-set by hand',
   closed_by         BIGINT UNSIGNED NULL,
   paid              TINYINT(1)    NOT NULL DEFAULT 0 COMMENT 'derived: paid_cents >= amount_cents',
@@ -218,6 +220,7 @@ CREATE TABLE repair_orders (
   updated_at        DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   UNIQUE KEY uq_ro_number (ro_number),
   KEY ix_ro_open (closed_at, status_slot),
+  KEY ix_ro_retention (closed_at, archived_at, purged_at),
   KEY ix_ro_close_date (close_date, paid),
   KEY ix_ro_total_loss (total_loss_at),
   KEY ix_ro_voided (voided_at),
@@ -316,10 +319,15 @@ CREATE TABLE documents (
   doc_type        VARCHAR(64)   NOT NULL,
   label           VARCHAR(190)  NOT NULL,
   storage_key     VARCHAR(255)  NOT NULL COMMENT 'path on disk or object key',
+  thumb_key       VARCHAR(255)  NULL,
+  thumb_state     ENUM('pending','ready','failed','none') NOT NULL DEFAULT 'none' COMMENT 'none = nothing to make, e.g. a .txt',
+  thumb_tries     TINYINT UNSIGNED NOT NULL DEFAULT 0,
   mime_type       VARCHAR(96)   NULL,
   source_mime     VARCHAR(100)  NULL COMMENT 'what the browser sent, when we converted it',
   width           INT           NULL,
   height          INT           NULL,
+  rotation        SMALLINT      NOT NULL DEFAULT 0 COMMENT '0, 90, 180, 270 — display only',
+  page_count      SMALLINT UNSIGNED NULL COMMENT 'PDFs only',
   is_image        TINYINT(1)    NOT NULL DEFAULT 0,
   is_pdf          TINYINT(1)    NOT NULL DEFAULT 0,
   size_bytes      BIGINT        NOT NULL DEFAULT 0,
@@ -331,6 +339,7 @@ CREATE TABLE documents (
   deleted_at      DATETIME      NULL,
   KEY ix_doc_ro (ro_id, created_at),
   KEY ix_doc_images (ro_id, is_image, created_at),
+  KEY ix_doc_pending (thumb_state, id),
   CONSTRAINT fk_doc_ro FOREIGN KEY (ro_id) REFERENCES repair_orders(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -604,7 +613,8 @@ CREATE TABLE notification_deliveries (
   user_id         BIGINT UNSIGNED NOT NULL COMMENT 'denormalised, so a purge leaves the trail',
   channel         ENUM('app','email','sms') NOT NULL,
   address         VARCHAR(190)  NULL COMMENT 'the email or number as it was at send time',
-  state           ENUM('pending','sent','failed','skipped') NOT NULL DEFAULT 'pending',
+  state           ENUM('pending','sent','failed','skipped','suppressed') NOT NULL DEFAULT 'pending'
+                  COMMENT 'suppressed = deliberately not attempted; never retry one',
   provider_ref    VARCHAR(120)  NULL,
   error           VARCHAR(255)  NULL,
   created_at      DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -1030,3 +1040,35 @@ CREATE TABLE staff_pay_plans (
   updated_by      BIGINT UNSIGNED NULL,
   PRIMARY KEY (user_id, job_type)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+
+-- ---------------------------------------------------------------------------
+-- Unsubscribe and STOP (migration 021). One list, two channels, keyed on the
+-- destination rather than a customer row so that editing or re-importing a
+-- client cannot un-block an address. Per shop by design; hard bounces live in
+-- the master database instead.
+-- ---------------------------------------------------------------------------
+CREATE TABLE suppressions (
+  id           BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  channel      ENUM('email','sms') NOT NULL,
+  destination  VARCHAR(190) NOT NULL COMMENT 'email lowercased; sms digits only',
+  reason       ENUM('unsubscribe','stop','manual') NOT NULL DEFAULT 'unsubscribe',
+  source       ENUM('link','reply','desk') NOT NULL DEFAULT 'link',
+  note         VARCHAR(255) NULL,
+  created_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  created_ip   VARCHAR(45) NULL,
+  released_at  DATETIME NULL COMMENT 'set by the customer re-subscribing; rows are never deleted',
+  released_ip  VARCHAR(45) NULL,
+  UNIQUE KEY uq_supp (channel, destination),
+  KEY ix_supp_live (channel, destination, released_at),
+  KEY ix_supp_when (created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE suppression_hits (
+  id           BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  channel      ENUM('email','sms') NOT NULL,
+  destination  VARCHAR(190) NOT NULL,
+  context      VARCHAR(120) NULL,
+  created_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  KEY ix_supp_hit (destination, created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

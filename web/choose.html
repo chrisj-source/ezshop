@@ -34,7 +34,7 @@
 <script>
 (function () {
   fetch('/api/me').then(function (r) { return r.json(); }).then(function (me) {
-    if (!me.companies || !me.companies.length) { location.href = '/'; return; }
+    if (!me.companies || !me.companies.length) { location.href = '/signin.html'; return; }
     var el = document.getElementById('list');
     el.innerHTML = me.companies.map(function (c) {
       return '<button class="shop" data-id="' + c.id + '"' + (c.suspended ? ' disabled' : '') + '>' +

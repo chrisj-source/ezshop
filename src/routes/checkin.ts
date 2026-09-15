@@ -3,6 +3,7 @@ import { RowDataPacket, ResultSetHeader } from 'mysql2/promise';
 import { tq, texec, tqOne, withTenantTx } from '../db/tenant';
 import { requireCompany, requireFeature } from '../middleware/context';
 import { extensionOf, storageKey, writeStream } from '../lib/storage';
+import { isSuppressed, noteSuppressionHit } from '../lib/suppression';
 
 /**
  * Mobile check-in. A phone at the door: job type, VIN, decoded vehicle,
@@ -146,12 +147,24 @@ export async function registerCheckin(app: FastifyInstance): Promise<void> {
 
       // Retail and insurance cars create a customer record; wholesale bills
       // the account, so the person who dropped it is a note, not a client.
+      //
+      // Check-in deliberately does NOT refuse an unsubscribed address the way
+      // the desk screens do. This is the customer's own hand on the keyboard,
+      // the address is theirs to give, and refusing it would block the
+      // check-in over a mail preference. So the address is stored and the
+      // suppression is left standing: they simply are not emailed. It is
+      // recorded as a hit so the desk can see why the car has an address that
+      // never receives anything, and they can be asked whether they want to
+      // re-subscribe — which only they can do.
       if (!isWholesale && !clientId && fields.customerName) {
         const [r] = await c.query<ResultSetHeader>(
           `INSERT INTO clients (kind, name, phone, email) VALUES ('retail', ?, ?, ?)`,
           [fields.customerName, fields.phone || null, fields.email || null]
         );
         clientId = r.insertId;
+        if (fields.email && await isSuppressed('email', fields.email, cid)) {
+          await noteSuppressionHit(cid, 'email', fields.email, 'typed at check-in');
+        }
       }
 
       let vehicleId: number | null = null;

@@ -4,6 +4,7 @@ import { tq, texec, tqOne } from '../db/tenant';
 import { requireCompany } from '../middleware/context';
 import { auditRead } from '../lib/audit';
 import { actorFrom } from './audit';
+import { refuseEmail } from '../lib/suppression';
 
 /**
  * Clients: wholesale accounts (dealers, hail companies, auctions, fleets),
@@ -112,6 +113,12 @@ export async function registerClients(app: FastifyInstance): Promise<void> {
       'SELECT id FROM clients WHERE kind = ? AND name = ?', [b.kind, b.name.trim()]);
     if (dup) return reply.code(409).send({ error: `“${b.name.trim()}” already exists.` });
 
+    /* An unsubscribed address cannot be entered. Same treatment a duplicate
+       reference number gets on a payment: refuse it and say why, rather than
+       accept it and never send to it. */
+    const refused = await refuseEmail(ctx.company!.id, b.email, 'new client');
+    if (refused) return reply.code(409).send({ error: refused, field: 'email' });
+
     const res = await texec(ctx.company!.id, `
       INSERT INTO clients
         (kind, wholesale_type, name, contact_name, phone, email, address, city, state, zip,
@@ -152,6 +159,11 @@ export async function registerClients(app: FastifyInstance): Promise<void> {
       phone: 'phone', email: 'email', address: 'address', city: 'city', state: 'state',
       zip: 'zip', terms: 'terms', adjusterDesk: 'adjuster_desk'
     };
+
+    if (typeof b.email === 'string' && b.email.trim()) {
+      const refused = await refuseEmail(ctx.company!.id, b.email as string, 'client edit');
+      if (refused) return reply.code(409).send({ error: refused, field: 'email' });
+    }
 
     const sets: string[] = [];
     const vals: unknown[] = [];

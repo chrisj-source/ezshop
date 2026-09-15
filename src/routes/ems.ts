@@ -6,6 +6,7 @@ import { parseEms, EmsEstimate, partTypeToEnum } from '../lib/ems';
 import { emsExtAllowed, extensionOf, storagePrefix, writeBuffer } from '../lib/storage';
 import { notify } from '../notify';
 import { auditIn, Area } from '../lib/audit';
+import { isSuppressed, noteSuppressionHit } from '../lib/suppression';
 
 interface FieldSpec {
   /** Column on the target table. */
@@ -407,6 +408,9 @@ export async function registerEms(app: FastifyInstance): Promise<void> {
       const actor = { user: ctx.user, roleLabel: ctx.roleLabel ?? null };
       const dollars = (v: unknown) => (isBlank(v) ? '—' : '$' + (Number(v) / 100).toFixed(2));
       const changed: Array<{ field: string; label: string; from: string; to: string }> = [];
+      /* Things the import deliberately did NOT do. Reported beside what it did,
+         because a field silently not moving is worse than one that moved. */
+      const heldBack: string[] = [];
 
       if (body.updateMoney !== false && imp.total_cents) {
         const hours = lines.reduce((a, l) => a + Number(l.labor_hours ?? 0), 0);
@@ -444,6 +448,32 @@ export async function registerEms(app: FastifyInstance): Promise<void> {
          to us too. Nothing here is ever blanked — a silent estimate leaves what
          the desk typed alone. */
       if (body.updateCustomer !== false) {
+        /**
+         * The estimate does not get to un-block an address.
+         *
+         * An import is authoritative about the claim, not about consent. If the
+         * estimate carries an address this shop's customer has unsubscribed,
+         * writing it onto the client record would look like the suppression had
+         * been lifted — it has not, and only the customer can lift it. So the
+         * email field is dropped from this import's field list and REPORTED
+         * instead, on `heldBack`, which the confirm screen shows next to
+         * everything that did move.
+         *
+         * Every other field still overwrites as normal.
+         */
+        const estEmail = (imp.customer_email as string) ?? null;
+        const emailBlocked = estEmail
+          ? await isSuppressed('email', estEmail, cid)
+          : false;
+
+        if (emailBlocked && estEmail) {
+          await noteSuppressionHit(cid, 'email', estEmail, 'carried by an estimate import');
+          heldBack.push(
+            `Email left as it was — the estimate carries ${estEmail}, which has ` +
+            `unsubscribed. Only the customer can switch it back on.`
+          );
+        }
+
         changed.push(...await applyFields(c, {
           table: 'clients cl JOIN repair_orders r ON r.client_id = cl.id',
           where: 'r.id = ?', whereParams: [roId],
@@ -452,7 +482,9 @@ export async function registerEms(app: FastifyInstance): Promise<void> {
             { col: 'cl.name', label: 'Customer name', next: (imp.customer_name as string) ?? null },
             { col: 'cl.phone', label: 'Phone', next: (imp.customer_phone as string) ?? null },
             { col: 'cl.phone2', label: 'Second phone', next: (imp.customer_phone2 as string) ?? null },
-            { col: 'cl.email', label: 'Email', next: (imp.customer_email as string) ?? null },
+            ...(emailBlocked ? [] : [
+              { col: 'cl.email', label: 'Email', next: estEmail } as FieldSpec
+            ]),
             { col: 'cl.address', label: 'Address', next: (imp.customer_addr as string) ?? null },
             { col: 'cl.city', label: 'City', next: (imp.customer_city as string) ?? null },
             { col: 'cl.state', label: 'State', next: (imp.customer_state as string) ?? null },
@@ -529,7 +561,8 @@ export async function registerEms(app: FastifyInstance): Promise<void> {
          `${created ? ', file created from the import' : ''}.` +
          (changed.length
            ? ' Overwritten: ' + changed.map(m => `${m.label} ${m.from} → ${m.to}`).join('; ') + '.'
-           : ''),
+           : '') +
+         (heldBack.length ? ' ' + heldBack.join(' ') : ''),
          ctx.user.id, ctx.user.name]);
 
       await c.query(
@@ -542,7 +575,7 @@ export async function registerEms(app: FastifyInstance): Promise<void> {
          WHERE state = 'pending' AND id <> ? AND ro_number = ? AND COALESCE(supplement_seq,0) <= ?`,
         [id, imp.ro_number ?? '', suppSeq ?? 0]);
 
-      return { roId, created, changed };
+      return { roId, created, changed, heldBack };
     });
 
     return { ok: true, ...result };

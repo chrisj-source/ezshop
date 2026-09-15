@@ -6,6 +6,7 @@ import { hashPassword, passwordProblem, verifyPassword } from './password';
 import { createSession, revokeAllForUser, revokeSession, switchSessionCompany } from './session';
 import { companyFeatures, requireUser } from '../middleware/context';
 import { EMAIL_EVENTS, eventPrefs, letter, seedEventPrefs, sendMail } from '../lib/mail';
+import { suppressedForUser } from '../lib/suppression';
 import crypto from 'node:crypto';
 import { texec } from '../db/tenant';
 import { ROLE_LABEL, Role } from '../permissions';
@@ -436,7 +437,32 @@ export async function registerAuth(app: FastifyInstance): Promise<void> {
  */
 export async function sendResetLink(
   userId: number, name: string, email: string
-): Promise<{ ok: boolean; error?: string }> {
+): Promise<{ ok: boolean; error?: string; suppressed?: boolean }> {
+  /**
+   * An unsubscribed address gets no reset link.
+   *
+   * Decided 15 Sep 2026: "if they unsubscribe, they unsubscribe" — there is no
+   * transactional exemption. The check happens before the token is minted, so
+   * a person who cannot be emailed does not also end up with an unusable token
+   * sitting in the table and their previous one deleted.
+   *
+   * The reset is asked for by address at the sign-in screen with no shop in
+   * hand, so every shop the account belongs to is checked — see
+   * suppressedForUser.
+   */
+  const blocked = await suppressedForUser(userId, email);
+  if (blocked.suppressed) {
+    return {
+      ok: false, suppressed: true,
+      error: blocked.where === 'platform'
+        ? `${email} is undeliverable — it bounced, so a reset link cannot reach ` +
+          `it. An owner or platform admin has to set the password instead.`
+        : `${email} unsubscribed, so no mail is sent to it — a reset link ` +
+          `included. Either an owner sets the password, or the person ` +
+          `re-subscribes from the link at the bottom of any earlier message.`
+    };
+  }
+
   const token = crypto.randomBytes(32).toString('base64url');
   const hash = crypto.createHash('sha256').update(token).digest('hex');
 

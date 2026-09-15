@@ -399,7 +399,7 @@
 
   api('/api/me').then(function (me) {
     ME = me;
-    if (!me.company) { location.href = '/'; return null; }
+    if (!me.company) { location.href = '/signin.html'; return null; }
     if (!me.caps.admin) {
       document.body.innerHTML = '<div class="empty">Admin is for the owner.<br>' +
         '<a href="/board.html">Back to the board</a></div>';

@@ -233,3 +233,23 @@ CREATE TABLE IF NOT EXISTS user_email_events (
   updated_at  DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (user_id, event_key)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+
+-- ---------------------------------------------------------------------------
+-- Platform-wide suppression (migration 006). The narrow exception to per-shop
+-- unsubscribe: a hard bounce or a spam complaint is the address saying it does
+-- not exist or does not want us at all, and sending again costs every shop on
+-- the platform its reputation. Nothing a customer clicks lands here.
+-- ---------------------------------------------------------------------------
+CREATE TABLE platform_suppressions (
+  id           BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  channel      ENUM('email','sms') NOT NULL,
+  destination  VARCHAR(190) NOT NULL COMMENT 'email lowercased; sms digits only',
+  reason       ENUM('bounce','complaint','manual') NOT NULL,
+  detail       VARCHAR(255) NULL,
+  created_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  released_at  DATETIME NULL,
+  released_by  BIGINT UNSIGNED NULL,
+  UNIQUE KEY uq_platform_supp (channel, destination),
+  KEY ix_platform_supp_live (channel, destination, released_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

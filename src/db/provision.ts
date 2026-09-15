@@ -8,6 +8,7 @@ import { buildTemplate, toHours, NOTIF_GROUPS, ShopType } from './status-templat
 import { defaultRoutesFor } from '../lib/status-routes';
 import { hashPassword } from '../auth/password';
 import { DERIVED_REF, dropTenantLogin, grantTenantLogin } from '../lib/tenant-credentials';
+import { runTolerant } from './alter';
 
 const TENANT_SQL = path.join(__dirname, '..', '..', 'db', 'tenant.sql');
 
@@ -181,12 +182,17 @@ async function applyTenantMigrations(admin: Connection): Promise<number> {
     const sql = await fs.readFile(path.join(dir, step.name), 'utf8');
     for (const stmt of splitStatements(sql)) {
       try {
-        await admin.query(stmt);
-      } catch (e) {
-        const msg = (e as Error).message;
-        if (!/Duplicate column|Duplicate key name|Duplicate entry|already exists|check that column\/key exists/i.test(msg)) {
-          throw new Error(`${step.name}: ${msg}`);
+        /* Per-clause tolerance, not per-statement. A multi-column ALTER is
+           atomic, so one already-present column would otherwise discard its
+           siblings — which is how a new shop ended up without
+           `documents.thumb_key` and failed on migration 008. See db/alter.ts. */
+        const res = await runTolerant(admin, stmt);
+        if (res.recovered.length) {
+          console.log(`  ${step.name}: base schema had drifted, applied ` +
+            `${res.recovered.length} clause(s) individually`);
         }
+      } catch (e) {
+        throw new Error(`${step.name}: ${(e as Error).message}`);
       }
     }
     at = step.version;

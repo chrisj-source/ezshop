@@ -12,6 +12,7 @@
     "platform": "node dist/scripts/platform.js",
     "migrate": "node dist/scripts/migrate.js",
     "tenant-creds": "node dist/scripts/tenant-creds.js",
+    "schema-audit": "node dist/scripts/schema-audit.js",
     "backfill-thumbs": "node dist/scripts/backfill-thumbs.js"
   },
   "dependencies": {

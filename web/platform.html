@@ -100,7 +100,7 @@
     if (opts.body != null) opts.headers['content-type'] = 'application/json';
     return fetch(p, opts)
       .then(function (r) {
-        if (r.status === 401) { location.href = '/'; throw new Error('out'); }
+        if (r.status === 401) { location.href = '/signin.html'; throw new Error('out'); }
         return r.json().then(function (j) { if (!r.ok) throw new Error(j.error); return j; });
       });
   }
@@ -472,7 +472,7 @@
   }
 
   $('signout').addEventListener('click', function () {
-    api('/api/auth/logout', { method: 'POST' }).then(function () { location.href = '/'; });
+    api('/api/auth/logout', { method: 'POST' }).then(function () { location.href = '/signin.html'; });
   });
 })();
 </script>

@@ -1,6 +1,7 @@
 import { mexec, mq, mqOne } from '../db/master';
 import { RowDataPacket } from 'mysql2/promise';
 import { config } from '../config';
+import { noteSuppressionHit, suppressionState, unsubscribeUrl } from './suppression';
 
 /**
  * Mail out.
@@ -28,12 +29,22 @@ export interface Mail {
   /** The shop it is about, so the From line can say so. */
   shopName?: string | null;
   replyTo?: string | null;
+  /**
+   * Which shop is sending. Needed for the suppression check, because an
+   * unsubscribe is per shop — without it only the platform list (bounces and
+   * complaints) can be honoured.
+   */
+  companyId?: number | null;
+  /** What this was, for the suppression_hits row if it is refused. */
+  context?: string;
 }
 
 export interface MailResult {
   ok: boolean;
   id?: string;
   error?: string;
+  /** Not sent because the address said no. Not a failure — do not retry it. */
+  suppressed?: boolean;
 }
 
 /**
@@ -76,6 +87,37 @@ export async function sendMail(m: Mail): Promise<MailResult> {
     return { ok: false, error: 'No RESEND_API_KEY on this box — mail is switched off.' };
   }
 
+  /**
+   * The suppression check lives HERE and nowhere else.
+   *
+   * Every send in the application goes through this function, so this is the
+   * only place that can promise an unsubscribed address is never written to.
+   * Putting it in each caller would mean the one caller somebody forgets is the
+   * one that breaks the promise.
+   *
+   * It applies to transactional mail too — password resets included. That was
+   * the call on 15 Sep 2026: if they unsubscribe, they unsubscribe. The
+   * consequence is that such a person cannot reset their own password and an
+   * owner has to set it for them, or they re-subscribe first. The error below
+   * says so rather than reading as a delivery fault.
+   *
+   * A refusal is NOT a failure: it does not touch the fail streak, because the
+   * provider is working perfectly and five of these in a row is not an outage.
+   */
+  const state = await suppressionState('email', m.to, m.companyId ?? null);
+  if (state.suppressed) {
+    if (m.companyId) {
+      await noteSuppressionHit(m.companyId, 'email', m.to, m.context ?? m.subject);
+    }
+    return {
+      ok: false, suppressed: true,
+      error: state.where === 'platform'
+        ? `${m.to} is undeliverable — it bounced, so nothing is sent to it.`
+        : `${m.to} unsubscribed, so nothing is sent to it. They can switch it ` +
+          `back on themselves from the link in any earlier message.`
+    };
+  }
+
   try {
     const res = await fetch('https://api.resend.com/emails', {
       method: 'POST',
@@ -89,6 +131,17 @@ export async function sendMail(m: Mail): Promise<MailResult> {
         reply_to: m.replyTo ?? config.mail.replyTo,
         subject: m.subject,
         text: m.text,
+        /**
+         * One-click unsubscribe, as the mailbox providers want it. Gmail and
+         * Outlook draw their own Unsubscribe control from these two headers,
+         * and a message that offers one is far less likely to be marked as
+         * spam than one where the only way out is the footer link. The POST
+         * target is the same endpoint the page uses.
+         */
+        ...(m.companyId ? { headers: {
+          'List-Unsubscribe': `<${unsubscribeUrl(m.companyId, 'email', m.to)}>`,
+          'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click'
+        } } : {}),
         ...(m.html ? { html: m.html } : {})
       })
     });
@@ -239,10 +292,32 @@ export async function stampEmailed(userId: number): Promise<void> {
 
 /* ----------------------------------------------------------------- letters */
 
-/** The shell every message shares. Plain, narrow, and readable in a preview. */
-export function letter(title: string, lines: string[], action?: { label: string; url: string }): { text: string; html: string } {
+/**
+ * The shell every message shares. Plain, narrow, and readable in a preview.
+ *
+ * `unsubscribeUrl` puts a real unsubscribe line in the footer. Pass it for
+ * anything automated; leave it off only where there is genuinely nothing to
+ * unsubscribe from.
+ */
+export function letter(
+  title: string, lines: string[],
+  action?: { label: string; url: string },
+  unsubscribeUrl?: string | null
+): { text: string; html: string } {
+  const foot = unsubscribeUrl
+    ? 'Stop getting these: ' + unsubscribeUrl
+    : 'You are getting this because email is switched on for your Easy Shop account. ' +
+      'Turn it off under Account.';
+
   const text = [title, '', ...lines, ...(action ? ['', action.label + ': ' + action.url] : []),
-    '', '— Easy Shop'].join('\n');
+    '', foot, '', '— Easy Shop'].join('\n');
+
+  const footHtml = unsubscribeUrl
+    ? `You are getting this because your vehicle is with the shop named above.
+       <a href="${esc(unsubscribeUrl)}" style="color:#d9a441">Unsubscribe</a> and nothing
+       further will be sent to this address.`
+    : `You are getting this because email is switched on for your Easy Shop account.
+       Turn it off under Account.`;
 
   const html = `<!doctype html><html><body style="margin:0;background:#131c2e;padding:24px;
     font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif">
@@ -255,8 +330,7 @@ export function letter(title: string, lines: string[], action?: { label: string;
       ${action ? `<p style="margin:18px 0 0"><a href="${esc(action.url)}"
         style="display:inline-block;padding:10px 16px;background:#d9a441;color:#131c2e;
         text-decoration:none;border-radius:5px;font-weight:600;font-size:14px">${esc(action.label)}</a></p>` : ''}
-      <p style="margin:20px 0 0;font-size:11.5px;color:#9aa6bc">You are getting this because email
-        is switched on for your Easy Shop account. Turn it off under Account.</p>
+      <p style="margin:20px 0 0;font-size:11.5px;color:#9aa6bc">${footHtml}</p>
     </div></body></html>`;
 
   return { text, html };

@@ -48,7 +48,7 @@
   </form>
 
   <div class="msg" id="msg"></div>
-  <a class="back" href="/">Back to sign in</a>
+  <a class="back" href="/signin.html">Back to sign in</a>
 </div>
 
 <script>
@@ -80,7 +80,7 @@
       btn.disabled = false;
       if (!res.ok) return say(res.j.error || 'That did not work.');
       say('Password set. Taking you to sign in…', 'ok');
-      setTimeout(function () { location.href = '/'; }, 900);
+      setTimeout(function () { location.href = '/signin.html'; }, 900);
     }).catch(function () {
       btn.disabled = false;
       say('Could not reach the server.');

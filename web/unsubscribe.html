@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Unsubscribe — Easy Shop</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/shell.css?v=8">
+<style>
+  /* Held to the same bar as checkin.html: this is a page a shop's CUSTOMER
+     lands on, so it is a Title III surface — real labels, real focus rings,
+     44px targets, and nothing conveyed by colour alone. */
+  body { display:grid; place-items:center; min-height:100vh; padding:24px; }
+  .box { width:min(460px,100%); }
+  .mark2 {
+    width:30px; height:30px; border-radius:6px; display:grid; place-items:center;
+    font:600 12px var(--font); color:var(--acc); border:1px solid var(--acc);
+  }
+  h1 { font:500 24px var(--font); margin:22px 0 8px; }
+  .sub { font:400 13.5px/1.65 var(--font); color:var(--dim); margin-bottom:6px; }
+  .who {
+    font:500 14px var(--font); margin:16px 0 20px; padding:11px 13px;
+    border:1px solid var(--line); border-radius:6px; background:rgba(255,255,255,.03);
+  }
+  .who span { display:block; font:400 11.5px var(--font); color:var(--dim);
+              letter-spacing:.08em; text-transform:uppercase; margin-bottom:4px; }
+  button {
+    width:100%; padding:13px; font:600 14px var(--font); border-radius:5px;
+    min-height:46px; cursor:pointer; border:1px solid var(--acc);
+  }
+  button.primary { background:var(--acc); color:var(--bg); }
+  button.quiet { background:transparent; color:var(--acc); margin-top:10px; }
+  button[disabled] { opacity:.5; cursor:default; }
+  button:focus-visible { outline:2px solid var(--acc); outline-offset:2px; }
+  .msg { margin-top:16px; font:400 13px/1.6 var(--font); padding:11px 13px; border-radius:5px; }
+  .msg:empty { display:none; }
+  .msg.err { color:#f0bdb2; background:rgba(208,126,111,.14); border:1px solid rgba(208,126,111,.4); }
+  .msg.ok  { color:#a9d8c2; background:rgba(111,174,140,.14); border:1px solid rgba(111,174,140,.4); }
+  .fine { font:400 11.5px/1.65 var(--font); color:var(--dim); margin-top:18px; }
+  .fine a { color:var(--acc); }
+</style>
+</head>
+<body>
+<main class="box">
+  <div style="display:flex;align-items:center;gap:10px">
+    <div class="mark2" aria-hidden="true">ES</div>
+    <div style="font:600 13px var(--font);letter-spacing:.16em;text-transform:uppercase">Easy Shop</div>
+  </div>
+
+  <h1 id="title">Stop these messages</h1>
+  <p class="sub" id="sub">Loading&hellip;</p>
+
+  <div class="who" id="who" hidden></div>
+
+  <div id="actions" hidden>
+    <button type="button" class="primary" id="stop">Unsubscribe me</button>
+    <button type="button" class="quiet" id="back" hidden>Start sending again</button>
+  </div>
+
+  <p class="msg" id="msg" role="status" aria-live="polite"></p>
+
+  <p class="fine" id="fine" hidden>
+    Messages about your repair come from the shop working on your vehicle.
+    Stopping them does not affect the repair &mdash; the shop will reach you by
+    phone instead, and you will still be told when your vehicle is ready.
+  </p>
+</main>
+
+<script>
+(function () {
+  var q = location.search;
+  var msg = document.getElementById('msg');
+  var who = document.getElementById('who');
+  var sub = document.getElementById('sub');
+  var title = document.getElementById('title');
+  var actions = document.getElementById('actions');
+  var stop = document.getElementById('stop');
+  var back = document.getElementById('back');
+
+  function say(t, kind) { msg.textContent = t; msg.className = 'msg ' + (kind || 'err'); }
+
+  function json(url, opts) {
+    return fetch(url, opts || {}).then(function (r) {
+      return r.json().catch(function () { return {}; }).then(function (b) {
+        if (!r.ok) throw new Error(b.error || 'Something went wrong. Try again in a moment.');
+        return b;
+      });
+    });
+  }
+
+  /* Paint from the server's answer rather than guessing: the page has to say
+     which shop and which address, or the person cannot tell what they are
+     switching off. */
+  function paint(s) {
+    var noun = s.channel === 'sms' ? 'text messages' : 'emails';
+    who.hidden = false;
+    who.innerHTML = '<span>' + (s.channel === 'sms' ? 'Number' : 'Address') + '</span>' +
+      s.destination;
+    document.getElementById('fine').hidden = false;
+    actions.hidden = false;
+
+    if (s.locked) {
+      title.textContent = 'This address cannot receive email';
+      sub.textContent = 'It came back as undeliverable, so nothing is being sent to it. ' +
+        'There is nothing to switch off here.';
+      stop.hidden = true;
+      return;
+    }
+
+    if (s.already) {
+      title.textContent = 'You are unsubscribed';
+      sub.textContent = 'No ' + noun + ' are being sent to you by ' + s.shop + '.';
+      stop.hidden = true;
+      back.hidden = false;
+    } else {
+      title.textContent = 'Stop these ' + noun;
+      sub.textContent = 'You are getting ' + noun + ' from ' + s.shop +
+        ' about work on your vehicle. One click stops all of them.';
+      stop.hidden = false;
+      back.hidden = true;
+    }
+  }
+
+  json('/api/unsubscribe' + q)
+    .then(paint)
+    .catch(function (e) {
+      sub.textContent = '';
+      title.textContent = 'This link did not work';
+      say(e.message + ' If you followed a link from an email, open it again from ' +
+          'that email, or reply to the shop and ask them to stop.');
+    });
+
+  stop.addEventListener('click', function () {
+    stop.disabled = true;
+    json('/api/unsubscribe' + q, { method: 'POST' })
+      .then(function () {
+        return json('/api/unsubscribe' + q);
+      })
+      .then(function (s) {
+        paint(s);
+        say('Done. Nothing more will be sent to you.', 'ok');
+      })
+      .catch(function (e) { stop.disabled = false; say(e.message); });
+  });
+
+  back.addEventListener('click', function () {
+    back.disabled = true;
+    json('/api/unsubscribe/resubscribe' + q, { method: 'POST' })
+      .then(function () { return json('/api/unsubscribe' + q); })
+      .then(function (s) {
+        back.disabled = false;
+        paint(s);
+        say('You are back on. Messages about your vehicle will reach you again.', 'ok');
+      })
+      .catch(function (e) { back.disabled = false; say(e.message); });
+  });
+})();
+</script>
+</body>
+</html>

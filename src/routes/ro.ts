@@ -7,6 +7,7 @@ import { notify } from '../notify';
 import { fireTrigger, correctTrigger } from '../lib/pay';
 import { auditIn } from '../lib/audit';
 import { actorFrom } from './audit';
+import { refuseEmail } from '../lib/suppression';
 
 /** Anything that stops this file being closed. Empty means it can be. */
 function closeBlockers(
@@ -274,6 +275,12 @@ export async function registerRepairOrders(app: FastifyInstance): Promise<void> 
 
     const dup = await tqOne<RowDataPacket>(cid, 'SELECT id FROM repair_orders WHERE ro_number = ?', [b.roNumber]);
     if (dup) return reply.code(409).send({ error: `RO ${b.roNumber} already exists.` });
+
+    /* An unsubscribed address is refused here rather than accepted and then
+       silently never written to. Checked before the transaction opens so the
+       file is not half-created. */
+    const refused = await refuseEmail(cid, b.email, 'new repair order');
+    if (refused) return reply.code(409).send({ error: refused, field: 'email' });
 
     const id = await withTenantTx(cid, async (c) => {
       let clientId: number | null = null;
@@ -576,6 +583,13 @@ export async function registerRepairOrders(app: FastifyInstance): Promise<void> 
       if (a === z) return;
       changes.push(z === null ? `${label} cleared` : `${label} set to ${z}`);
     };
+
+    /* Before the transaction, so a refused address does not leave a half-edited
+       file behind. */
+    if (typeof b.customerEmail === 'string' && b.customerEmail.trim()) {
+      const refused = await refuseEmail(cid, b.customerEmail as string, 'file edit');
+      if (refused) return reply.code(409).send({ error: refused, field: 'customerEmail' });
+    }
 
     await withTenantTx(cid, async (c) => {
       /* -------------------------------------------------- customer */
