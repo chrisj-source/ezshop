@@ -4,6 +4,9 @@
  *   npm run schema-audit            report only
  *   npm run schema-audit -- --go    add what is missing
  *
+ * Note the bare `--`: without it npm keeps the flag for itself and the script
+ * runs in report mode regardless.
+ *
  * Why this exists
  * ---------------
  * `db/tenant.sql` is the base schema a new shop is created from; the numbered
@@ -41,13 +44,36 @@ const TENANT_SQL = path.join(__dirname, '..', '..', 'db', 'tenant.sql');
 interface Declared { table: string; column: string; definition: string; after: string | null }
 
 /**
+ * A column definition has to begin with a type. This is the backstop that keeps
+ * a misread line out of the generated DDL: on 15 Sep 2026 the first version of
+ * this script read the second line of a block comment inside `repair_orders`
+ * as a column named `declared` and reported it missing on every shop. Stripping
+ * block comments fixed that instance; this makes the whole class impossible,
+ * because prose does not start with BIGINT.
+ */
+const TYPE_START = new RegExp('^(' + [
+  'BIGINT', 'INT', 'INTEGER', 'SMALLINT', 'TINYINT', 'MEDIUMINT',
+  'DECIMAL', 'NUMERIC', 'FLOAT', 'DOUBLE', 'BIT',
+  'VARCHAR', 'CHAR', 'TEXT', 'TINYTEXT', 'MEDIUMTEXT', 'LONGTEXT',
+  'BLOB', 'TINYBLOB', 'MEDIUMBLOB', 'LONGBLOB', 'BINARY', 'VARBINARY',
+  'DATE', 'DATETIME', 'TIMESTAMP', 'TIME', 'YEAR',
+  'ENUM', 'SET', 'JSON', 'BOOLEAN', 'BOOL'
+].join('|') + ')\\b', 'i');
+
+/**
  * Columns declared in tenant.sql, per table, with enough of the definition to
  * recreate one. Deliberately a text scan of our own file rather than a general
  * SQL parser: we control the formatting, and a parser would be more to go wrong
  * than the thing it replaces.
  */
 async function declaredColumns(): Promise<Declared[]> {
-  const sql = await fs.readFile(TENANT_SQL, 'utf8');
+  const raw = await fs.readFile(TENANT_SQL, 'utf8');
+  /* Block comments first, and across lines. tenant.sql carries a few of these
+     INSIDE a CREATE TABLE body, and a line-by-line scan reads their second
+     line as a column: the audit duly reported a missing column called
+     `declared` on every shop. Strip them before anything else looks at the
+     text. Line comments are handled per line below. */
+  const sql = raw.replace(/\/\*[\s\S]*?\*\//g, '');
   const out: Declared[] = [];
 
   for (const t of sql.matchAll(/CREATE TABLE\s+`?(\w+)`?\s*\(([\s\S]*?)\n\)\s*ENGINE/gi)) {
@@ -55,11 +81,9 @@ async function declaredColumns(): Promise<Declared[]> {
     const lines = t[2].split('\n');
     let previous: string | null = null;
 
-    for (const raw of lines) {
-      const line = raw.trim().replace(/,\s*$/, '');
+    for (const lineRaw of lines) {
+      const line = lineRaw.trim().replace(/,\s*$/, '');
       if (!line || line.startsWith('--')) continue;
-      /* Skip the constraint clauses: keys, indexes, foreign keys, primary key
-         declarations written on their own line. */
       if (/^(KEY|UNIQUE|PRIMARY|CONSTRAINT|FOREIGN|INDEX|FULLTEXT|CHECK)\b/i.test(line)) continue;
       /* And skip continuation lines. Several column definitions in tenant.sql
          wrap — a trailing `COMMENT '...'`, a `NOT NULL DEFAULT ...`, the tail of
@@ -73,6 +97,12 @@ async function declaredColumns(): Promise<Declared[]> {
       /* A column line whose "definition" is itself a key word is a constraint
          we failed to spot; leave it. */
       if (/^(PRIMARY|KEY|UNIQUE)\b/i.test(m[2])) continue;
+
+      /* Last gate, and the important one: this script writes DDL, so a line it
+         has misread must not become an ALTER. The definition has to START with
+         a real column type. Prose cannot pass this — which is what a stray
+         comment line looks like. */
+      if (!TYPE_START.test(m[2])) continue;
 
       out.push({ table, column: m[1], definition: m[2], after: previous });
       previous = m[1];
@@ -92,7 +122,8 @@ async function main(): Promise<void> {
     byTable.set(d.table, list);
   }
   console.log(`tenant.sql declares ${declared.length} columns across ${byTable.size} tables`);
-  console.log(go ? 'mode: REPAIR (--go)\n' : 'mode: report only — pass --go to apply\n');
+  console.log(go ? 'mode: REPAIR (--go)\n'
+                 : 'mode: report only — to apply, run:  npm run schema-audit -- --go\n');
 
   const dbs = await mq<Array<RowDataPacket & {
     company_id: number; db_name: string; name: string; schema_version: number;
@@ -158,7 +189,7 @@ async function main(): Promise<void> {
 
   console.log(`\n${dbs.length} database(s). ${totalMissing} missing column(s) found.`);
   if (go) console.log(`${totalAdded} added.`);
-  else if (totalMissing) console.log('Re-run with --go to add them.');
+  else if (totalMissing) console.log('To add them:  npm run schema-audit -- --go');
 
   await closeMaster();
 }
