@@ -709,6 +709,10 @@
   var api = Shell.api, esc = Shell.esc;
   var ME = null, CFG = null, FILES = [], STATUSES = [], GROUPS = [], LANES = [], STAFF = [];
   var DOCTYPES = [], OPEN = null, VIEW = 'table', MEDIA = [], LBAT = 0, LBPAGE = 1;
+  /* The detail the drawer is currently showing. `OPEN` is only the id, and
+     wireDrawer() takes no arguments — so anything the wiring needs out of the
+     payload has to live here rather than in renderDrawer's scope. */
+  var DTL = null;
   /* What had focus before a dialog opened, so it can be given back. */
   var RETURN_TO = null;
   var SUBLET_STATES = ['scheduled', 'out', 'returned', 'invoiced'];
@@ -2161,6 +2165,7 @@
 
   function renderDrawer(d) {
     var r = d.ro;
+    DTL = d;
 
     /* ---- header ---- */
     $('dPip').textContent = groupNumber({ group: r.group_id });
@@ -3091,7 +3096,7 @@
       });
     });
 
-    wireTagPicker($('newNote'), $('tagList'), d.taggable || []);
+    wireTagPicker($('newNote'), $('tagList'), (DTL && DTL.taggable) || []);
 
     var an = $('addNote');
     if (an) an.addEventListener('click', function () {
