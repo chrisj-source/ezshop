@@ -32,12 +32,28 @@ export async function registerPay(app: FastifyInstance): Promise<void> {
     const cid = ctx.company!.id;
 
     /* Everyone who could carry a file's sales assignment: whoever holds a role
-       with the leads capability, plus anyone already named on a plan. */
+       with the leads capability, plus anyone already named on a plan.
+
+       Read from `membership_roles` UNION `memberships.role`. The union is the
+       point, not belt-and-braces: `membership_roles` arrived with master
+       migration 002, and neither the provisioner nor the demo seeder writes to
+       it — both still write the single `memberships.role` column. Querying
+       `membership_roles` alone therefore returned NOBODY on any shop whose
+       people were created by provisioning or by the demo reset, so this screen
+       rendered empty, no plan could be created, no commission ledger row could
+       exist, and closing a file flagged nobody. All four symptoms, one cause
+       (found 15 Sep 2026 from a demo).
+
+       `middleware/context.ts` has always had this fallback, which is why
+       sign-in and permissions looked fine while pay was dead. */
     const people = await mq<Array<RowDataPacket & { user_id: number; name: string }>>(
       `SELECT DISTINCT u.id AS user_id, u.name
-       FROM membership_roles mr
-       JOIN users u ON u.id = mr.user_id
-       WHERE mr.company_id = ? ORDER BY u.name`, [cid]);
+         FROM users u
+         JOIN memberships m ON m.user_id = u.id
+         LEFT JOIN membership_roles mr
+                ON mr.user_id = u.id AND mr.company_id = m.company_id
+        WHERE m.company_id = ? AND m.status = 'active'
+        ORDER BY u.name`, [cid]);
 
     const capsRows = await tq<Array<RowDataPacket & { role_key: string }>>(cid,
       `SELECT role_key FROM role_caps WHERE cap_key = 'leads' AND can_change = 1`).catch(() => []);
@@ -48,6 +64,15 @@ export async function registerPay(app: FastifyInstance): Promise<void> {
     const rolesOf = new Map<number, string[]>();
     for (const h of held) {
       rolesOf.set(h.user_id, [...(rolesOf.get(h.user_id) ?? []), h.role_key]);
+    }
+
+    /* The old column, for anybody with no rows in the new table. Same fallback
+       order as context.ts: the multi-role table wins where it has anything. */
+    const primary = await mq<Array<RowDataPacket & { user_id: number; role: string }>>(
+      `SELECT user_id, role FROM memberships
+        WHERE company_id = ? AND status = 'active' AND role IS NOT NULL`, [cid]);
+    for (const p of primary) {
+      if (!rolesOf.has(p.user_id)) rolesOf.set(p.user_id, [p.role]);
     }
 
     const plans = await tq<RowDataPacket[]>(cid, `SELECT * FROM pay_plans`);

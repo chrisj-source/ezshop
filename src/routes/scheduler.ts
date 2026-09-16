@@ -3,6 +3,7 @@ import { RowDataPacket, ResultSetHeader } from 'mysql2/promise';
 import { tq, texec, tqOne, withTenantTx } from '../db/tenant';
 import { requireCompany, requireFeature } from '../middleware/context';
 import { pushAppointment } from './gcal';
+import { closedReason, nextOpen, shopCalendar } from '../lib/shophours';
 
 const KINDS = ['drop', 'pickup', 'return', 'estimate', 'appraiser'] as const;
 type Kind = typeof KINDS[number];
@@ -164,6 +165,36 @@ export async function registerScheduler(app: FastifyInstance): Promise<void> {
       'SELECT setting_value FROM shop_settings WHERE setting_key = ?', ['cap_' + b.kind]);
     const cap = Number(capRow?.setting_value ?? 0);
 
+    /**
+     * The TIME, not just the day.
+     *
+     * The day limit below has always been checked; the hour never was, so a
+     * drop could be booked for 9pm on a Tuesday or for Christmas Day and the
+     * scheduler would take it happily. An appointment at 9am has to mean 9am,
+     * and 9am on a day the shop is shut is not a time.
+     *
+     * Warn-and-override rather than refuse outright, like the person-conflict
+     * check below: shops genuinely do take a car in early as a favour, and a
+     * scheduler that makes that impossible gets worked around with a note
+     * instead. The override is recorded on the appointment.
+     */
+    const cal = await shopCalendar(cid, ctx.company!.timezone);
+    const why = closedReason(cal, when);
+    let hoursNote: string | null = null;
+
+    if (why) {
+      if (!b.override) {
+        const opens = nextOpen(cal, when);
+        return reply.code(409).send({
+          error: `That time is outside shop hours — ${why}.`,
+          outsideHours: true,
+          canOverride: true,
+          nextOpen: opens ? opens.toISOString() : null
+        });
+      }
+      hoursNote = `Booked outside shop hours (${why}).`;
+    }
+
     if (cap > 0) {
       const [cnt] = await tq<RowDataPacket[]>(cid, `
         SELECT COUNT(*) AS n FROM appointments
@@ -199,6 +230,13 @@ export async function registerScheduler(app: FastifyInstance): Promise<void> {
         }
         overrideNote = clashes.map(c => c.text).join(' ').slice(0, 255);
       }
+    }
+
+    /* Both overrides land on the same note, so the day can be explained later
+       without two columns saying different halves of it. */
+    if (hoursNote) {
+      overrideNote = (overrideNote ? overrideNote + ' ' : '') + hoursNote;
+      overrideNote = overrideNote.slice(0, 255);
     }
 
     const result = await withTenantTx(cid, async (c) => {

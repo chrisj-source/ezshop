@@ -146,11 +146,23 @@ async function main(): Promise<void> {
       const present = new Set(have.map(r => `${String(r.t).toLowerCase()}.${String(r.c).toLowerCase()}`));
       const tablesPresent = new Set(have.map(r => String(r.t).toLowerCase()));
 
+      /* Missing TABLES, not just columns. The column check skips any table the
+         database does not have, so a whole table absent from a shop was
+         invisible to this script — which is exactly the shape of the bug it
+         exists to catch. Reported, not created: a missing table usually means
+         a migration did not run, and `npm run migrate` is the right fix. */
+      const wantedTables = [...byTable.keys()];
+      const missingTables = wantedTables.filter(t => !tablesPresent.has(t.toLowerCase()));
+      if (missingTables.length) {
+        console.log(`  TABLES MISSING  ${db.db_name}  (${db.name}): ${missingTables.join(', ')}`);
+        console.log('          run: npm run migrate');
+      }
+
       const missing = declared.filter(d =>
         tablesPresent.has(d.table.toLowerCase()) &&
         !present.has(`${d.table.toLowerCase()}.${d.column.toLowerCase()}`));
 
-      if (!missing.length) {
+      if (!missing.length && !missingTables.length) {
         console.log(`  ok    ${db.db_name}  (${db.name}, v${db.schema_version})`);
         continue;
       }

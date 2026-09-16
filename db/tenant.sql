@@ -44,7 +44,8 @@ INSERT INTO positions (position_key, label, category, owner_role, sort_order) VA
   ('est','Estimator','management','estimator',7),
   ('parts','Parts manager','management','parts',8),
   ('office','Front office','office','front office',9),
-  ('sales','Salesperson','office',NULL,10);
+  ('sales','Salesperson','office',NULL,10),
+  ('transport','Transporter','office','transporter',11);
 
 -- Shop-side profile for a master user.
 CREATE TABLE staff (
@@ -439,6 +440,10 @@ CREATE TABLE leads (
   last_name       VARCHAR(80)   NULL,
   phone           VARCHAR(32)   NULL,
   email           VARCHAR(190)  NULL,
+  address         VARCHAR(190)  NULL,
+  city            VARCHAR(90)   NULL,
+  addr_state      VARCHAR(32)   NULL COMMENT 'US state. NOT `state` — that is the lead status enum above',
+  zip             VARCHAR(16)   NULL,
   vehicle_text    VARCHAR(160)  NULL,
   damage_note     VARCHAR(400)  NULL,
   estimate_cents  BIGINT        NULL COMMENT 'what was quoted at the counter. Required to mark estimate_written',
@@ -771,6 +776,7 @@ INSERT INTO roles (role_key, label, rank_order, locked, own_only, is_custom, not
   ('parts_manager','Parts manager',50,'none',0,0,NULL),
   ('front_office','Front office',60,'none',0,0,NULL),
   ('salesperson','Salesperson',70,'none',1,0,'Sees their own leads and their own files.'),
+  ('transporter','Transporter',75,'none',0,0,'Moves vehicles. Sees the board, the schedule and leads — the vehicle, the customer and who checked it in. No money and no hours.'),
   ('technician','Technician',80,'tech',1,0,'Locked because the lane rules hang off trades.');
 
 INSERT INTO role_caps (role_key, cap_key, can_see, can_change) VALUES
@@ -805,7 +811,15 @@ INSERT INTO role_caps (role_key, cap_key, can_see, can_change) VALUES
   ('front_office','any_status',1,1),('front_office','close_ro',1,1),('front_office','leads',1,1),
   ('front_office','del_lead',1,0),('front_office','paperwork',1,1),
   ('salesperson','sees_all',1,0),('salesperson','leads',1,1),('salesperson','paperwork',1,0),
-  ('technician','sees_all',1,0),('technician','labour_money',1,0);
+  ('technician','sees_all',1,0),('technician','labour_money',1,0),
+  -- Customer address, city, zip, phone and email. Its own tick: a production
+  -- manager sees every car and has no reason to know where its owner lives.
+  ('owner','cust_contact',1,1),('front_office','cust_contact',1,1),
+  ('accounting','cust_contact',1,0),
+  -- Transporter: the board, the schedule, leads read-only, and the customer
+  -- details. No money and no hours — absence is how that is expressed.
+  ('transporter','sees_all',1,0),('transporter','leads',1,0),
+  ('transporter','cust_contact',1,0);
 
 -- ===========================================================================
 -- Pay: the stamps, the plans, the ledger
@@ -985,6 +999,17 @@ CREATE TABLE payroll_run_cars (
   CONSTRAINT fk_prc_run FOREIGN KEY (run_id) REFERENCES payroll_runs(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- The sales screen's own rules (migration 023). Settings, not constants, so a
+-- shop that does not work this way can turn them off. `sales_onboard_clock` is
+-- 'actual' — real elapsed hours, not shop hours: a Friday evening sale needs
+-- the onboarding call on Saturday.
+INSERT INTO shop_settings (setting_key, setting_value) VALUES
+  ('sales_require_address',   '1'),
+  ('sales_require_drop',      '1'),
+  ('sales_onboard_red_hours', '12'),
+  ('sales_onboard_clock',     'actual')
+ON DUPLICATE KEY UPDATE setting_value = setting_value;
+
 INSERT INTO shop_settings (setting_key, setting_value) VALUES
   ('materials_rate_cents', '4200'),
   ('thin_profit_pct', '25'),
@@ -1072,3 +1097,60 @@ CREATE TABLE suppression_hits (
   created_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   KEY ix_supp_hit (destination, created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+
+-- ---------------------------------------------------------------------------
+-- Shop hours (migration 024). One row per weekday, 0 = Sunday. The scheduler
+-- reads these, and so does the sales onboarding clock when a shop sets it to
+-- shop hours. `closed_days` in shop_settings is kept in step by the settings
+-- screen for the drop-capacity view, but this table is the truth.
+-- ---------------------------------------------------------------------------
+CREATE TABLE shop_hours (
+  dow         TINYINT UNSIGNED NOT NULL COMMENT '0 = Sunday … 6 = Saturday',
+  open_time   TIME    NOT NULL DEFAULT '08:00:00',
+  close_time  TIME    NOT NULL DEFAULT '17:00:00',
+  closed      TINYINT(1) NOT NULL DEFAULT 0 COMMENT 'a closed day keeps its times',
+  PRIMARY KEY (dow)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+INSERT INTO shop_hours (dow, open_time, close_time, closed) VALUES
+  (0, '08:00:00', '17:00:00', 1),
+  (1, '08:00:00', '17:00:00', 0),
+  (2, '08:00:00', '17:00:00', 0),
+  (3, '08:00:00', '17:00:00', 0),
+  (4, '08:00:00', '17:00:00', 0),
+  (5, '08:00:00', '17:00:00', 0),
+  (6, '08:00:00', '12:00:00', 1);
+
+
+-- ---------------------------------------------------------------------------
+-- Closures (migration 025). `shop_hours` is the ordinary week; this is the
+-- exception list, because a shop's real calendar is a weekly pattern plus a
+-- handful of dates that do not follow it. `kind = 'hours'` is a half day.
+-- `source` keeps the holidays a shop ticked separate from the dates somebody
+-- typed, so re-ticking Thanksgiving next year cannot wipe a funeral in March.
+-- ---------------------------------------------------------------------------
+CREATE TABLE shop_closures (
+  on_date      DATE         NOT NULL,
+  kind         ENUM('closed','hours') NOT NULL DEFAULT 'closed',
+  open_time    TIME         NULL COMMENT 'kind = hours only',
+  close_time   TIME         NULL COMMENT 'kind = hours only',
+  label        VARCHAR(80)  NOT NULL,
+  source       ENUM('holiday','manual') NOT NULL DEFAULT 'manual',
+  holiday_key  VARCHAR(40)  NULL COMMENT 'stable across years, e.g. christmas_eve',
+  created_at   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (on_date),
+  KEY ix_closure_year (on_date, kind)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Which holidays this shop observes at all, remembered by key so next year's
+-- dates are offered already ticked. Nothing is seeded: a shop that works
+-- Thanksgiving should not have to un-tick it.
+CREATE TABLE shop_holiday_prefs (
+  holiday_key  VARCHAR(40)  NOT NULL,
+  observed     TINYINT(1)   NOT NULL DEFAULT 1,
+  kind         ENUM('closed','hours') NOT NULL DEFAULT 'closed',
+  open_time    TIME         NULL,
+  close_time   TIME         NULL,
+  PRIMARY KEY (holiday_key)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

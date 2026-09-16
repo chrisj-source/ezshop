@@ -2075,16 +2075,37 @@
     var canEdit = ME.caps.editRepairOrders && !r.voided_at;
 
     L.push('<div class="sec">Customer</div>');
+    /* The contact block is stripped server-side for anyone without the
+       capability, so "is the field absent" is the honest test — not a
+       permission check repeated in the browser. The name always arrives. */
+    var seesContact = r.customer_phone !== undefined || r.customer_addr !== undefined;
     if (canEdit) {
       L.push('<div class="fieldset">' +
         ef('customerName', 'Name', r.customer_name) +
-        ef('customerPhone', 'Phone', r.customer_phone, { type: 'tel' }) +
-        ef('customerEmail', 'Email', r.customer_email, { type: 'email' }) +
+        (seesContact
+          ? ef('customerPhone', 'Phone', r.customer_phone, { type: 'tel' }) +
+            ef('customerEmail', 'Email', r.customer_email, { type: 'email' }) +
+            ef('customerAddress', 'Address', r.customer_addr) +
+            ef('customerCity', 'City', r.customer_city) +
+            ef('customerState', 'State', r.customer_state, { placeholder: 'TX' }) +
+            ef('customerZip', 'ZIP', r.customer_zip)
+          : '') +
         '</div>' + saveRow('cust', 'Edits the client record, not just this file.'));
     } else {
       L.push('<div class="fieldset">' +
-        f2('Name', r.customer_name) + f2('Phone', r.customer_phone, 1) +
-        f2('Email', r.customer_email) + '</div>');
+        f2('Name', r.customer_name) +
+        (seesContact
+          ? f2('Phone', r.customer_phone, 1) +
+            f2('Email', r.customer_email) +
+            f2('Address', [r.customer_addr, r.customer_city,
+                 [r.customer_state, r.customer_zip].filter(Boolean).join(' ')]
+                 .filter(Boolean).join(', ') || null, 1)
+          : '') +
+        '</div>');
+    }
+    if (!seesContact) {
+      L.push('<div class="hint">The customer\'s address and contact details are ' +
+        'not shown for your role.</div>');
     }
 
     L.push('<div class="sec">Vehicle</div>');

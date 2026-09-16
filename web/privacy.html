@@ -17,6 +17,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="site.css">
+<script src="consent.js" defer></script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"WebPage","name":"Privacy policy","url":"https://easyshopauto.com/privacy.html","datePublished":"2026-09-15","inLanguage":"en-US","isPartOf":{"@type":"WebSite","url":"https://easyshopauto.com/"},"publisher":{"@type":"Organization","name":"Storm Rider Solutions LLC"}}
 </script>
@@ -24,7 +25,10 @@
 <body>
 <a class="skip" href="#main">Skip to content</a>
 <header class="nav">
-  <a class="brand" href="index.html">Easy Shop</a>
+  <a class="wordmark" href="index.html">
+      <span class="mark" aria-hidden="true">ES</span>
+      <span class="name">Easy Shop</span>
+    </a>
   <nav aria-label="Main">
     <ul>
       <li><a href="index.html#modules">Modules</a></li>
@@ -70,10 +74,14 @@
 <p>Server logs holding IP address, timestamp, page requested and error details, kept for security and troubleshooting. An audit trail of changes made inside a shop's account &mdash; who changed what, when, and what it was before &mdash; which exists so a shop can answer that question about its own records.</p>
 
 <h2 id="cookies">Cookies</h2>
-<p><strong>These marketing pages set no cookies at all.</strong> This page, the home page, the About page and the text message terms use no cookies, no local storage, no analytics, no advertising pixels and no third-party trackers. Nothing about your visit is recorded beyond the ordinary server log described above. Because nothing non-essential is set, there is no consent banner to click — there is nothing to consent to.</p>
+<p><strong>Nothing is set on these pages unless you say yes.</strong> We use Google Analytics, through Google Tag Manager, to see which pages people find useful. It sets cookies, so it does not load at all until you allow it. Decline and no analytics script is requested, no cookie is written, and the site behaves identically. There is no "reject" that quietly means "some".</p>
+<p>Your answer is remembered in your browser's local storage under <code>es_consent</code>, not in a cookie — setting a cookie on somebody who just declined cookies would be a poor start. Change it at any time from <strong>Cookie choices</strong> in the footer of every page. Turning it back off clears the analytics cookies and reloads the page, so nothing carries on in memory.</p>
+<p>If your browser sends a <strong>Global Privacy Control</strong> signal we treat that as a no and never ask. You do not have to click anything and you will not see a banner.</p>
+<p>What Analytics records is the ordinary set: pages viewed, roughly where in the world the request came from, the kind of device and browser, and how you arrived. We do not use it to identify you, and no advertising or remarketing tags are configured. Google processes that data under its own terms.</p>
 <p>Inside the application, Easy Shop sets one cookie, <code>es_sid</code>. It holds a signed session identifier, is not readable by scripts in your browser, and exists solely to keep you signed in. It expires after 14 days, sooner if the session goes unused. It is strictly necessary for the service to work and so does not require consent; if you block it you cannot sign in.</p>
-<p>We set no advertising cookies and no third-party tracking cookies anywhere — not in the application and not on the public pages. If we ever add analytics we will ask for your consent first, through the preferences control in the application, and we will honour a Global Privacy Control signal from your browser as an opt-out without you having to ask. The consent mechanism ships with the analytics, not after it.</p>
-<p>The pages load one third-party resource: the Inter typeface from Google Fonts, which is a stylesheet and font files. Google receives the request for those files, including your IP address, as it would for any image loaded from another site. No cookie is set by it.</p>
+<p>We set no advertising cookies and run no remarketing, on the public pages or in the application.</p>
+<p><strong>This measurement covers these public pages only.</strong> It is not in Easy Shop. Inside the application there is exactly one cookie, <code>es_sid</code>, and no analytics of any kind: no tag manager, no Analytics, no pixels, no session recording. A shop's own screens are not measured, and no repair order, customer record, photograph or claim detail is ever sent to Google or to anyone else for measurement. The two are separate systems that happen to share a domain.</p>
+<p>One third-party resource loads whatever you answer, because it sets no cookie: the Inter typeface from Google Fonts. Google receives the request for the font files, including your IP address, as it would for any image loaded from another site. Google Tag Manager and Analytics are requested <em>only</em> after you allow them.</p>
 
 <h2>Why we hold it, and what we never do</h2>
 <p>To provide the service, to keep accounts and records secure, to support shops when something goes wrong, to bill for the service, and to meet our legal obligations.</p>
@@ -136,6 +144,7 @@
       <ul>
         <li><a href="privacy.html">Privacy policy</a></li>
         <li><a href="privacy.html#cookies">Cookies</a></li>
+        <li><a href="#" id="cookie-prefs">Cookie choices</a></li>
         <li><a href="terms.html">Terms of use</a></li>
         <li><a href="sms-terms.html">Text message terms</a></li>
         <li><a href="unsubscribe.html">Unsubscribe</a></li>
@@ -144,7 +153,7 @@
   </div>
   <div class="base">
     <span>&copy; 2026 <a href="https://stormrsolutions.com" rel="noopener" style="color:inherit">Storm Rider Solutions LLC</a>. Founded in Plano, Texas.</span>
-    <span>No cookies. No tracking. <a href="privacy.html#cookies">Why</a>.</span>
+    <span>Analytics only with your say-so. <a href="privacy.html#cookies">What we measure</a>.</span>
   </div>
 </footer>
 </body>

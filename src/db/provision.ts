@@ -339,6 +339,14 @@ async function createOwner(
      ON DUPLICATE KEY UPDATE role = 'owner', status = 'active'`,
     [userId, companyId]
   );
+  /* And the multi-role table, which is what every roles-aware screen reads.
+     Writing only `memberships.role` here is what left new shops with an empty
+     `membership_roles` and a dead pay-plan screen — see master/007. */
+  await mexec(
+    `INSERT IGNORE INTO membership_roles (user_id, company_id, role_key)
+     VALUES (?, ?, 'owner')`,
+    [userId, companyId]
+  ).catch(() => undefined);
   return userId;
 }
 

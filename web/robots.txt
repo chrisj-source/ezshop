@@ -13,6 +13,7 @@ Allow: /privacy.html
 Allow: /sms-terms.html
 Allow: /terms.html
 Allow: /site.css
+Allow: /consent.js
 Allow: /img/
 
 # The CRM itself.
@@ -46,3 +47,7 @@ Disallow: /unsubscribe.html
 Disallow: /api/
 
 Sitemap: https://easyshopauto.com/sitemap.xml
+
+# Changes are also pushed to Bing and the other IndexNow participants on deploy
+# (npm run indexnow). Google does not take part in IndexNow — it finds changes
+# from the sitemap above.

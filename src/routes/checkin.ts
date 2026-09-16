@@ -158,8 +158,13 @@ export async function registerCheckin(app: FastifyInstance): Promise<void> {
       // re-subscribe — which only they can do.
       if (!isWholesale && !clientId && fields.customerName) {
         const [r] = await c.query<ResultSetHeader>(
-          `INSERT INTO clients (kind, name, phone, email) VALUES ('retail', ?, ?, ?)`,
-          [fields.customerName, fields.phone || null, fields.email || null]
+          /* Address is optional here — a car at the door is never blocked for a
+             missing zip code. Stored when given, ignored when not. */
+          `INSERT INTO clients (kind, name, phone, email, address, city, state, zip)
+           VALUES ('retail', ?, ?, ?, ?, ?, ?, ?)`,
+          [fields.customerName, fields.phone || null, fields.email || null,
+           fields.address || null, fields.city || null,
+           (fields.addrState || '').toUpperCase() || null, fields.zip || null]
         );
         clientId = r.insertId;
         if (fields.email && await isSuppressed('email', fields.email, cid)) {

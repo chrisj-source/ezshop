@@ -2,7 +2,7 @@ import { FastifyInstance } from 'fastify';
 import { RowDataPacket } from 'mysql2/promise';
 import { tq } from '../db/tenant';
 import { requireCompany, requireFeature } from '../middleware/context';
-import { scrubMoney } from '../permissions';
+import { scrubCustomer, scrubMoney } from '../permissions';
 
 interface BoardRow extends RowDataPacket {
   id: number; ro_number: string; status_slot: string | null; status_since: Date | null;
@@ -14,6 +14,8 @@ interface BoardRow extends RowDataPacket {
   rental_cost_cents: number; voided_days: number;
   total_loss_at: Date | null; total_loss_note: string | null;
   customer_name: string | null; customer_phone: string | null; insurer_name: string | null;
+  customer_email: string | null; customer_addr: string | null; customer_city: string | null;
+  customer_state: string | null; customer_zip: string | null;
   client_kind: 'retail' | 'wholesale' | 'insurance' | null;
   vin: string | null; year: number | null; make: string | null; model: string | null;
   color: string | null; plate: string | null; plate_state: string | null; status_by: string | null;
@@ -66,6 +68,11 @@ export async function registerBoard(app: FastifyInstance): Promise<void> {
         r.claim_number, r.repair_path, r.ro_type, r.opened_at, r.promised_at, r.target_days,
         r.amount_cents, r.labor_hours,
         c.name AS customer_name, c.phone AS customer_phone, c.kind AS client_kind,
+        /* Contact details. Selected for everyone and then stripped by
+           scrubCustomer for anyone without the capability — one query, one
+           gate, rather than two query shapes to keep in step. */
+        c.email AS customer_email, c.address AS customer_addr, c.city AS customer_city,
+        c.state AS customer_state, c.zip AS customer_zip,
         ins.name AS insurer_name,
         v.vin, v.year, v.make, v.model, v.color, v.plate, v.plate_state,
         s.label AS status_label, s.customer_label, s.group_id, s.lane_key, s.kind,
@@ -133,7 +140,11 @@ export async function registerBoard(app: FastifyInstance): Promise<void> {
       if (r.age_red_hours && hoursInStatus >= r.age_red_hours) age = 'red';
       else if (r.age_yellow_hours && hoursInStatus >= r.age_yellow_hours) age = 'yellow';
 
-      return scrubMoney({
+      /* Money first, then the customer's contact details. Two capabilities,
+         two scrubs, because they answer different questions: what does this
+         cost, and where does this person live. A production manager gets the
+         first and not the second. */
+      return scrubCustomer(scrubMoney({
         id: r.id,
         ro: r.ro_number,
         statusSlot: r.status_slot,
@@ -157,6 +168,11 @@ export async function registerBoard(app: FastifyInstance): Promise<void> {
         roType: r.ro_type,
         customer: r.customer_name,
         phone: r.customer_phone,
+        email: r.customer_email,
+        address: r.customer_addr,
+        city: r.customer_city,
+        addr_state: r.customer_state,
+        zip: r.customer_zip,
         insurer: r.insurer_name,
         /* Who is paying. A wholesale client is not a customer paying out of
            pocket, and the board said Customer Pay for both. */

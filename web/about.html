@@ -19,6 +19,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="site.css">
+<script src="consent.js" defer></script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"AboutPage","url":"https://easyshopauto.com/about.html","name":"About Easy Shop","inLanguage":"en-US","mainEntity":{"@type":"Person","name":"Chris Johnson","jobTitle":"Founder","worksFor":{"@type":"Organization","name":"Storm Rider Solutions LLC","url":"https://easyshopauto.com/"},"description":"Seventeen years in auto collision, auto hail and automotive repair. Has worked with the major collision repairers, run operations for multi-million-dollar companies, consults with repair shops, and opened his own repair company in 2022."}}
 </script>
@@ -26,7 +27,10 @@
 <body>
 <a class="skip" href="#main">Skip to content</a>
 <header class="nav">
-  <a class="brand" href="index.html">Easy Shop</a>
+  <a class="wordmark" href="index.html">
+      <span class="mark" aria-hidden="true">ES</span>
+      <span class="name">Easy Shop</span>
+    </a>
   <nav aria-label="Main">
     <ul>
       <li><a href="index.html#modules">Modules</a></li>
@@ -46,7 +50,7 @@
         <h1>Very few of these tools are built for the shops</h1>
         <p class="lede">Easy Shop is production ready. It runs a multi-million-dollar repair facility day to day, and it is demoing in other shops. I built it for my own shop first.</p>
         <div style="display:flex;align-items:center;gap:14px">
-          <span style="width:36px;height:1px;background:var(--accent-600)"></span>
+          <span style="width:36px;height:1px;background:var(--accent-mark)"></span>
           <div>
             <div style="font-weight:500;font-size:15px">Chris Johnson</div>
             <div class="muted" style="font-size:13px">Founder &middot; Plano, Texas</div>
@@ -62,8 +66,8 @@
   <section class="tint" id="story">
     <div class="narrow">
       <p class="kicker">Why it exists</p>
-      <p style="font-size:17px;line-height:1.7;color:var(--n-200)">Seventeen years in the industry, and so many tools exist out there to manage production, clients, scheduling, etc. But very few are built for the shops. And more than that, the ones that are generally don't have every feature I would want for my shop.</p>
-      <p style="font-size:17px;line-height:1.7;color:var(--n-200)">As a result of that, and my experience in all of the organizations I have been a part of, I set out to build something that makes it easier to run your shop.</p>
+      <p style="font-size:17px;line-height:1.7;color:var(--text)">Seventeen years in the industry, and so many tools exist out there to manage production, clients, scheduling, etc. But very few are built for the shops. And more than that, the ones that are generally don't have every feature I would want for my shop.</p>
+      <p style="font-size:17px;line-height:1.7;color:var(--text)">As a result of that, and my experience in all of the organizations I have been a part of, I set out to build something that makes it easier to run your shop.</p>
       <p class="muted" style="margin:0">I have worked with the major collision repairers, run operations for multi-million-dollar companies, and I consult with repair shops on how they run. In 2022 I opened my own repair company, which is still going today.</p>
     </div>
   </section>
@@ -166,6 +170,7 @@
       <ul>
         <li><a href="privacy.html">Privacy policy</a></li>
         <li><a href="privacy.html#cookies">Cookies</a></li>
+        <li><a href="#" id="cookie-prefs">Cookie choices</a></li>
         <li><a href="terms.html">Terms of use</a></li>
         <li><a href="sms-terms.html">Text message terms</a></li>
         <li><a href="unsubscribe.html">Unsubscribe</a></li>
@@ -174,7 +179,7 @@
   </div>
   <div class="base">
     <span>&copy; 2026 <a href="https://stormrsolutions.com" rel="noopener" style="color:inherit">Storm Rider Solutions LLC</a>. Founded in Plano, Texas.</span>
-    <span>No cookies. No tracking. <a href="privacy.html#cookies">Why</a>.</span>
+    <span>Analytics only with your say-so. <a href="privacy.html#cookies">What we measure</a>.</span>
   </div>
 </footer>
 </body>

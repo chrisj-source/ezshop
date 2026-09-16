@@ -8,6 +8,7 @@ import { fireTrigger, correctTrigger } from '../lib/pay';
 import { auditIn } from '../lib/audit';
 import { actorFrom } from './audit';
 import { refuseEmail } from '../lib/suppression';
+import { scrubCustomer } from '../permissions';
 
 /** Anything that stops this file being closed. Empty means it can be. */
 function closeBlockers(
@@ -49,6 +50,8 @@ export async function registerRepairOrders(app: FastifyInstance): Promise<void> 
 
     const ro = await tqOne<RowDataPacket>(cid, `
       SELECT r.*, c.name AS customer_name, c.phone AS customer_phone, c.email AS customer_email,
+             c.address AS customer_addr, c.city AS customer_city,
+             c.state AS customer_state, c.zip AS customer_zip,
              c.kind AS customer_kind,
              ins.name AS insurer_name,
              v.vin, v.year, v.make, v.model, v.color, v.plate, v.plate_state, v.mileage,
@@ -97,7 +100,9 @@ export async function registerRepairOrders(app: FastifyInstance): Promise<void> 
     }
 
     return {
-      ro: scrubMoney(ro as Record<string, unknown>, ctx.caps),
+      /* Two gates: what it costs, and where the customer lives. Different
+         questions, different capabilities. */
+      ro: scrubCustomer(scrubMoney(ro as Record<string, unknown>, ctx.caps), ctx.caps),
       assigned: assignedMap,
       /* The notes block is one permission covering both lists: notes and status
          history are the same running record, and splitting them would let a
@@ -596,12 +601,27 @@ export async function registerRepairOrders(app: FastifyInstance): Promise<void> 
       const custCols: Array<[string, string, string, number]> = [
         ['customerName', 'name', 'Name', 190],
         ['customerPhone', 'phone', 'Phone', 32],
-        ['customerEmail', 'email', 'Email', 190]
+        ['customerEmail', 'email', 'Email', 190],
+        ['customerAddress', 'address', 'Address', 190],
+        ['customerCity', 'city', 'City', 90],
+        ['customerState', 'state', 'State', 32],
+        ['customerZip', 'zip', 'ZIP', 16]
       ];
       const custSets: string[] = [];
       const custVals: unknown[] = [];
+      /* Seeing the address and changing it are separate ticks. Accounting can
+         read it and must not rewrite it; a role with neither never gets this
+         far, because the block is not drawn and the columns are not sent. */
+      const mayEditContact = ctx.caps.editCustomerContact;
+      const CONTACT_COLS = new Set(['phone', 'email', 'address', 'city', 'state', 'zip']);
+
       for (const [key, col, label, len] of custCols) {
         if (b[key] === undefined) continue;
+        if (CONTACT_COLS.has(col) && !mayEditContact) {
+          throw Object.assign(
+            new Error('Your role can see the customer\'s contact details but not change them.'),
+            { statusCode: 403 });
+        }
         const v = str(b[key], len);
         if (col === 'name' && !v) {
           throw Object.assign(new Error('A customer needs a name.'), { statusCode: 400 });

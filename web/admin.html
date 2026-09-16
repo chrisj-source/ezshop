@@ -1494,13 +1494,219 @@
     }).catch(function () { /* nothing removed, or no access */ });
   }
 
+  /* ------------------------------------------------------- shop hours */
+
+  var DAYS7 = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+  function renderHours() {
+    api('/api/config/hours').then(function (r) {
+      var byDow = {};
+      (r.hours || []).forEach(function (h) { byDow[Number(h.dow)] = h; });
+
+      var rows = DAYS7.map(function (name, dow) {
+        var h = byDow[dow] || { open_time: '08:00:00', close_time: '17:00:00', closed: dow === 0 || dow === 6 };
+        var off = Number(h.closed) === 1;
+        return '<div class="card2row" style="grid-template-columns:110px 1fr 1fr auto;' +
+          'align-items:center;gap:10px;padding:6px 0">' +
+          '<div style="font:500 12.5px var(--font)' + (off ? ';opacity:.55' : '') + '">' +
+          name + '</div>' +
+          '<div><input class="dinput" type="time" id="hopen' + dow + '" value="' +
+          esc(String(h.open_time).slice(0, 5)) + '"' + (off ? ' disabled' : '') + '></div>' +
+          '<div><input class="dinput" type="time" id="hclose' + dow + '" value="' +
+          esc(String(h.close_time).slice(0, 5)) + '"' + (off ? ' disabled' : '') + '></div>' +
+          '<button class="pchip' + (off ? '' : ' on') + '" data-hday="' + dow + '" ' +
+          'data-on="' + (off ? 0 : 1) + '">' + (off ? 'Closed' : 'Open') + '</button>' +
+          '</div>';
+      }).join('');
+
+      document.getElementById('hoursBody').innerHTML =
+        '<div style="margin-bottom:8px">' + rows + '</div>' +
+        '<div class="row" style="margin-top:10px">' +
+        '<button class="btn btn-solid" id="saveHours">Save hours</button></div>' +
+        '<div class="sub" style="margin-top:8px">Times are ' + esc(r.timezone || 'the shop timezone') +
+        '. Closing has to be after opening \u2014 an overnight shift is not something the ' +
+        'scheduler can express yet.</div>';
+
+      Array.prototype.forEach.call(document.querySelectorAll('[data-hday]'), function (b) {
+        b.addEventListener('click', function () {
+          var on = b.dataset.on !== '1', dow = b.dataset.hday;
+          b.dataset.on = on ? '1' : '0';
+          b.classList.toggle('on', on);
+          b.textContent = on ? 'Open' : 'Closed';
+          document.getElementById('hopen' + dow).disabled = !on;
+          document.getElementById('hclose' + dow).disabled = !on;
+        });
+      });
+
+      document.getElementById('saveHours').addEventListener('click', function () {
+        var hours = DAYS7.map(function (_, dow) {
+          var b = document.querySelector('[data-hday="' + dow + '"]');
+          return {
+            dow: dow,
+            open: document.getElementById('hopen' + dow).value || '08:00',
+            close: document.getElementById('hclose' + dow).value || '17:00',
+            closed: b.dataset.on !== '1'
+          };
+        });
+        api('/api/config/hours', { method: 'PUT', body: JSON.stringify({ hours: hours }) })
+          .then(function () { say('Shop hours saved.', 'ok'); })
+          .catch(function (e) { say(e.message, 'err'); });
+      });
+    }).catch(function (e) {
+      document.getElementById('hoursBody').textContent = e.message;
+    });
+  }
+
+  /* --------------------------------------------------- holidays */
+
+  var HOLYEAR = new Date().getFullYear();
+  var MANUAL = [];
+
+  function renderHolidays() {
+    api('/api/config/closures?year=' + HOLYEAR).then(function (r) {
+      MANUAL = (r.manual || []).map(function (m) {
+        return { date: m.on_date, kind: m.kind,
+          open: String(m.open_time || '08:00').slice(0, 5),
+          close: String(m.close_time || '12:00').slice(0, 5),
+          label: m.label };
+      });
+      paintHolidays(r.holidays || []);
+    }).catch(function (e) { document.getElementById('holBody').textContent = e.message; });
+  }
+
+  function paintHolidays(hol) {
+    var rows = hol.map(function (h, i) {
+      var half = h.kind === 'hours';
+      return '<div class="card2row" style="grid-template-columns:auto 1fr auto auto;' +
+        'align-items:center;gap:10px;padding:5px 0">' +
+        '<button class="pchip' + (h.observed ? ' on' : '') + '" data-hol="' + i + '" ' +
+        'data-on="' + (h.observed ? 1 : 0) + '">' + (h.observed ? 'Observed' : 'Open') + '</button>' +
+        '<div style="font:500 12.5px var(--font)' + (h.observed ? '' : ';opacity:.55') + '">' +
+        esc(h.label) + ' <span class="sub">' + esc(h.date) + '</span></div>' +
+        '<select class="dinput" data-holkind="' + i + '"' + (h.observed ? '' : ' disabled') + '>' +
+        '<option value="closed"' + (half ? '' : ' selected') + '>Closed all day</option>' +
+        '<option value="hours"' + (half ? ' selected' : '') + '>Half day</option></select>' +
+        '<span data-holtimes="' + i + '"' + (half && h.observed ? '' : ' hidden') + '>' +
+        '<input class="dinput" type="time" data-holopen="' + i + '" value="' + esc(h.open) +
+        '" style="width:110px"> to ' +
+        '<input class="dinput" type="time" data-holclose="' + i + '" value="' + esc(h.close) +
+        '" style="width:110px"></span></div>';
+    }).join('');
+
+    var manual = MANUAL.map(function (m, i) {
+      return '<div class="card2row" style="grid-template-columns:auto 1fr auto auto auto;' +
+        'align-items:center;gap:10px;padding:5px 0">' +
+        '<input class="dinput" type="date" data-mdate="' + i + '" value="' + esc(m.date) +
+        '" style="width:150px">' +
+        '<input class="dinput" data-mlabel="' + i + '" value="' + esc(m.label) +
+        '" placeholder="Why">' +
+        '<select class="dinput" data-mkind="' + i + '">' +
+        '<option value="closed"' + (m.kind === 'hours' ? '' : ' selected') + '>Closed</option>' +
+        '<option value="hours"' + (m.kind === 'hours' ? ' selected' : '') + '>Half day</option>' +
+        '</select>' +
+        '<span data-mtimes="' + i + '"' + (m.kind === 'hours' ? '' : ' hidden') + '>' +
+        '<input class="dinput" type="time" data-mopen="' + i + '" value="' + esc(m.open) +
+        '" style="width:110px"> to ' +
+        '<input class="dinput" type="time" data-mclose="' + i + '" value="' + esc(m.close) +
+        '" style="width:110px"></span>' +
+        '<button class="pchip" data-mdel="' + i + '">Remove</button></div>';
+    }).join('');
+
+    document.getElementById('holBody').innerHTML =
+      '<div class="row" style="margin-bottom:10px;gap:8px;align-items:center">' +
+      '<button class="pchip" id="holPrev">&larr;</button>' +
+      '<strong style="font:500 13px var(--font)">' + HOLYEAR + '</strong>' +
+      '<button class="pchip" id="holNext">&rarr;</button></div>' +
+      rows +
+      '<div class="dlbl" style="margin:16px 0 4px">Other days you are closed</div>' +
+      '<div class="sub" style="margin-bottom:8px">A funeral, a shop trip, the week between ' +
+      'Christmas and New Year. These are yours and are not touched when holidays change.</div>' +
+      (manual || '<div class="sub">Nothing yet.</div>') +
+      '<div class="row" style="margin-top:10px;gap:8px">' +
+      '<button class="btn btn-ghost" id="addClosure">Add a day</button>' +
+      '<button class="btn btn-solid" id="saveHolidays">Save</button></div>';
+
+    function readHol() {
+      return hol.map(function (h, i) {
+        var b = document.querySelector('[data-hol="' + i + '"]');
+        var k = document.querySelector('[data-holkind="' + i + '"]');
+        return { key: h.key, observed: b.dataset.on === '1', kind: k.value,
+          open: document.querySelector('[data-holopen="' + i + '"]').value,
+          close: document.querySelector('[data-holclose="' + i + '"]').value };
+      });
+    }
+    function readManual() {
+      return MANUAL.map(function (_, i) {
+        var kind = document.querySelector('[data-mkind="' + i + '"]').value;
+        return { date: document.querySelector('[data-mdate="' + i + '"]').value,
+          label: document.querySelector('[data-mlabel="' + i + '"]').value || 'Closed',
+          kind: kind,
+          open: document.querySelector('[data-mopen="' + i + '"]').value,
+          close: document.querySelector('[data-mclose="' + i + '"]').value };
+      }).filter(function (m) { return m.date; });
+    }
+
+    Array.prototype.forEach.call(document.querySelectorAll('[data-hol]'), function (b) {
+      b.addEventListener('click', function () {
+        var i = b.dataset.hol, on = b.dataset.on !== '1';
+        b.dataset.on = on ? '1' : '0';
+        b.classList.toggle('on', on);
+        b.textContent = on ? 'Observed' : 'Open';
+        var k = document.querySelector('[data-holkind="' + i + '"]');
+        k.disabled = !on;
+        document.querySelector('[data-holtimes="' + i + '"]').hidden = !on || k.value !== 'hours';
+      });
+    });
+    Array.prototype.forEach.call(document.querySelectorAll('[data-holkind]'), function (sel) {
+      sel.addEventListener('change', function () {
+        document.querySelector('[data-holtimes="' + sel.dataset.holkind + '"]').hidden =
+          sel.value !== 'hours';
+      });
+    });
+    Array.prototype.forEach.call(document.querySelectorAll('[data-mkind]'), function (sel) {
+      sel.addEventListener('change', function () {
+        document.querySelector('[data-mtimes="' + sel.dataset.mkind + '"]').hidden =
+          sel.value !== 'hours';
+      });
+    });
+    Array.prototype.forEach.call(document.querySelectorAll('[data-mdel]'), function (b) {
+      b.addEventListener('click', function () {
+        MANUAL = readManual();
+        MANUAL.splice(Number(b.dataset.mdel), 1);
+        paintHolidays(readHol().map(function (h, i) {
+          return Object.assign({}, hol[i], h);
+        }));
+      });
+    });
+    document.getElementById('addClosure').addEventListener('click', function () {
+      MANUAL = readManual();
+      MANUAL.push({ date: '', kind: 'closed', open: '08:00', close: '12:00', label: '' });
+      paintHolidays(readHol().map(function (h, i) { return Object.assign({}, hol[i], h); }));
+    });
+    document.getElementById('holPrev').addEventListener('click', function () {
+      HOLYEAR--; renderHolidays();
+    });
+    document.getElementById('holNext').addEventListener('click', function () {
+      HOLYEAR++; renderHolidays();
+    });
+    document.getElementById('saveHolidays').addEventListener('click', function () {
+      api('/api/config/closures', { method: 'PUT', body: JSON.stringify({
+        year: HOLYEAR, holidays: readHol(), manual: readManual()
+      }) }).then(function () { say('Saved.', 'ok'); return renderHolidays(); })
+        .catch(function (e) { say(e.message, 'err'); });
+    });
+  }
+
   /* ===================================================== settings */
 
   function renderSettings() {
     rail('Reference', [
       { k: 'tech', t: 'Tech visibility' },
+      { k: 'hours', t: 'Shop hours' },
+      { k: 'holidays', t: 'Holidays & closures' },
       { k: 'caps', t: 'Day limits' },
       { k: 'leads', t: 'Lead follow-up' },
+      { k: 'sales', t: 'Sales write-ups' },
       { k: 'cal', t: 'Google Calendar' }
     ]);
     var s = CFG.settings;
@@ -1519,6 +1725,26 @@
       '<button class="pchip' + (s.tech_sees_own_only !== '0' ? ' on' : '') + '" id="techOwn" ' +
       'data-on="' + (s.tech_sees_own_only !== '0' ? 1 : 0) + '">' +
       (s.tech_sees_own_only !== '0' ? 'On' : 'Off') + '</button></div></div>' : '') +
+
+      (shows('hours') ? '<div class="card2" style="margin:0 0 14px" id="hoursCard">' +
+        '<div class="card2row" style="grid-template-columns:1fr">' +
+        '<div class="dlbl" style="margin:0 0 4px">Shop hours</div>' +
+        '<div class="sub" style="margin-bottom:10px;max-width:560px">When the doors are open, in ' +
+        'the shop\'s own timezone. The scheduler uses these, and so does the sales onboarding ' +
+        'clock when it is set to shop hours. A closed day keeps its times \u2014 shut Saturdays for ' +
+        'the winter and you get them back in spring without retyping.</div>' +
+        '<div id="hoursBody" class="sub">Loading\u2026</div>' +
+        '</div></div>' : '') +
+
+      (shows('holidays') ? '<div class="card2" style="margin:0 0 14px" id="holCard">' +
+        '<div class="card2row" style="grid-template-columns:1fr">' +
+        '<div class="dlbl" style="margin:0 0 4px">Holidays &amp; closures</div>' +
+        '<div class="sub" style="margin-bottom:10px;max-width:560px">Tick the ones you observe. ' +
+        'Each can be a full day closed or a half day \u2014 Christmas Eve until noon is the usual ' +
+        'one. Dates are worked out per year, so ticking Thanksgiving once keeps it ticked next ' +
+        'year on the right Thursday. Anything else you close for goes in the list underneath.' +
+        '</div><div id="holBody" class="sub">Loading\u2026</div>' +
+        '</div></div>' : '') +
 
       (shows('caps') ? '<div class="card2" style="margin:0 0 14px">' +
       '<div class="card2row" style="grid-template-columns:1fr">' +
@@ -1547,6 +1773,51 @@
         esc(s.lead_appointment_window_days || '30') + '"></div>' +
         '</div></div></div>' : '') +
 
+      (shows('sales') ? '<div class="card2" style="margin:0 0 14px" id="salesCard">' +
+        '<div class="card2row" style="grid-template-columns:1fr">' +
+        '<div class="dlbl" style="margin:0 0 4px">Sales write-ups</div>' +
+        '<div class="sub" style="margin-bottom:10px;max-width:560px">What the sales screen insists ' +
+        'on, and how fast a lead written on the road is chased. These apply to the sales screen ' +
+        'only \u2014 a car at the door is never blocked for a missing address, and a lead taken over ' +
+        'the phone still only needs a name and a number.</div>' +
+
+        '<div class="card2row" style="grid-template-columns:1fr auto;padding:0 0 10px">' +
+        '<div><div style="font:500 12.5px var(--font)">Require the customer\'s address</div>' +
+        '<div class="sub" style="margin-top:4px;max-width:520px">Street, city and ZIP, before the ' +
+        'write-up can be sent. The shop may have to collect the car, and the onboarding call goes ' +
+        'out against this record.</div></div>' +
+        '<button class="pchip' + (s.sales_require_address !== '0' ? ' on' : '') + '" id="salesAddr" ' +
+        'data-on="' + (s.sales_require_address !== '0' ? 1 : 0) + '">' +
+        (s.sales_require_address !== '0' ? 'On' : 'Off') + '</button></div>' +
+
+        '<div class="card2row" style="grid-template-columns:1fr auto;padding:0 0 10px">' +
+        '<div><div style="font:500 12.5px var(--font)">Require a drop-off day</div>' +
+        '<div class="sub" style="margin-top:4px;max-width:520px">A booked day, or an explicit tick ' +
+        'that the customer is delivering it themselves. Silence is what gets refused \u2014 ' +
+        '\u201cI\u2019ll bring it sometime\u201d is how a sold job becomes a lost one.</div></div>' +
+        '<button class="pchip' + (s.sales_require_drop !== '0' ? ' on' : '') + '" id="salesDrop" ' +
+        'data-on="' + (s.sales_require_drop !== '0' ? 1 : 0) + '">' +
+        (s.sales_require_drop !== '0' ? 'On' : 'Off') + '</button></div>' +
+
+        '<div class="grid3">' +
+        '<div><div class="dk">Hours before an un-chased sales lead goes red</div>' +
+        '<input class="dinput" type="number" min="1" max="168" id="sales_onboard_red_hours" value="' +
+        esc(s.sales_onboard_red_hours || '12') + '"></div>' +
+        '<div><div class="dk">Clock</div>' +
+        '<select class="dinput" id="sales_onboard_clock">' +
+        '<option value="actual"' + (s.sales_onboard_clock !== 'shop' ? ' selected' : '') + '>' +
+        'Actual hours</option>' +
+        '<option value="shop"' + (s.sales_onboard_clock === 'shop' ? ' selected' : '') + '>' +
+        'Shop hours only</option>' +
+        '</select></div>' +
+        '</div>' +
+        '<div class="sub" style="margin-top:8px;max-width:560px">Hours, not days \u2014 this lead is ' +
+        'waiting on an onboarding call, not a chase. <strong>Actual hours</strong> means a Friday ' +
+        'evening sale needs the call on Saturday; shop hours would wait until Monday and defeat ' +
+        'the point. A booked drop does not stop the clock: the appointment is the car arriving, ' +
+        'the call is making sure it does.</div>' +
+        '</div></div>' : '') +
+
       (shows('cal') ? '<div class="card2" style="margin:0 0 14px" id="calCard">' +
         '<div class="card2row" style="grid-template-columns:1fr">' +
         '<div class="dlbl" style="margin:0 0 4px">Google Calendar</div>' +
@@ -1559,17 +1830,26 @@
       '<div class="row"><button class="btn btn-solid" id="saveSettings">Save settings</button></div>' +
       '<div class="msg" id="dMsg"></div></div>';
 
+    if (shows('hours')) renderHours();
+    if (shows('holidays')) renderHolidays();
     if (shows('cal')) renderCalendar();
     if (!shows('tech') || !shows('caps')) {
       // The Save button writes both cards; hide it when neither is on screen.
-      $('saveSettings').hidden = !shows('tech') && !shows('caps');
+      $('saveSettings').hidden = !shows('tech') && !shows('caps') &&
+        !shows('leads') && !shows('sales');
     }
 
-    if ($('techOwn')) $('techOwn').addEventListener('click', function () {
-      var b = $('techOwn'), on = b.dataset.on !== '1';
-      b.dataset.on = on ? '1' : '0';
-      b.classList.toggle('on', on);
-      b.textContent = on ? 'On' : 'Off';
+    /* One handler for every on/off chip on this page, rather than one per
+       setting: the next toggle is then a line of markup and nothing else. */
+    ['techOwn', 'salesAddr', 'salesDrop'].forEach(function (id) {
+      var b = $(id);
+      if (!b) return;
+      b.addEventListener('click', function () {
+        var on = b.dataset.on !== '1';
+        b.dataset.on = on ? '1' : '0';
+        b.classList.toggle('on', on);
+        b.textContent = on ? 'On' : 'Off';
+      });
     });
 
     $('saveSettings').addEventListener('click', function () {
@@ -1581,6 +1861,14 @@
       ['lead_followup_days', 'lead_appointment_window_days'].forEach(function (k) {
         if ($(k)) body[k] = $(k).value || (k === 'lead_followup_days' ? '3' : '30');
       });
+      if ($('salesAddr')) body.sales_require_address = $('salesAddr').dataset.on === '1' ? '1' : '0';
+      if ($('salesDrop')) body.sales_require_drop = $('salesDrop').dataset.on === '1' ? '1' : '0';
+      if ($('sales_onboard_red_hours')) {
+        body.sales_onboard_red_hours = $('sales_onboard_red_hours').value || '12';
+      }
+      if ($('sales_onboard_clock')) {
+        body.sales_onboard_clock = $('sales_onboard_clock').value || 'actual';
+      }
       api('/api/config/settings', { method: 'PATCH', body: JSON.stringify(body) })
         .then(function () { say('Saved.', 'ok'); return reloadConfig(); })
         .catch(function (e) { say(e.message, 'err'); });

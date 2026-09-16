@@ -138,8 +138,12 @@
   var ME = null, STEP = 0, SHOTS = [], CAP = null, VIEW = 'new';
   var D = {
     firstName: '', lastName: '', phone: '', email: '',
+    address: '', city: '', addrState: '', zip: '',
     vehicleText: '', note: '', dropDay: '', selfDeliver: false
   };
+  /* The shop's rules, read from the capacity call. Defaults match the server's:
+     both required until somebody turns them off. */
+  var RULES = { address: true, drop: true };
 
   var STEPS = ['Who', 'Contract', 'Drop off', 'Done'];
 
@@ -157,6 +161,13 @@
   }).then(function (c) {
     if (!c) return;
     CAP = c;
+    /* The shop's rules ride along with the capacity call rather than costing a
+       second request on a phone in a parking lot. Absent means required, which
+       matches the server. */
+    if (c.rules) {
+      RULES.address = c.rules.address !== false;
+      RULES.drop = c.rules.drop !== false;
+    }
     render();
   }).catch(function (e) { if (e.message !== 'signed out') console.error(e); });
 
@@ -171,12 +182,23 @@
 
     if (STEP === 0) {
       h += '<div class="step"><div class="steptitle">Who is it?</div>' +
-        '<div class="stepnote">Name and phone are enough. This becomes a lead the shop can see ' +
-        'straight away.</div>' +
+        '<div class="stepnote">' +
+        (RULES.address
+          ? 'The address is needed here \u2014 the shop may have to collect the car, ' +
+            'and the onboarding call goes out against this record.'
+          : 'Name and phone are enough. This becomes a lead the shop can see straight away.') +
+        '</div>' +
         '<div class="fields two">' +
         f('firstName', 'First name') + f('lastName', 'Last name') +
         '</div><div class="fields">' +
         f('phone', 'Phone', 'tel') +
+        f('email', 'Email', 'email') +
+        f('address', 'Street address' + (RULES.address ? ' *' : '')) +
+        '</div><div class="fields two">' +
+        f('city', 'City' + (RULES.address ? ' *' : '')) +
+        f('addrState', 'State') +
+        '</div><div class="fields two">' +
+        f('zip', 'ZIP' + (RULES.address ? ' *' : ''), 'text') +
         f('vehicleText', 'Vehicle') +
         '</div>' +
         '<div class="fields"><div><label class="fl" for="note">What is wrong with it</label>' +
@@ -248,8 +270,20 @@
       '<button class="btn btn-solid" id="next">' + esc(next) + '</button></div>';
   }
 
+  /** Nothing leaves step 0 without what the shop insists on. */
+  function whoMissing() {
+    if (!D.firstName.trim() && !D.lastName.trim()) return 'A name is needed.';
+    if (!D.phone.trim()) return 'A phone number is needed.';
+    if (RULES.address && !D.address.trim()) return 'The street address is needed.';
+    if (RULES.address && !D.city.trim()) return 'The city is needed.';
+    if (RULES.address && !D.zip.trim()) return 'The ZIP is needed.';
+    return null;
+  }
+
   function collect() {
-    ['firstName', 'lastName', 'phone', 'email', 'vehicleText', 'note'].forEach(function (k) {
+    ['firstName', 'lastName', 'phone', 'email',
+     'address', 'city', 'addrState', 'zip',
+     'vehicleText', 'note'].forEach(function (k) {
       var el = document.getElementById(k);
       if (el) D[k] = el.value;
     });
@@ -262,8 +296,8 @@
     if (next) next.addEventListener('click', function () {
       collect();
       if (STEP === 0) {
-        if (!D.lastName.trim() && !D.firstName.trim()) return alert('A name is required.');
-        if (!D.phone.trim()) return alert('A phone number is required.');
+        var missing = whoMissing();
+        if (missing) return alert(missing);
       }
       STEP++; render();
     });
@@ -313,8 +347,17 @@
     collect();
     var btn = $('submit'), msg = $('msg');
 
-    if (!D.dropDay && !D.selfDeliver) {
+    /* A day or an explicit self-delivery. Silence is what is refused: "I'll
+       bring it sometime" is how a sold job becomes a lost one. The server
+       enforces the same rule, and the shop can switch it off. */
+    if (RULES.drop && !D.dropDay && !D.selfDeliver) {
       msg.textContent = 'Pick a day, or tick that you are bringing it in yourself.';
+      msg.className = 'msg err';
+      return;
+    }
+    var missing = whoMissing();
+    if (missing) {
+      msg.textContent = missing + ' Go back to the first step.';
       msg.className = 'msg err';
       return;
     }
@@ -324,7 +367,9 @@
     msg.className = 'msg ok';
 
     var fd = new FormData();
-    ['firstName', 'lastName', 'phone', 'email', 'vehicleText', 'note'].forEach(function (k) {
+    ['firstName', 'lastName', 'phone', 'email',
+     'address', 'city', 'addrState', 'zip',
+     'vehicleText', 'note'].forEach(function (k) {
       if (D[k]) fd.append(k, D[k]);
     });
     if (D.dropDay) fd.append('dropDay', D.dropDay);

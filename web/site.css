@@ -1,34 +1,86 @@
 /* Easy Shop — the public marketing pages.
  *
- * Deliberately one small stylesheet rather than inline styles: these pages are
- * served to crawlers and to people on a phone in a parking lot, so the HTML
- * stays content and the CSS caches once. Tokens are Nocturne's, copied as
- * values so the marketing site has no build step and no dependency on the
- * design-system package.
+ * One stylesheet, served to crawlers and to people on a phone in a parking lot.
+ *
+ * Two grounds, one sheet. The default is the slate ground; a visitor whose
+ * device is set to light mode gets the paper ground automatically, because a
+ * dark page in direct sunlight is the hard case and a shop owner reads this
+ * standing outside. Every colour is therefore a TOKEN — nothing hard-codes an
+ * rgba of the text colour, which is the bug that made body copy pale grey on
+ * cream.
+ *
+ * Accent and grounds come from the application's own palette (web/shell.css):
+ * gold #d9a441 on navy. The site uses a warm slate rather than the app's navy
+ * so the navy screenshots sit forward of the page instead of dissolving into it.
  *
  * Kept on the public allowlist in src/middleware/security.ts.
  */
 
 :root {
-  --bg: #161826;
-  --surface: #232532;
-  --text: #e9e9ed;
-  --accent: #9184d9;
-  --accent-300: #d2cefd;
-  --accent-600: #796cbf;
-  --accent-700: #5d5294;
-  --accent-900: #2b2741;
-  --n-200: #e4e7f5;
-  --n-300: #cfd3e5;
-  --n-400: #b2b6ca;
-  --n-700: #595d6c;
-  --n-800: #3f424d;
-  --n-900: #292b31;
-  --divider: rgba(233, 233, 237, 0.16);
+  /* Slate — warm, no blue in it, so a navy screenshot reads as blue. */
+  --bg: #1a1917;
+  --deep: #121110;
+  --surface: #242320;
+  --card-top: #2c2b27;
+
+  /* Ink. Body copy is --muted and it is deliberately close to --text: the old
+     0.55-alpha grey measured acceptably and still read as washed out. */
+  --text: #f2f0ec;
+  --muted: #cdc9c0;
+  --faint: #a6a29a;
+
+  --line: #35312c;
+  --line-soft: #2a2724;
+  --divider: rgba(242, 240, 236, 0.14);
+
+  --accent: #d9a441;
+  --accent-hover: #e5bf68;
+  --accent-mark: #b38533;
+  /* Accent as TEXT. On a dark ground the bright gold is fine; on paper it is
+     not, so this flips and body-size accent text is never the raw gold. */
+  --accent-ink: #e5bf68;
+  --accent-wash: rgba(217, 164, 65, 0.14);
+  --accent-glow: rgba(217, 164, 65, 0.13);
+
+  --field: rgba(0, 0, 0, 0.22);
+  --lift: rgba(0, 0, 0, 0.55);
+  --inner-top: rgba(255, 255, 255, 0.06);
+
   --font: Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
   --radius: 8px;
   --radius-lg: 14px;
   --pad: clamp(20px, 5vw, 64px);
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg: #f3f1ec;
+    --deep: #e9e5dc;
+    --surface: #ffffff;
+    --card-top: #ffffff;
+
+    --text: #16181c;
+    --muted: #3f434b;
+    --faint: #62666e;
+
+    --line: #d6d1c6;
+    --line-soft: #e2ddd2;
+    --divider: rgba(22, 24, 28, 0.14);
+
+    /* 3.42:1 on the paper ground — clears the 3:1 minimum for borders, focus
+       rings and other non-text UI. Anything the accent has to carry at TEXT
+       size uses --accent-ink instead, which is 5.6:1. */
+    --accent: #a67a2d;
+    --accent-hover: #8a6526;
+    --accent-mark: #9c7229;
+    --accent-ink: #7a5a1c;
+    --accent-wash: rgba(179, 133, 51, 0.13);
+    --accent-glow: rgba(217, 164, 65, 0.20);
+
+    --field: #ffffff;
+    --lift: rgba(23, 32, 52, 0.16);
+    --inner-top: rgba(255, 255, 255, 0.9);
+  }
 }
 
 * { box-sizing: border-box; }
@@ -49,6 +101,7 @@ h1, h2, h3, h4 {
   line-height: 1.14;
   letter-spacing: -0.015em;
   margin: 0;
+  color: var(--text);
   text-wrap: pretty;
 }
 h1 { font-size: clamp(34px, 4.6vw, 52px); }
@@ -56,11 +109,11 @@ h2 { font-size: clamp(26px, 3.4vw, 38px); }
 h3 { font-size: clamp(21px, 2.4vw, 28px); }
 p { margin: 0 0 12px; text-wrap: pretty; }
 
-a { color: var(--accent); text-underline-offset: 3px; }
-a:hover { color: var(--accent-300); }
+a { color: var(--accent-ink); text-underline-offset: 3px; }
+a:hover { color: var(--accent); }
 :focus { outline: none; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-::selection { background: rgba(145, 132, 217, 0.3); }
+::selection { background: var(--accent-wash); }
 
 img { display: block; max-width: 100%; height: auto; }
 
@@ -69,11 +122,12 @@ img { display: block; max-width: 100%; height: auto; }
   font-weight: 500;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: rgba(233, 233, 237, 0.55);
+  color: var(--accent-ink);
   margin: 0 0 8px;
 }
-.muted { color: rgba(233, 233, 237, 0.55); }
-.lede { font-size: 17px; color: var(--n-300); max-width: 54ch; }
+.muted { color: var(--muted); }
+.faint { color: var(--faint); }
+.lede { font-size: 17px; color: var(--muted); max-width: 54ch; }
 
 .skip {
   position: absolute; left: -9999px; top: 0; z-index: 50;
@@ -82,26 +136,51 @@ img { display: block; max-width: 100%; height: auto; }
 }
 .skip:focus { left: 12px; top: 12px; }
 
+/* --------------------------------------------------------------- wordmark */
+
+/* Real text, not an image: it stays selectable, scales, and a crawler reads it.
+   The monogram tile is the same mark the application's sign-in screen uses,
+   which is what ties the site to the product. */
+.wordmark {
+  display: inline-flex; align-items: center; gap: 10px;
+  text-decoration: none; color: var(--text);
+}
+.wordmark .mark {
+  flex: none;
+  width: 30px; height: 30px;
+  display: grid; place-items: center;
+  font: 600 11px/1 var(--font);
+  letter-spacing: 0.04em;
+  /* Text, so it takes the ink value rather than the border gold. */
+  color: var(--accent-ink);
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+}
+.wordmark .name {
+  font: 600 13px/1 var(--font);
+  letter-spacing: 0.17em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.wordmark:hover .mark { background: var(--accent-wash); }
+.wordmark:hover { color: var(--text); }
+
 /* ------------------------------------------------------------------ header */
 
 .nav {
   position: sticky; top: 0; z-index: 20;
   display: flex; align-items: center; justify-content: space-between;
   gap: 16px; padding: 12px var(--pad);
-  background: rgba(22, 24, 38, 0.88);
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
   backdrop-filter: blur(10px);
-  border-bottom: 1px solid var(--divider);
-}
-.brand {
-  font-weight: 500; font-size: 17px; letter-spacing: -0.01em;
-  color: var(--text); text-decoration: none;
+  border-bottom: 1px solid var(--accent-wash);
 }
 .nav ul {
   display: flex; align-items: center; gap: clamp(10px, 2vw, 26px);
   list-style: none; margin: 0; padding: 0; font-size: 14px;
 }
-.nav ul a { color: var(--n-300); text-decoration: none; }
-.nav ul a:hover, .nav ul a[aria-current="page"] { color: var(--accent-300); }
+.nav ul a { color: var(--muted); text-decoration: none; }
+.nav ul a:hover, .nav ul a[aria-current="page"] { color: var(--accent-ink); }
 
 .btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 6px;
@@ -111,10 +190,12 @@ img { display: block; max-width: 100%; height: auto; }
   border: 1px solid transparent; background: transparent; color: var(--text);
   min-height: 40px;
 }
-.btn-primary { color: var(--accent); border-color: var(--accent); }
-.btn-primary:hover { background: rgba(145, 132, 217, 0.12); color: var(--accent-300); }
-.btn-ghost { color: var(--n-300); border-color: var(--n-800); }
-.btn-ghost:hover { border-color: var(--accent-600); color: var(--text); }
+/* Outlined, per the design system and the app's own buttons. */
+.btn-primary { color: var(--accent-ink); border-color: var(--accent); }
+.btn-primary:hover { background: var(--accent-wash); border-color: var(--accent-hover); }
+.btn-primary:active { background: var(--accent-wash); border-color: var(--accent-ink); }
+.btn-ghost { color: var(--muted); border-color: var(--line); }
+.btn-ghost:hover { border-color: var(--accent-mark); color: var(--text); }
 .btn-lg { font-size: 15px; padding: 13px 24px; min-height: 46px; }
 
 .tag {
@@ -122,14 +203,27 @@ img { display: block; max-width: 100%; height: auto; }
   letter-spacing: 0.06em; text-transform: uppercase;
   padding: 3px 9px; border-radius: 999px;
 }
-.tag-accent { background: var(--accent-700); color: #f5f4ff; }
-.tag-outline { border: 1px solid var(--n-700); color: var(--n-400); }
+.tag-accent {
+  background: var(--accent-wash); color: var(--accent-ink);
+  box-shadow: inset 0 0 0 1px var(--accent-wash);
+}
+.tag-outline { border: 1px solid var(--line); color: var(--faint); }
 
 /* ------------------------------------------------------------------ layout */
 
 section { padding: clamp(40px, 7vw, 88px) var(--pad); }
-section.tint { background: var(--n-900); }
-section.ruled { border-top: 1px solid var(--divider); }
+/* Bands RECEDE rather than lighten — on either ground that reads as a layer. */
+section.tint {
+  background: var(--deep);
+  box-shadow: inset 0 1px 0 var(--inner-top);
+}
+/* A seam that fades at both ends, the way the design system draws its rules. */
+section.ruled {
+  background-image: linear-gradient(to right, transparent, var(--divider) 12%,
+                                     var(--divider) 88%, transparent);
+  background-size: 100% 1px;
+  background-repeat: no-repeat;
+}
 .wrap { max-width: 1180px; }
 .narrow { max-width: 760px; }
 .split {
@@ -140,16 +234,35 @@ section.ruled { border-top: 1px solid var(--divider); }
 .cols-3 { display: grid; gap: 18px; grid-template-columns: repeat(auto-fit, minmax(258px, 1fr)); }
 .actions { display: flex; flex-wrap: wrap; gap: 12px; }
 
-.card {
-  background: var(--surface); border-radius: var(--radius);
-  box-shadow: 0 0 0 1px var(--n-800); padding: 18px;
+/* The hero, lit from two corners instead of being a flat rectangle. */
+main > section:first-of-type {
+  position: relative;
+  background:
+    radial-gradient(1100px 520px at 10% -10%, var(--accent-glow), transparent 62%),
+    radial-gradient(800px 420px at 95% 5%, rgba(127, 157, 196, 0.10), transparent 58%);
 }
+
+.card {
+  background: linear-gradient(180deg, var(--card-top) 0%, var(--surface) 100%);
+  border-radius: var(--radius);
+  box-shadow: 0 0 0 1px var(--line-soft), 0 2px 10px var(--lift);
+  padding: 18px;
+}
+/* A screenshot has to read as a separate object, so its frame lifts harder
+   than a card does. */
 .frame {
-  background: var(--surface); border-radius: var(--radius-lg);
-  box-shadow: 0 0 0 1px var(--n-700), 0 6px 18px rgba(0, 0, 0, 0.55);
+  background: linear-gradient(180deg, var(--card-top) 0%, var(--surface) 100%);
+  border-radius: var(--radius-lg);
+  box-shadow:
+    0 0 0 1px var(--line),
+    0 1px 0 var(--inner-top) inset,
+    0 18px 44px var(--lift);
   padding: 12px; min-width: 0;
 }
-.frame img { border-radius: var(--radius); }
+.frame img {
+  border-radius: var(--radius);
+  box-shadow: 0 0 0 1px var(--divider);
+}
 
 /* ------------------------------------------------------------------ pieces */
 
@@ -159,11 +272,19 @@ section.ruled { border-top: 1px solid var(--divider); }
 .modules li { display: flex; gap: 12px; padding: 9px 0; }
 .modules li::before {
   content: ""; flex: none; width: 3px; border-radius: 2px;
-  background: var(--accent-600); align-self: stretch;
+  background: var(--accent-mark); align-self: stretch;
 }
-.modules .optional li::before { background: var(--n-800); }
-.modules b { display: block; font-weight: 500; font-size: 15px; }
-.modules span { font-size: 13px; line-height: 1.5; color: rgba(233, 233, 237, 0.55); }
+.modules .optional li::before { background: var(--line); }
+.modules b { display: block; font-weight: 500; font-size: 15px; color: var(--text); }
+/* Scoped to the description span inside each row. Unscoped, `.modules span`
+   (specificity 0,1,1) beat `.tag-accent` (0,1,0) and stripped the gold off the
+   Included / Add-when-needed pills, which also rendered 2px larger than the
+   identical pills in the feature rows. The `.head` caption below keeps its own
+   muted treatment. */
+.modules li span { font-size: 13px; line-height: 1.5; color: var(--muted); }
+/* `:not(.tag)` matters: `.modules .head span` would still be 0,2,1 and beat
+   `.tag-accent` at 0,1,0 on colour, which is the bug this is fixing. */
+.modules .head span:not(.tag) { font-size: 13px; color: var(--muted); }
 .modules .head {
   display: flex; align-items: center; gap: 12px;
   padding-bottom: 9px; margin-bottom: 6px; border-bottom: 1px solid var(--divider);
@@ -173,32 +294,33 @@ section.ruled { border-top: 1px solid var(--divider); }
 .feature:last-child { margin-bottom: 0; }
 .feature:nth-child(even) .frame { order: -1; }
 .feature ul { list-style: none; margin: 4px 0 0; padding: 0; display: grid; gap: 7px; }
-.feature li { display: flex; gap: 12px; font-size: 14px; line-height: 1.5; color: rgba(233, 233, 237, 0.55); }
+.feature li { display: flex; gap: 12px; font-size: 14px; line-height: 1.5; color: var(--muted); }
 .feature li::before {
   content: ""; flex: none; width: 14px; height: 1px;
-  background: var(--accent-600); margin-top: 11px;
+  background: var(--accent-mark); margin-top: 11px;
 }
 
 details.faq {
   background: var(--surface); border-radius: var(--radius);
-  box-shadow: 0 0 0 1px var(--n-800); padding: 16px 18px; margin-bottom: 10px;
+  box-shadow: 0 0 0 1px var(--line-soft); padding: 16px 18px; margin-bottom: 10px;
 }
 details.faq summary {
   cursor: pointer; font-weight: 500; font-size: 16px; list-style: none;
+  color: var(--text);
   display: flex; justify-content: space-between; gap: 14px;
 }
 details.faq summary::-webkit-details-marker { display: none; }
-details.faq summary::after { content: "+"; color: rgba(233, 233, 237, 0.55); }
+details.faq summary::after { content: "+"; color: var(--accent-ink); }
 details.faq[open] summary::after { content: "\2212"; }
-details.faq p { margin: 14px 0 0; font-size: 14.5px; color: var(--n-300); max-width: 64ch; }
+details.faq p { margin: 14px 0 0; font-size: 14.5px; color: var(--muted); max-width: 64ch; }
 
 .field { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
 .field span {
-  font-size: 12px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--n-400);
+  font-size: 12px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--faint);
 }
 input, textarea {
   width: 100%; font: 400 15px var(--font); color: var(--text);
-  background: rgba(0, 0, 0, 0.22); border: 1px solid var(--n-800);
+  background: var(--field); border: 1px solid var(--line);
   border-radius: var(--radius); padding: 10px 12px; min-height: 44px;
 }
 input:focus-visible, textarea:focus-visible { border-color: var(--accent); }
@@ -210,22 +332,73 @@ textarea { resize: vertical; }
 footer { padding: clamp(28px, 4vw, 48px) var(--pad); border-top: 1px solid var(--divider); }
 footer .cols { display: grid; gap: 28px; grid-template-columns: repeat(auto-fit, minmax(205px, 1fr)); max-width: 1180px; }
 footer h2 { font-size: 16px; margin-bottom: 10px; }
-footer ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 7px; font-size: 13px; }
+footer ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 7px; font-size: 13px; color: var(--muted); }
 footer a { text-decoration: none; }
 footer .base {
   display: flex; flex-wrap: wrap; gap: 14px; justify-content: space-between;
   margin-top: 28px; padding-top: 18px; border-top: 1px solid var(--divider);
-  font-size: 12px; color: rgba(233, 233, 237, 0.55);
+  font-size: 12px; color: var(--faint);
 }
+footer .base a { color: inherit; }
 
 /* ------------------------------------------------------------------- prose */
 
 .prose h2 { font-size: clamp(20px, 2.4vw, 26px); margin: 30px 0 8px; }
 .prose h2:first-of-type { margin-top: 0; }
-.prose p, .prose li { font-size: 15px; line-height: 1.68; color: var(--n-300); max-width: 70ch; }
+.prose p, .prose li { font-size: 15px; line-height: 1.68; color: var(--muted); max-width: 70ch; }
 .prose ul { padding-left: 20px; }
 .prose code {
-  font: 400 13px ui-monospace, monospace; background: rgba(0, 0, 0, 0.3);
+  font: 400 13px ui-monospace, monospace; background: var(--field);
+  border: 1px solid var(--line-soft);
   padding: 1px 5px; border-radius: 4px;
 }
 .prose strong { color: var(--text); font-weight: 500; }
+
+/* ----------------------------------------------------------- consent bar */
+
+/* A bottom sheet rather than a centre-screen modal: it does not block the page,
+   which matters because somebody arriving from a search result wants to read
+   before they answer a question about cookies. Decline and Allow are the same
+   size on purpose — a decline hidden behind a second screen is a dark pattern
+   and, under several state laws, not valid consent. */
+#es-consent {
+  position: fixed;
+  left: 0; right: 0; bottom: 0;
+  z-index: 60;
+  background: var(--surface);
+  border-top: 1px solid var(--accent-wash);
+  box-shadow: 0 -10px 40px var(--lift);
+  padding: 14px var(--pad) calc(14px + env(safe-area-inset-bottom, 0px));
+}
+.es-consent-in {
+  max-width: 1180px;
+  display: flex; flex-wrap: wrap; align-items: center;
+  gap: 14px 24px; justify-content: space-between;
+}
+#es-consent p {
+  margin: 0;
+  font-size: 13.5px; line-height: 1.55;
+  color: var(--muted);
+  max-width: 76ch;
+}
+#es-consent a { color: var(--accent-ink); }
+.es-consent-btns { display: flex; gap: 10px; flex: none; }
+#es-consent button {
+  font: 500 14px/1.2 var(--font);
+  padding: 10px 18px; min-height: 44px;
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  white-space: nowrap;
+}
+#es-consent button:hover { border-color: var(--accent-mark); color: var(--text); }
+#es-consent button.es-primary { color: var(--accent-ink); border-color: var(--accent); }
+#es-consent button.es-primary:hover { background: var(--accent-wash); border-color: var(--accent-hover); }
+#es-consent button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+@media (max-width: 560px) {
+  .es-consent-btns { width: 100%; }
+  #es-consent button { flex: 1; }
+}

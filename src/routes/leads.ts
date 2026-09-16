@@ -8,6 +8,41 @@ import { daysBetweenSql, shopToday, tzOffset } from '../lib/shoptime';
 import { audit } from '../lib/audit';
 import { actorFrom } from './audit';
 import { isSuppressed, noteSuppressionHit, refuseEmail } from '../lib/suppression';
+import { scrubCustomer } from '../permissions';
+import { shopCalendar, workingHoursBetween, Calendar } from '../lib/shophours';
+
+/**
+ * Re-measure the onboarding clock in WORKING hours.
+ *
+ * The SQL gives elapsed hours, which is what most shops want. A shop that
+ * chooses the shop-hours clock gets the same span walked through its own open
+ * windows instead — see lib/shophours. Done here, once per request, rather
+ * than per row: the week is one query and the arithmetic is local.
+ */
+function applyShopClock(rows: Record<string, unknown>[], cal: Calendar): void {
+  const now = new Date();
+  for (const l of rows) {
+    if (l.source !== 'sales app' || !l.received_at) continue;
+    l.onboard_hours = workingHoursBetween(cal, new Date(String(l.received_at)), now);
+  }
+}
+
+/**
+ * Hide a lead's contact details from anyone without the capability — except
+ * the person who created the lead, on their own lead.
+ *
+ * That exception is deliberate and it is enforced here rather than in the
+ * capability: they typed the address in at the counter, so a screen that took
+ * it back off them would be lying about what they had just entered. It applies
+ * to their OWN leads only; a salesperson still cannot read the address on
+ * somebody else's.
+ */
+function scrubLead<T extends Record<string, unknown>>(
+  row: T, caps: Parameters<typeof scrubCustomer>[1], viewerId: number
+): T {
+  if (Number(row.owner_user_id) === viewerId) return row;
+  return scrubCustomer(row, caps);
+}
 
 const SOURCES = ['phone', 'walk-in', 'website', 'referral', 'google', 'scheduler', 'sales app', 'other'];
 const STATES = ['new', 'contacted', 'estimate_written', 'estimate_sent', 'appraisal_booked', 'won', 'lost'];
@@ -17,7 +52,26 @@ const LOST_REASONS = [
   'Too far out', 'Outside what we do', 'Other'
 ];
 
-interface FollowupCfg { days: number; windowDays: number }
+interface FollowupCfg {
+  days: number;
+  windowDays: number;
+  /**
+   * A lead written on the sales screen is chased in HOURS, not days. Somebody
+   * has been stood in front of the customer, the car is expected, and an
+   * onboarding call has to happen before it goes cold. Twelve hours by default
+   * against the normal three days.
+   */
+  salesRedHours: number;
+  /**
+   * 'actual' — real elapsed hours. Decided 15 Sep 2026: not shop hours, because
+   * a Friday evening sale needs the call on Saturday and a clock that waits for
+   * Monday defeats the point.
+   *
+   * 'shop' walks the span through the shop's own open windows instead — see
+   * `applyShopClock` below and `lib/shophours`. Both are real; the shop picks.
+   */
+  salesClock: 'actual' | 'shop';
+}
 
 /**
  * The shop's own follow-up numbers. Three days of silence suits a shop that
@@ -26,13 +80,16 @@ interface FollowupCfg { days: number; windowDays: number }
 async function leadFollowupCfg(cid: number): Promise<FollowupCfg> {
   const rows = await tq<Array<RowDataPacket & { setting_key: string; setting_value: string }>>(
     cid, `SELECT setting_key, setting_value FROM shop_settings
-          WHERE setting_key IN ('lead_followup_days', 'lead_appointment_window_days')`
+          WHERE setting_key IN ('lead_followup_days', 'lead_appointment_window_days',
+                                'sales_onboard_red_hours', 'sales_onboard_clock')`
   ).catch(() => []);
   const map: Record<string, string> = {};
   for (const r of rows) map[r.setting_key] = r.setting_value;
   return {
     days: Math.max(1, Number(map.lead_followup_days ?? 3) || 3),
-    windowDays: Math.max(1, Number(map.lead_appointment_window_days ?? 30) || 30)
+    windowDays: Math.max(1, Number(map.lead_appointment_window_days ?? 30) || 30),
+    salesRedHours: Math.max(1, Number(map.sales_onboard_red_hours ?? 12) || 12),
+    salesClock: map.sales_onboard_clock === 'shop' ? 'shop' : 'actual'
   };
 }
 
@@ -56,6 +113,35 @@ function markFollowup(l: Record<string, unknown>, cfg: FollowupCfg, today: strin
     : snoozed ? 'held'
     : quiet >= cfg.days ? 'quiet'
     : 'waiting';
+
+  /**
+   * The sales-app clock, which runs alongside the one above rather than
+   * replacing it.
+   *
+   * A lead written on the road is waiting on an onboarding call. It goes RED at
+   * the shop's hour figure — twelve by default — and red here means red: the
+   * screen should show it as overdue, not merely due.
+   *
+   * `onboarded` is what stops it: somebody logged contact after the lead was
+   * written. A booked drop does NOT stop it, deliberately — the appointment is
+   * the car arriving, the call is the shop making sure it does.
+   */
+  if (l.source === 'sales app' && !settled) {
+    const hours = Number(l.onboard_hours ?? 0);
+    const onboarded = !!l.onboard_done;
+    l.onboard_red = !onboarded && hours >= cfg.salesRedHours;
+    l.onboard_hours_left = onboarded ? null : Math.max(0, cfg.salesRedHours - hours);
+    l.onboard_needed = !onboarded;
+    /* The row is red for whichever clock fires first. */
+    if (l.onboard_red) {
+      l.needs_followup = true;
+      l.followup_reason = 'onboarding';
+    }
+  } else {
+    l.onboard_red = false;
+    l.onboard_needed = false;
+    l.onboard_hours_left = null;
+  }
 }
 
 export async function registerLeads(app: FastifyInstance): Promise<void> {
@@ -107,6 +193,15 @@ export async function registerLeads(app: FastifyInstance): Promise<void> {
       SELECT l.*, r.ro_number, sf.display_name AS owner_name,
              TIMESTAMPDIFF(HOUR, l.received_at, COALESCE(l.first_reply_at, NOW())) AS hours_to_reply,
              TIMESTAMPDIFF(HOUR, l.received_at, NOW()) AS age_hours,
+             /* The onboarding clock for a sales-app lead. Real elapsed hours,
+                not shop hours — a Friday evening sale needs the call on
+                Saturday. `onboard_done` is somebody having logged contact
+                since the lead was written; the sales route stamps
+                `first_reply_at` at creation, so that column cannot be the
+                signal, but `last_followup_at` is only ever set by a human
+                marking the lead chased. */
+             TIMESTAMPDIFF(HOUR, l.received_at, NOW()) AS onboard_hours,
+             (l.last_followup_at IS NOT NULL) AS onboard_done,
              /* Calendar days in the shop's timezone. Elapsed hours called a lead
                 taken at 4pm yesterday “today”; counting UTC days called one taken
                 at 8pm yesterday “today” as well, because it had already rolled
@@ -126,6 +221,10 @@ export async function registerLeads(app: FastifyInstance): Promise<void> {
 
     /* The flag is computed here rather than stored, so changing the shop's
        number re-flags everything at once instead of on next touch. */
+    if (cfg.salesClock === 'shop') {
+      applyShopClock(rows as Record<string, unknown>[],
+        await shopCalendar(ctx.company!.id, ctx.company!.timezone));
+    }
     for (const l of rows) markFollowup(l as Record<string, unknown>, cfg, shopToday(ctx.company!.timezone));
 
     const [sum] = await tq<RowDataPacket[]>(ctx.company!.id, `
@@ -158,7 +257,7 @@ export async function registerLeads(app: FastifyInstance): Promise<void> {
     const wonCents = Number(sum.won_cents ?? 0);
     const quoted = Number(sum.quoted ?? 0);
     return {
-      leads: rows,
+      leads: rows.map(l => scrubLead(l as Record<string, unknown>, ctx.caps, ctx.user.id)),
       staff,
       followup: cfg,
       summary: {
@@ -192,6 +291,15 @@ export async function registerLeads(app: FastifyInstance): Promise<void> {
       SELECT l.*, r.ro_number,
              ${daysBetweenSql('l.received_at', 'NOW()')} AS age_days,
              TIMESTAMPDIFF(HOUR, l.received_at, NOW()) AS age_hours,
+             /* The onboarding clock for a sales-app lead. Real elapsed hours,
+                not shop hours — a Friday evening sale needs the call on
+                Saturday. `onboard_done` is somebody having logged contact
+                since the lead was written; the sales route stamps
+                `first_reply_at` at creation, so that column cannot be the
+                signal, but `last_followup_at` is only ever set by a human
+                marking the lead chased. */
+             TIMESTAMPDIFF(HOUR, l.received_at, NOW()) AS onboard_hours,
+             (l.last_followup_at IS NOT NULL) AS onboard_done,
              ${daysBetweenSql('COALESCE(l.last_followup_at, l.received_at)', 'NOW()')} AS quiet_days
       FROM leads l
       LEFT JOIN repair_orders r ON r.id = l.ro_id WHERE l.id = ?`,
@@ -212,12 +320,19 @@ export async function registerLeads(app: FastifyInstance): Promise<void> {
     const next = appointments.filter(a =>
       !a.cancelled_at && new Date(String(a.starts_at)) >= new Date())[0];
     (lead as Record<string, unknown>).next_appointment = next ? next.starts_at : null;
+    if (cfg.salesClock === 'shop') {
+      applyShopClock([lead as Record<string, unknown>],
+        await shopCalendar(cid, ctx.company!.timezone));
+    }
     markFollowup(lead as Record<string, unknown>, cfg, shopToday(ctx.company!.timezone));
 
     const events = await tq<RowDataPacket[]>(cid,
       'SELECT * FROM lead_events WHERE lead_id = ? ORDER BY created_at DESC, id DESC', [id]);
 
-    return { lead, events, appointments, followup: cfg };
+    return {
+      lead: scrubLead(lead as Record<string, unknown>, ctx.caps, ctx.user.id),
+      events, appointments, followup: cfg
+    };
   });
 
   /**
@@ -421,10 +536,13 @@ export async function registerLeads(app: FastifyInstance): Promise<void> {
       const [r] = await c.query<ResultSetHeader>(`
         INSERT INTO leads
           (lead_number, source, state, first_name, last_name, phone, email,
+           address, city, addr_state, zip,
            vehicle_text, damage_note, payer, owner_user_id, received_at)
-        VALUES (?, ?, 'new', ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, NOW()))`,
+        VALUES (?, ?, 'new', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, NOW()))`,
         [num, b.source ?? 'phone', b.firstName ?? null, b.lastName ?? null,
-         b.phone ?? null, b.email ?? null, b.vehicleText ?? null, b.damageNote ?? null,
+         b.phone ?? null, b.email ?? null,
+         b.address ?? null, b.city ?? null, b.addrState ?? null, b.zip ?? null,
+         b.vehicleText ?? null, b.damageNote ?? null,
          PAYERS.includes(b.payer ?? '') ? b.payer : 'cash',
          b.ownerUserId ?? ctx.user.id, b.receivedAt ?? null]);
 
@@ -522,6 +640,7 @@ export async function registerLeads(app: FastifyInstance): Promise<void> {
 
     const map: Record<string, string> = {
       firstName: 'first_name', lastName: 'last_name', phone: 'phone', email: 'email',
+      address: 'address', city: 'city', addrState: 'addr_state', zip: 'zip',
       vehicleText: 'vehicle_text', damageNote: 'damage_note', source: 'source',
       payer: 'payer', ownerUserId: 'owner_user_id', lostReason: 'lost_reason'
     };
@@ -657,9 +776,14 @@ export async function registerLeads(app: FastifyInstance): Promise<void> {
          refuse an address — the car is being taken in — so an unsubscribed one
          travels onto the file and is recorded as a hit instead, and simply never
          receives anything. */
+      /* The address travels with the conversion. Note the column mapping:
+         `leads.addr_state` → `clients.state`, because on a lead `state` is the
+         status enum and on a client it is the US state. */
       const [cl] = await c.query<ResultSetHeader>(
-        `INSERT INTO clients (kind, name, phone, email) VALUES ('retail', ?, ?, ?)`,
-        [name, lead.phone ?? null, lead.email ?? null]);
+        `INSERT INTO clients (kind, name, phone, email, address, city, state, zip)
+         VALUES ('retail', ?, ?, ?, ?, ?, ?, ?)`,
+        [name, lead.phone ?? null, lead.email ?? null,
+         lead.address ?? null, lead.city ?? null, lead.addr_state ?? null, lead.zip ?? null]);
       if (lead.email && await isSuppressed('email', String(lead.email), cid)) {
         await noteSuppressionHit(cid, 'email', String(lead.email), 'carried from a converted lead');
       }

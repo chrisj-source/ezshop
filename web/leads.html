@@ -874,12 +874,22 @@
     $('detBody').innerHTML =
       '<div style="font:400 11px/1.5 var(--font);color:var(--muted);margin:12px 0 14px">' +
       'Whatever you have. A phone number and a name is enough — the rest can be filled in when ' +
-      'you call them back.</div>' +
+      'you call them back. The address is only insisted on when a lead is written up on the ' +
+      'sales screen.</div>' +
       '<div style="display:flex;flex-direction:column;gap:10px">' +
       '<div style="display:grid;grid-template-columns:1fr 1fr;gap:9px">' +
       '<div><div class="detlbl">First name</div><input id="nFirst" class="detsel"></div>' +
       '<div><div class="detlbl">Last name</div><input id="nLast" class="detsel"></div></div>' +
       '<div><div class="detlbl">Phone</div><input id="nPhone" class="detsel" placeholder="(972) 555-0100"></div>' +
+      '<div><div class="detlbl">Email</div><input id="nEmail" class="detsel" type="email" placeholder="name@example.com"></div>' +
+      /* Optional here on purpose: a lead taken over the phone often has nothing
+         but a name and a number, and refusing it would push people to make an
+         address up. The sales screen is where it is insisted on. */
+      '<div><div class="detlbl">Address</div><input id="nAddress" class="detsel" placeholder="1420 Ridge Road"></div>' +
+      '<div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:9px">' +
+      '<div><div class="detlbl">City</div><input id="nCity" class="detsel"></div>' +
+      '<div><div class="detlbl">State</div><input id="nState" class="detsel" maxlength="2" placeholder="TX"></div>' +
+      '<div><div class="detlbl">ZIP</div><input id="nZip" class="detsel" maxlength="10"></div></div>' +
       '<div><div class="detlbl">Vehicle</div><input id="nVehicle" class="detsel" placeholder="2022 Honda CR-V EX"></div>' +
       '<div><div class="detlbl">What is wrong</div><input id="nNote" class="detsel" placeholder="Hail on the roof and hood"></div>' +
       '<div style="display:grid;grid-template-columns:1fr 1fr;gap:9px">' +
@@ -908,6 +918,11 @@
         firstName: $('nFirst').value.trim() || undefined,
         lastName: $('nLast').value.trim() || undefined,
         phone: $('nPhone').value.trim() || undefined,
+        email: $('nEmail').value.trim() || undefined,
+        address: $('nAddress').value.trim() || undefined,
+        city: $('nCity').value.trim() || undefined,
+        addrState: $('nState').value.trim().toUpperCase() || undefined,
+        zip: $('nZip').value.trim() || undefined,
         vehicleText: $('nVehicle').value.trim() || undefined,
         damageNote: $('nNote').value.trim() || undefined,
         source: $('nSource').value,

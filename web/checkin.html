@@ -221,7 +221,8 @@
     payType: '', clientId: '', droppedBy: '',
     jobType: '', roNumber: '',
     vin: '', year: '', make: '', model: '', color: '', plate: '', plateState: '', mileage: '',
-    customerName: '', phone: '', email: '', insurerName: '', claimNumber: '', dateOfLoss: '',
+    customerName: '', phone: '', email: '', address: '', city: '', addrState: '', zip: '',
+    insurerName: '', claimNumber: '', dateOfLoss: '',
     damageNote: '', amount: '',
     _derivedRo: '', _typedRo: ''
   };
@@ -413,6 +414,20 @@
         f('email', 'Email', 'email', 'autocomplete="email" inputmode="email"') +
         (D.payType === 'insurance' ? f('insurerName', 'Insurer') + f('claimNumber', 'Claim number') +
           f('dateOfLoss', 'Date of loss', 'date') : '') +
+        '</div>' +
+        /* Address is OPTIONAL at the door, deliberately. A car arriving must
+           never be blocked because nobody asked for a zip code — that is the
+           one place in the system where stopping the flow costs more than the
+           missing field. The sales screen is where it is insisted on. */
+        '<fieldset class="fields" style="margin-top:13px;border:0;padding:0">' +
+        '<legend class="fl" style="padding:0">Address <span class="sr-only">(optional)</span>' +
+        '<span aria-hidden="true" style="font-weight:400;opacity:.7"> — optional</span></legend>' +
+        '<div>' + f('address', 'Street', 'text', 'autocomplete="street-address"') + '</div>' +
+        '</fieldset>' +
+        '<div class="fields" style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:9px">' +
+        f('city', 'City', 'text', 'autocomplete="address-level2"') +
+        f('addrState', 'State', 'text', 'autocomplete="address-level1" maxlength="2"') +
+        f('zip', 'ZIP', 'text', 'autocomplete="postal-code" inputmode="numeric" maxlength="10"') +
         '</div>' +
         '<div class="fields" style="margin-top:13px"><div>' +
         '<label class="fl" for="damageNote">Damage note</label>' +

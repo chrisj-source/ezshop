@@ -19,20 +19,32 @@ import { config } from '../config';
  * What it does buy: no third-party script can load, no one can frame the app,
  * no form can post off-site, and injected <img>/<iframe> cannot phone home.
  * Getting to a nonce CSP means touching every page in server/web; queued.
+ *
+ * `publicPage` widens it for the marketing pages ONLY, because those load
+ * Google Tag Manager. The CRM must not inherit that: every screen behind
+ * sign-in holds a shop's customer records, and 'no third-party script can
+ * load' is worth more there than analytics is anywhere.
  */
-function csp(): string {
+function csp(publicPage: boolean): string {
+  const google = publicPage
+    ? ['https://www.googletagmanager.com', 'https://www.google-analytics.com',
+       'https://*.google-analytics.com', 'https://*.analytics.google.com']
+    : [];
+
   return [
     "default-src 'self'",
-    "script-src 'self' 'unsafe-inline'",
+    ["script-src 'self' 'unsafe-inline'", ...(publicPage ? ['https://www.googletagmanager.com'] : [])].join(' '),
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
     "font-src 'self' https://fonts.gstatic.com data:",
-    "img-src 'self' data: blob:",
-    "connect-src 'self'",
+    ["img-src 'self' data: blob:", ...google].join(' '),
+    ["connect-src 'self'", ...google].join(' '),
     "object-src 'none'",
     "base-uri 'none'",
     "form-action 'self'",
+    /* The app must never be framed. The marketing pages must not be either —
+       GTM's noscript iframe is a CHILD frame, which frame-src governs. */
     "frame-ancestors 'none'",
-    "frame-src 'none'",
+    publicPage ? "frame-src https://www.googletagmanager.com" : "frame-src 'none'",
     'upgrade-insecure-requests'
   ].join('; ');
 }
@@ -56,6 +68,7 @@ const PUBLIC_PAGES = new Set([
   '/terms.html',
   '/robots.txt', '/sitemap.xml',
   '/site.css',
+  '/consent.js',
   '/favicon.ico'
 ]);
 
@@ -72,11 +85,15 @@ function isPublicPage(url: string): boolean {
      of image search and out of a rich result's thumbnail, so the screenshots
      have to be allowed alongside the pages that use them. */
   if (path.startsWith('/img/')) return true;
+  /* The IndexNow key file. Bing fetches it to prove we own the domain, so it
+     has to be reachable and must not be cloaked. */
+  if (/^\/[a-f0-9]{8,64}\.txt$/i.test(path)) return true;
   return PUBLIC_PAGES.has(path);
 }
 
 function applyHeaders(req: FastifyRequest, reply: FastifyReply): void {
-  reply.header('content-security-policy', csp());
+  const isPublic = isPublicPage(req.url);
+  reply.header('content-security-policy', csp(isPublic));
   reply.header('x-content-type-options', 'nosniff');
   reply.header('x-frame-options', 'DENY');
   reply.header('referrer-policy', 'strict-origin-when-cross-origin');
@@ -84,7 +101,7 @@ function applyHeaders(req: FastifyRequest, reply: FastifyReply): void {
   reply.header('cross-origin-resource-policy', 'same-origin');
   reply.header('permissions-policy', 'camera=(self), geolocation=(), microphone=()');
 
-  if (isPublicPage(req.url)) {
+  if (isPublic) {
     /* The marketing pages are meant to be found. `max-image-preview:large`
        lets Google use a full-size thumbnail in results, which is worth having
        and costs nothing. */

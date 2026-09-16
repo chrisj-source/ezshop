@@ -246,6 +246,15 @@ async function seedPeople(cid: number): Promise<Person[]> {
          status = 'active'`,
       [userId, cid, c.role, c.trade]);
 
+    /* The multi-role table as well. Seeding only `memberships.role` is what
+       left the demo shop with an empty `membership_roles`, and therefore a
+       pay-plan screen with nobody on it and a commission report with nothing in
+       it. The nightly reset runs this, so the demo has to be right here rather
+       than relying on the backfill migration. */
+    await mexec(
+      `INSERT IGNORE INTO membership_roles (user_id, company_id, role_key)
+       VALUES (?, ?, ?)`, [userId, cid, c.role]).catch(() => undefined);
+
     await texec(cid, `
       INSERT INTO staff (user_id, display_name, position_key, pay_basis, rate_cents, active)
       VALUES (?, ?, ?, 'hourly', ?, 1)
@@ -528,6 +537,9 @@ async function ensureTester(cid: number): Promise<string | null> {
      VALUES (?, ?, 'owner', 'active')
      ON DUPLICATE KEY UPDATE role = 'owner', status = 'active'`,
     [userId, cid]);
+  await mexec(
+    `INSERT IGNORE INTO membership_roles (user_id, company_id, role_key)
+     VALUES (?, ?, 'owner')`, [userId, cid]).catch(() => undefined);
 
   await texec(cid, `
     INSERT INTO staff (user_id, display_name, position_key, active)

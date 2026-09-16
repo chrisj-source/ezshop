@@ -77,6 +77,7 @@ export const CAP_DEFS: CapDef[] = [
   { key: 'payment_edit',  label: 'Edit or void a payment',     section: 'Money',    see: 'editPayments' },
 
   { key: 'sees_all',      label: 'Sees files on the board',    section: 'Files',    see: 'seesRepairOrders' },
+  { key: 'cust_contact',  label: "Customer address and contact details", section: 'Files', see: 'viewCustomerContact', change: 'editCustomerContact' },
   { key: 'notes',         label: 'Notes and history on a file', section: 'Files',   see: 'viewNotes',        change: 'addNotes' },
   { key: 'edit_ro',       label: 'Create and edit repair orders', section: 'Files', see: 'editRepairOrders' },
   { key: 'any_status',    label: 'Move a file to any status',  section: 'Files',    see: 'anyStatus' },
@@ -163,6 +164,18 @@ export interface Caps {
   viewMoneyReports: boolean;
   viewPayPlans: boolean;
   editPayPlans: boolean;
+  /**
+   * The customer's address, city, zip, phone and email, wherever they appear —
+   * the board, the file, a lead. Its own tick rather than riding on `sees_all`:
+   * a production manager sees every car in the shop and has no reason to know
+   * where its owner lives.
+   *
+   * Enforced by `scrubCustomer`, the same shape as `scrubMoney`. The lead's
+   * own creator is allowed past it in the leads route — they typed the address
+   * in, so hiding it back from them would make the screen lie.
+   */
+  viewCustomerContact: boolean;
+  editCustomerContact: boolean;
   /** Read the audit log. Its own tick so a manager can have it alone. */
   viewAudit: boolean;
   admin: boolean;
@@ -176,7 +189,7 @@ const CAPS_FIELDS: Array<keyof Caps> = [
   'uncloseRepairOrders', 'manageWholesaleClients', 'viewLeads', 'manageLeads', 'deleteLeads', 'viewPaperwork',
   'uploadPaperwork', 'deleteDocuments', 'acceptImports', 'editAssignments', 'manageParts',
   'manageSublet', 'viewReports', 'exportReports', 'viewMoneyReports', 'viewPayPlans',
-  'editPayPlans', 'viewAudit', 'admin', 'managePermissions'
+  'editPayPlans', 'viewCustomerContact', 'editCustomerContact', 'viewAudit', 'admin', 'managePermissions'
 ];
 
 export function emptyCaps(): Caps {
@@ -239,7 +252,8 @@ const LEGACY: Record<string, Array<[string, 0 | 1, 0 | 1]>> = {
     ['payments', 1, 1], ['payment_edit', 1, 0],
     ['sees_all', 1, 0], ['close_ro', 1, 1], ['unclose', 1, 1], ['wholesale_clients', 1, 1],
     ['leads', 1, 0], ['paperwork', 1, 1],
-    ['reports', 1, 1], ['money_reports', 1, 0], ['pay_plans', 1, 1], ['notes', 1, 1]],
+    ['reports', 1, 1], ['money_reports', 1, 0], ['pay_plans', 1, 1], ['notes', 1, 1],
+    ['cust_contact', 1, 0]],
   estimator: [['ro_totals', 1, 1], ['parts_money', 1, 1], ['labour_money', 1, 1], ['commission', 1, 0],
     ['payments', 1, 0],
     ['sees_all', 1, 0], ['edit_ro', 1, 1], ['any_status', 1, 1], ['total_loss', 1, 1], ['close_ro', 1, 0],
@@ -252,8 +266,13 @@ const LEGACY: Record<string, Array<[string, 0 | 1, 0 | 1]>> = {
   parts_manager: [['parts_money', 1, 1], ['sees_all', 1, 0], ['paperwork', 1, 0], ['parts', 1, 1],
     ['sublet', 1, 1], ['notes', 1, 1]],
   front_office: [['ro_totals', 1, 0], ['payments', 1, 1], ['sees_all', 1, 0], ['edit_ro', 1, 1], ['any_status', 1, 1],
-    ['close_ro', 1, 1], ['leads', 1, 1], ['del_lead', 1, 0], ['paperwork', 1, 1], ['notes', 1, 1]],
+    ['close_ro', 1, 1], ['leads', 1, 1], ['del_lead', 1, 0], ['paperwork', 1, 1], ['notes', 1, 1],
+    ['cust_contact', 1, 1]],
   salesperson: [['sees_all', 1, 0], ['leads', 1, 1], ['paperwork', 1, 0], ['notes', 1, 1]],
+  /* Moves vehicles. The board, the schedule, leads read-only, and the customer
+     details — which is the whole reason the role exists. No money capability
+     and no hours: absence is how that is said here. */
+  transporter: [['sees_all', 1, 0], ['leads', 1, 0], ['cust_contact', 1, 0], ['notes', 1, 1]],
   technician: [['sees_all', 1, 0], ['labour_money', 1, 0], ['notes', 1, 1]]
 };
 
@@ -386,6 +405,42 @@ export function scrubMoney<T extends Record<string, unknown>>(row: T, caps: Caps
     if (keepLabour && /^labor_hours$|^labour_hours$|hours$/i.test(k)) continue;
     if (keepParts && /^parts_/i.test(k)) continue;
     if (/_cents$|^amount|^deductible|commission|^rate$/i.test(k)) delete out[k];
+  }
+  return out as T;
+}
+
+/**
+ * Strip the customer's contact details before the row leaves the server.
+ *
+ * Same shape and the same reason as `scrubMoney`: the enforcement lives on the
+ * server, so a screen that forgets to hide a field, or somebody reading the
+ * network tab, still gets nothing. Hiding it in the browser only would mean the
+ * data was sent and then politely not drawn.
+ *
+ * What goes: address, city, state, zip, phone and email — on the customer, not
+ * on the shop or the insurer. An adjuster's phone number is not a customer's
+ * personal detail and a transporter has no use for it either, but it is
+ * governed by `paperwork` and the insurance block rather than by this.
+ *
+ * The NAME stays. A board row or a lead with no name is unusable, and a name on
+ * its own is not the thing being protected — where somebody lives is.
+ */
+export function scrubCustomer<T extends Record<string, unknown>>(row: T, caps: Caps): T {
+  if (caps.viewCustomerContact) return row;
+  const out = { ...row } as Record<string, unknown>;
+  for (const k of Object.keys(out)) {
+    /* Customer-scoped contact fields, in every spelling the queries use:
+       `address`/`customer_addr`/`cust_address`, `city`, `state`, `zip`,
+       `phone`/`phone2`/`customer_phone`, `email`/`customer_email`.
+       Deliberately anchored so `insurer_phone`, `adjuster_phone` and
+       `adjuster_email` are untouched. */
+    if (/^(customer_|cust_)?(address|addr|city|zip|postcode)$/i.test(k)) delete out[k];
+    /* `addr_state` and `customer_state`, never a bare `state`: on a lead that
+       is the status enum, and stripping it would blank every lead's state for
+       anyone without this capability. */
+    if (/^(addr_state|customer_state|cust_state)$/i.test(k)) delete out[k];
+    if (/^(customer_|cust_)?(phone|phone2|mobile)$/i.test(k)) delete out[k];
+    if (/^(customer_|cust_)?email$/i.test(k)) delete out[k];
   }
   return out as T;
 }

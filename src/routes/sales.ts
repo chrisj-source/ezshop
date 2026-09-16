@@ -65,12 +65,28 @@ export async function registerSales(app: FastifyInstance): Promise<void> {
       });
     }
 
+    /* The shop's write-up rules ride along here rather than costing a second
+       request on a phone in a parking lot. The screen mirrors them; the POST
+       enforces them. */
+    const ruleRows = await tq<Array<RowDataPacket & { setting_key: string; setting_value: string }>>(
+      cid, `SELECT setting_key, setting_value FROM shop_settings
+             WHERE setting_key IN ('sales_require_address', 'sales_require_drop',
+                                   'sales_onboard_red_hours')`
+    ).catch(() => []);
+    const rl: Record<string, string> = {};
+    for (const x of ruleRows) rl[x.setting_key] = x.setting_value;
+
     return {
       capacity: cap,
       days: out,
       // If nothing is open in the window, the rep drives it in themselves —
       // better than promising a slot the shop cannot take.
-      anyOpen: out.some(d => d.open > 0)
+      anyOpen: out.some(d => d.open > 0),
+      rules: {
+        address: rl.sales_require_address !== '0',
+        drop: rl.sales_require_drop !== '0',
+        onboardRedHours: Math.max(1, Number(rl.sales_onboard_red_hours ?? 12) || 12)
+      }
     };
   });
 
@@ -116,12 +132,55 @@ export async function registerSales(app: FastifyInstance): Promise<void> {
     const first = (fields.firstName ?? '').trim();
     const last = (fields.lastName ?? '').trim();
     const phone = (fields.phone ?? '').trim();
+    const address = (fields.address ?? '').trim();
+    const city = (fields.city ?? '').trim();
+    const addrState = (fields.addrState ?? '').trim();
+    const zip = (fields.zip ?? '').trim();
 
     if (!last && !first) return reply.code(400).send({ error: 'A name is required.' });
     if (!phone) return reply.code(400).send({ error: 'A phone number is required.' });
 
     const dropDay = (fields.dropDay ?? '').trim();
     const selfDeliver = fields.selfDeliver === '1';
+
+    /**
+     * The sales screen asks for more than the counter does, and the shop
+     * decides how much.
+     *
+     * Both of these are settings rather than constants: a shop that sells
+     * differently turns them off without a deploy. They are enforced here and
+     * not only in the browser — the screen is a phone in a parking lot and the
+     * request is the thing that has to be right.
+     *
+     * Deliberately NOT applied at check-in or on the board: a car at the door
+     * must never be blocked because nobody asked for a zip code, and a
+     * wholesale vehicle may have no retail customer at all.
+     */
+    const rules = await tq<Array<RowDataPacket & { setting_key: string; setting_value: string }>>(
+      cid, `SELECT setting_key, setting_value FROM shop_settings
+             WHERE setting_key IN ('sales_require_address', 'sales_require_drop')`
+    ).catch(() => []);
+    const rule: Record<string, string> = {};
+    for (const x of rules) rule[x.setting_key] = x.setting_value;
+
+    if (rule.sales_require_address !== '0' && (!address || !city || !zip)) {
+      return reply.code(400).send({
+        error: 'The address, city and ZIP are needed on a sales write-up. ' +
+               'The shop can switch that off under Settings.',
+        field: !address ? 'address' : !city ? 'city' : 'zip'
+      });
+    }
+
+    /* A drop, or an explicit "they are bringing it themselves". Silence is the
+       thing being refused — "I'll bring it sometime" is how a sold job becomes
+       a lost one. */
+    if (rule.sales_require_drop !== '0' && !dropDay && !selfDeliver) {
+      return reply.code(400).send({
+        error: 'Book a drop-off day, or mark that the customer is delivering it ' +
+               'themselves. The shop can switch that off under Settings.',
+        field: 'dropDay'
+      });
+    }
 
     const result = await withTenantTx(cid, async (c) => {
       const [seq] = await c.query<RowDataPacket[]>(
@@ -131,9 +190,11 @@ export async function registerSales(app: FastifyInstance): Promise<void> {
       const [l] = await c.query<ResultSetHeader>(`
         INSERT INTO leads
           (lead_number, source, state, first_name, last_name, phone, email,
+           address, city, addr_state, zip,
            vehicle_text, damage_note, owner_user_id, first_reply_at)
-        VALUES (?, 'sales app', 'contacted', ?, ?, ?, ?, ?, ?, ?, NOW())`,
+        VALUES (?, 'sales app', 'contacted', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
         [num, first || null, last || null, phone, (fields.email ?? '').trim() || null,
+         address || null, city || null, addrState || null, zip || null,
          (fields.vehicleText ?? '').trim() || null, (fields.note ?? '').trim() || null,
          ctx.user.id]);
 
