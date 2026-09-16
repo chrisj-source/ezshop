@@ -17,7 +17,7 @@ import { config } from './config';
 
 export type EventKey =
   | 'status.change' | 'parts.arrived' | 'parts.late' | 'parts.return'
-  | 'supp.decision' | 'age.red' | 'assign.file' | 'sms.reply';
+  | 'supp.decision' | 'age.red' | 'assign.file' | 'sms.reply' | 'mention' | 'lead.chase';
 
 export interface NotifyInput {
   companyId: number;

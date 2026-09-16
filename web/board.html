@@ -545,6 +545,22 @@
     .subgrid { grid-template-columns:1fr 1fr 96px; }
     .subgrid > div:nth-child(4), .subgrid > div:nth-child(5) { display:none; }
   }
+
+  /* The @ picker. Anchored to the note box rather than the page so it moves
+     with the drawer as it scrolls. */
+  .taglist {
+    position:absolute; left:0; right:0; top:100%; z-index:40;
+    max-height:220px; overflow:auto;
+    background:var(--surf); border:1px solid var(--line); border-radius:6px;
+    box-shadow:0 10px 30px rgba(0,0,0,.5); margin-top:2px;
+  }
+  .tagopt {
+    padding:7px 10px; cursor:pointer; font:400 12.5px var(--font);
+    display:flex; gap:8px; align-items:baseline;
+  }
+  .tagopt strong { font-weight:600; color:var(--acc2); }
+  .tagopt span { color:var(--dim); }
+  .tagopt.on, .tagopt:hover { background:var(--chip); }
 </style>
 </head>
 <body>
@@ -1317,6 +1333,16 @@
       'title="' + f.partsWaiting + ' gating part' + (f.partsWaiting === 1 ? '' : 's') + ' outstanding">Parts</span>';
     if (f.supplementsOpen) out += '<span class="flag" style="color:var(--move);border:1px solid var(--move)" ' +
       'title="Supplement open">Supp</span>';
+    /* Somebody was tagged here and has not written back. First in the row
+       after Hold, because it is a request to a person rather than a fact about
+       the car — and it is the only flag that clears by somebody doing
+       something. The count matters: five unanswered tags must not look like
+       one. */
+    if (f.mentions) out += '<span class="flag" style="color:var(--stopped);' +
+      'border:1px solid var(--stopped)" title="' + f.mentions + ' ' +
+      (f.mentions === 1 ? 'person was tagged here and has' : 'people were tagged here and have') +
+      ' not replied. A note on the file clears it.">&#9888; ' +
+      (f.mentions > 1 ? f.mentions : '') + '</span>';
     if (f.roType === 'wholesale') out += '<span class="flag" style="color:var(--dim);border:1px solid var(--line)">WS</span>';
     if (needsTech(f) && !f.totalLoss) out += '<span class="flag" style="color:var(--acc);border:1px solid var(--acc)" ' +
       'title="Nobody is on this file, or it has body or paint work with the other trade missing">Needs tech</span>';
@@ -1329,6 +1355,110 @@
         '" title="No status change in ' + days + ' days">' + days + 'd in status</span>';
     }
     return out;
+  }
+
+  /**
+   * The @ picker.
+   *
+   * Watches the word being typed at the caret. It only opens on an @ that
+   * starts a word, so an email address in the middle of a sentence never
+   * triggers it — the same rule the server uses when it decides what is a tag.
+   *
+   * Inserts the HANDLE rather than the full name, because a handle has no
+   * space in it: "@Ray Whitlock, can you" is ambiguous the moment a comma
+   * follows, and "@RayW, can you" is not.
+   */
+  function wireTagPicker(box, list, people) {
+    if (!box || !list || !people.length) return;
+
+    var open = false, items = [], active = 0, from = -1;
+
+    function close() {
+      open = false; list.hidden = true; list.innerHTML = '';
+      box.setAttribute('aria-expanded', 'false');
+    }
+
+    /* The @word immediately before the caret, or null. */
+    function token() {
+      var upto = box.value.slice(0, box.selectionStart);
+      var m = /(^|[\s(])@([A-Za-z0-9]*)$/.exec(upto);
+      if (!m) return null;
+      return { q: m[2], at: box.selectionStart - m[2].length - 1 };
+    }
+
+    /* Prefix match on the whole name, each word of it, and the handle — so
+       "chr" finds Chris Johnson, "joh" finds him too, and "chrisj" finds him
+       exactly. Ordered so the closest match is first and Enter is safe. */
+    function match(q) {
+      var s = q.toLowerCase();
+      if (!s) return people.slice(0, 8);
+      var score = function (p) {
+        var h = (p.handle || '').toLowerCase(), n = p.name.toLowerCase();
+        if (h === s) return 0;
+        if (h.indexOf(s) === 0) return 1;
+        if (n.indexOf(s) === 0) return 2;
+        if (n.split(/\s+/).some(function (w) { return w.indexOf(s) === 0; })) return 3;
+        return n.indexOf(s) >= 0 ? 4 : 99;
+      };
+      return people.map(function (p) { return { p: p, s: score(p) }; })
+        .filter(function (x) { return x.s < 99; })
+        .sort(function (a, b) { return a.s - b.s || a.p.name.localeCompare(b.p.name); })
+        .slice(0, 8).map(function (x) { return x.p; });
+    }
+
+    function paint() {
+      list.innerHTML = items.map(function (p, i) {
+        return '<div class="tagopt' + (i === active ? ' on' : '') + '" role="option" ' +
+          'aria-selected="' + (i === active ? 'true' : 'false') + '" data-i="' + i + '">' +
+          '<strong>@' + esc(p.handle || '') + '</strong> <span>' + esc(p.name) + '</span></div>';
+      }).join('');
+      list.hidden = false;
+      box.setAttribute('aria-expanded', 'true');
+    }
+
+    function refresh() {
+      var t = token();
+      if (!t) return close();
+      items = match(t.q);
+      if (!items.length) return close();
+      from = t.at; active = 0; open = true; paint();
+    }
+
+    function choose(i) {
+      var p = items[i];
+      if (!p) return;
+      var before = box.value.slice(0, from);
+      var after = box.value.slice(box.selectionStart);
+      var ins = '@' + (p.handle || p.name.replace(/\s+/g, '')) + ' ';
+      box.value = before + ins + after;
+      var caret = before.length + ins.length;
+      box.setSelectionRange(caret, caret);
+      close();
+      box.focus();
+    }
+
+    box.addEventListener('input', refresh);
+    box.addEventListener('click', refresh);
+
+    box.addEventListener('keydown', function (e) {
+      if (!open) return;
+      if (e.key === 'ArrowDown') { e.preventDefault(); active = (active + 1) % items.length; paint(); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); active = (active - 1 + items.length) % items.length; paint(); }
+      /* Enter picks only while the list is open; otherwise it is a newline,
+         which is what somebody writing a paragraph expects. */
+      else if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); choose(active); }
+      else if (e.key === 'Escape') { e.preventDefault(); close(); }
+    });
+
+    list.addEventListener('mousedown', function (e) {
+      /* mousedown, not click: the textarea must not lose focus first. */
+      var opt = e.target.closest('[data-i]');
+      if (!opt) return;
+      e.preventDefault();
+      choose(Number(opt.dataset.i));
+    });
+
+    box.addEventListener('blur', function () { setTimeout(close, 120); });
   }
 
   function laneLabel(key) {
@@ -2074,6 +2204,25 @@
 
     var canEdit = ME.caps.editRepairOrders && !r.voided_at;
 
+    /* Open tags, before anything else in the drawer: this is somebody waiting
+       on a person, and it outranks the facts about the car. */
+    if (d.mentions && d.mentions.length) {
+      L.push('<div class="sec">Waiting on a reply</div>');
+      L.push('<div class="fieldset">' + d.mentions.map(function (m) {
+        var who = (d.taggable || []).filter(function (p) { return p.id === m.user_id; })[0];
+        var hrs = Number(m.age_hours || 0);
+        var late = hrs >= 24;
+        return '<div class="drow"><div class="dk">' +
+          esc((m.by_user_name || 'Somebody')) + ' tagged</div>' +
+          '<div class="dv" style="color:' + (late ? 'var(--stopped)' : 'var(--text)') + '">' +
+          esc(who ? who.name : 'somebody') + ' \u00b7 ' +
+          (hrs < 1 ? 'just now' : hrs + ' hour' + (hrs === 1 ? '' : 's') + ' ago') +
+          (late ? ' \u2014 overdue' : '') + '</div></div>';
+      }).join('') + '</div>');
+      L.push('<div class="hint">A note from them on this file clears it. ' +
+        'Opening the file does not.</div>');
+    }
+
     L.push('<div class="sec">Customer</div>');
     /* The contact block is stripped server-side for anyone without the
        capability, so "is the field absent" is the honest test — not a
@@ -2417,7 +2566,15 @@
     R.push('<div class="stack"><select id="newStatus" style="width:100%">' +
       '<option value="">Select a new status…</option>' + statusOptions(null) + '</select>' +
       (d.canAddNotes
-        ? '<textarea id="newNote" aria-label="Note" placeholder="Add a note — call with the adjuster, customer, parts vendor…"></textarea>'
+        ? '<div style="position:relative">' +
+          '<textarea id="newNote" aria-label="Note" autocomplete="off" ' +
+          'aria-autocomplete="list" aria-controls="tagList" aria-expanded="false" ' +
+          'placeholder="Add a note \u2014 call with the adjuster, customer, parts vendor\u2026 ' +
+          'type @ to tag somebody"></textarea>' +
+          '<div id="tagList" class="taglist" role="listbox" aria-label="People you can tag" hidden></div>' +
+          '</div>' +
+          '<div class="hint" style="margin-top:4px">Type <strong>@</strong> to tag somebody. ' +
+          'They get it in their inbox and this file stays marked until they reply here.</div>'
         : '') +
       '<div class="row"><button class="btn btn-solid" id="saveStatus">' +
       (d.canAddNotes ? 'Add a note or pick a status' : 'Pick a status') + '</button>' +
@@ -2933,6 +3090,8 @@
           .then(reopen).catch(function (e) { say(e.message, 'err'); });
       });
     });
+
+    wireTagPicker($('newNote'), $('tagList'), d.taggable || []);
 
     var an = $('addNote');
     if (an) an.addEventListener('click', function () {

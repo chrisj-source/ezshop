@@ -112,7 +112,16 @@ export const config = {
     /** Failures in a row before the platform log says sending is broken. */
     alertAfter: Number(process.env.MAIL_ALERT_AFTER ?? 5),
     /** How long a password-reset link is good for. One use, either way. */
-    resetHours: Number(process.env.MAIL_RESET_HOURS ?? 1)
+    resetHours: Number(process.env.MAIL_RESET_HOURS ?? 1),
+    /**
+     * Where a demo request from the marketing site lands.
+     *
+     * Its own value, not `replyTo`: that one is where a REPLY to an automated
+     * message goes (admin@easyshopauto.com), and a sales enquiry belongs in the
+     * inbox the website actually advertises. They are different jobs and were
+     * briefly the same address by accident.
+     */
+    demoTo: process.env.DEMO_TO ?? 'Contact@stormrsolutions.com'
   },
 
   media: {

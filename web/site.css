@@ -354,6 +354,19 @@ footer .base a { color: inherit; }
 }
 .prose strong { color: var(--text); font-weight: 500; }
 
+/* The demo form's result line. Colours from the tokens so it reads on both
+   grounds without a second rule. */
+.formmsg { margin: 0; font-size: 13.5px; line-height: 1.55; }
+.formmsg:empty { display: none; }
+.formmsg.ok {
+  color: var(--text);
+  border-left: 2px solid var(--accent); padding-left: 10px;
+}
+.formmsg.err {
+  color: var(--text);
+  border-left: 2px solid #d07e6f; padding-left: 10px;
+}
+
 /* ----------------------------------------------------------- consent bar */
 
 /* A bottom sheet rather than a centre-screen modal: it does not block the page,

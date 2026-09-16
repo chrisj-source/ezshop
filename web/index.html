@@ -417,10 +417,16 @@
           <label class="field"><span>What you use now</span><input name="current" type="text"></label>
         </div>
         <label class="field"><span>Anything else worth knowing</span><textarea name="note" rows="4"></textarea></label>
+        <!-- Hidden from people, filled by bots. Cheaper than a captcha and it
+             costs a shop owner on a phone nothing. -->
+        <div style="position:absolute;left:-9999px" aria-hidden="true">
+          <label>Website<input name="website" type="text" tabindex="-1" autocomplete="off"></label>
+        </div>
         <div style="display:flex;flex-wrap:wrap;align-items:center;gap:12px">
           <button class="btn btn-primary btn-lg" type="submit">Send it</button>
-          <span class="muted" style="font-size:12px">Opens an email to us with what you've typed. Nothing is sent until you send it.</span>
+          <span class="muted" style="font-size:12px">We will get back to you the same day where we can.</span>
         </div>
+        <p class="formmsg" id="demoMsg" role="status" aria-live="polite"></p>
       </form>
     </div>
   </section>
@@ -471,22 +477,50 @@
 </footer>
 
 <script>
-/* The demo form opens the visitor's own mail client. No endpoint, no stored
-   personal data, nothing to breach — and it works with JavaScript disabled
-   too, because the address is a plain mailto link above it. */
-document.getElementById('demoForm').addEventListener('submit', function (e) {
-  e.preventDefault();
-  var f = new FormData(e.target);
-  var line = function (label, key) { return f.get(key) ? label + ': ' + f.get(key) + '\n' : ''; };
-  var body = line('Name', 'name') + line('Shop', 'shop') + line('Email', 'email') +
-             line('Phone', 'phone') + line('City and state', 'city') +
-             line('Currently using', 'current') +
-             (f.get('note') ? '\n' + f.get('note') + '\n' : '');
-  var subject = 'Easy Shop demo request' + (f.get('shop') ? ' \u2014 ' + f.get('shop') : '');
-  location.href = 'mailto:Contact@stormrsolutions.com?subject=' +
-    encodeURIComponent(subject) + '&body=' +
-    encodeURIComponent(body || "I'd like to see a demo.");
-});
+/* This used to open the visitor's mail client with a mailto link. It does
+   nothing at all on a machine with no mail client registered — silently — so
+   the form appeared dead and the request was lost. It posts to the server now
+   and the server sends it. The phone number and address stay on the page as
+   the route that needs no JavaScript at all. */
+(function () {
+  var form = document.getElementById('demoForm');
+  var msg = document.getElementById('demoMsg');
+  var btn = form.querySelector('button[type=submit]');
+  var label = btn.textContent;
+
+  form.addEventListener('submit', function (e) {
+    e.preventDefault();
+
+    var body = {};
+    new FormData(form).forEach(function (v, k) { body[k] = v; });
+
+    btn.disabled = true;
+    btn.textContent = 'Sending\u2026';
+    msg.textContent = '';
+    msg.className = 'formmsg';
+
+    fetch('/api/demo-request', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body)
+    }).then(function (r) {
+      return r.json().catch(function () { return {}; }).then(function (j) {
+        if (!r.ok) throw new Error(j.error || 'That did not go through.');
+        return j;
+      });
+    }).then(function () {
+      form.reset();
+      btn.textContent = label;
+      msg.textContent = 'Thanks \u2014 that reached us. We will be in touch.';
+      msg.className = 'formmsg ok';
+    }).catch(function (err) {
+      btn.disabled = false;
+      btn.textContent = label;
+      msg.textContent = err.message + ' You can also call 401-203-5823.';
+      msg.className = 'formmsg err';
+    });
+  });
+})();
 </script>
 </body>
 </html>

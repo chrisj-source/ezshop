@@ -1763,11 +1763,15 @@
         '<div class="dlbl" style="margin:0 0 4px">Lead follow-up</div>' +
         '<div class="sub" style="margin-bottom:10px;max-width:560px">A lead nobody has touched gets ' +
         'flagged for a chase. A lead with something on the calendar does not — being booked ' +
-        '<em>is</em> the follow-up. Marking one chased holds it for the same number of days again.</div>' +
+        '<em>is</em> the follow-up. Marking one chased holds it for the same stretch again.</div>' +
+        '<div class="sub" style="margin-bottom:10px;max-width:560px">One number, in hours: it ' +
+        'turns the row red <em>and</em> sends the message to the lead\'s owner and front office. ' +
+        '72 is three days. A lead written on the sales app uses its own shorter figure under ' +
+        '<strong>Sales write-ups</strong>.</div>' +
         '<div class="grid3">' +
-        '<div><div class="dk">Days of silence before flagging</div>' +
-        '<input class="dinput" type="number" min="1" max="90" id="lead_followup_days" value="' +
-        esc(s.lead_followup_days || '3') + '"></div>' +
+        '<div><div class="dk">Hours of silence before flagging</div>' +
+        '<input class="dinput" type="number" min="1" max="2160" id="lead_chase_hours" value="' +
+        esc(s.lead_chase_hours || '72') + '"></div>' +
         '<div><div class="dk">A booking this far ahead counts</div>' +
         '<input class="dinput" type="number" min="1" max="365" id="lead_appointment_window_days" value="' +
         esc(s.lead_appointment_window_days || '30') + '"></div>' +
@@ -1858,9 +1862,10 @@
       ['drop', 'pickup', 'return', 'estimate', 'appraiser'].forEach(function (k) {
         if ($('cap_' + k)) body['cap_' + k] = $('cap_' + k).value || '0';
       });
-      ['lead_followup_days', 'lead_appointment_window_days'].forEach(function (k) {
-        if ($(k)) body[k] = $(k).value || (k === 'lead_followup_days' ? '3' : '30');
-      });
+      if ($('lead_chase_hours')) body.lead_chase_hours = $('lead_chase_hours').value || '72';
+      if ($('lead_appointment_window_days')) {
+        body.lead_appointment_window_days = $('lead_appointment_window_days').value || '30';
+      }
       if ($('salesAddr')) body.sales_require_address = $('salesAddr').dataset.on === '1' ? '1' : '0';
       if ($('salesDrop')) body.sales_require_drop = $('salesDrop').dataset.on === '1' ? '1' : '0';
       if ($('sales_onboard_red_hours')) {

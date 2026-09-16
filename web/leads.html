@@ -270,10 +270,34 @@
    * it is booked (which is why it is not due), or it is being held. A lead
    * quietly inside its window says nothing.
    */
+  /* Hours under a day, days above it. "Due in 6 hours" is actionable; "due in
+     0 days" is the kind of thing people stop reading. */
+  function dueIn(l) {
+    var hrs = Number(l.followup_due_in_hours);
+    if (!isFinite(hrs)) return 'due';
+    if (hrs <= 0) return 'due now';
+    if (hrs < 24) return 'due in ' + Math.round(hrs) + ' hour' + (Math.round(hrs) === 1 ? '' : 's');
+    var d = Math.ceil(hrs / 24);
+    return 'due in ' + d + ' day' + (d === 1 ? '' : 's');
+  }
+
+  function quietFor(l) {
+    var hrs = Number(l.quiet_hours || 0);
+    if (hrs < 24) return Math.round(hrs) + ' hour' + (Math.round(hrs) === 1 ? '' : 's');
+    var d = Math.floor(hrs / 24);
+    return d + ' day' + (d === 1 ? '' : 's');
+  }
+
   function followTag(l) {
     if (l.needs_followup) {
-      return '<span class="ftag due" title="Quiet for ' + l.quiet_days +
-        ' days and nothing on the calendar">Follow up</span>';
+      /* The onboarding clock is its own thing and says so — "quiet" is the
+         wrong word for a lead that needs a call somebody promised. */
+      if (l.followup_reason === 'onboarding') {
+        return '<span class="ftag due" title="Written on the sales app ' +
+          quietFor(l) + ' ago with no onboarding call">Needs a call</span>';
+      }
+      return '<span class="ftag due" title="Quiet for ' + quietFor(l) +
+        ' and nothing on the calendar">Follow up</span>';
     }
     if (l.followup_reason === 'booked') {
       return '<span class="ftag booked" title="Booked ' + stamp(l.next_appointment) +
@@ -605,7 +629,7 @@
               ? 'held until ' + esc(String(lead.followup_snooze_until || ''))
               : (lead.state === 'won' || lead.state === 'lost')
                 ? 'settled'
-                : 'due in ' + lead.followup_due_in + ' day' + (lead.followup_due_in === 1 ? '' : 's')) +
+                : dueIn(lead)) +
         '</div></div>');
 
       if (lead.state !== 'won' && lead.state !== 'lost') {

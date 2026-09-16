@@ -119,6 +119,10 @@ export async function registerBoard(app: FastifyInstance): Promise<void> {
       idsByRo.set(a.ro_id, ids);
     }
 
+    /* Who is still waiting on an answer, per file. One query for the page
+       rather than one per row. */
+    const mentionCounts = await openMentionCounts(ctx.company!.id, rows.map(x => Number(x.id)));
+
     const now = Date.now();
     const files = rows.map(r => {
       const sinceMs = r.status_since ? now - new Date(r.status_since).getTime() : 0;
@@ -158,6 +162,10 @@ export async function registerBoard(app: FastifyInstance): Promise<void> {
         lane: r.total_loss_at ? 'total_loss' : r.lane_key,
         laneNumber: r.total_loss_at ? '00' : null,
         totalLoss: !!r.total_loss_at,
+        /* Somebody was tagged here and has not written back. The board draws a
+           red triangle; the count matters because a file with five unanswered
+           tags should not look like one with a single tag. */
+        mentions: mentionCounts.get(Number(r.id)) ?? 0,
         totalLossAt: r.total_loss_at,
         totalLossNote: r.total_loss_note,
         kind: r.kind,

@@ -458,6 +458,7 @@ CREATE TABLE leads (
   received_at     DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
   first_reply_at  DATETIME      NULL,
   last_followup_at DATETIME     NULL,
+  chase_notified_at DATETIME     NULL COMMENT 'automatic chase message sent; cleared when chased',
   followup_snooze_until DATE     NULL COMMENT 'set by hand to hold it longer',
   settled_at      DATETIME      NULL,
   deleted_at      DATETIME      NULL COMMENT 'soft delete, like a void',
@@ -1154,3 +1155,33 @@ CREATE TABLE shop_holiday_prefs (
   close_time   TIME         NULL,
   PRIMARY KEY (holiday_key)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+
+-- ---------------------------------------------------------------------------
+-- Mentions (migration 026). One row per tagged person per note, NOT per file:
+-- two people tagged is two rows, each clearing when that person writes, so
+-- "Ray answered, Denise has not" is expressible. Clearing means the tagged
+-- person LEFT A NOTE on the file — opening it is not an answer.
+-- ---------------------------------------------------------------------------
+CREATE TABLE ro_mentions (
+  id             BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  ro_id          BIGINT UNSIGNED NOT NULL,
+  note_id        BIGINT UNSIGNED NOT NULL COMMENT 'the note that did the tagging',
+  user_id        BIGINT UNSIGNED NOT NULL COMMENT 'who was tagged',
+  by_user_id     BIGINT UNSIGNED NULL,
+  by_user_name   VARCHAR(120)  NULL,
+  created_at     DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  cleared_at     DATETIME      NULL,
+  cleared_note_id BIGINT UNSIGNED NULL COMMENT 'which note answered it',
+  reminded_at    DATETIME      NULL COMMENT 'the 24-hour nudge, sent once',
+  KEY ix_mention_open (ro_id, cleared_at),
+  KEY ix_mention_person (user_id, cleared_at),
+  KEY ix_mention_due (cleared_at, reminded_at, created_at),
+  CONSTRAINT fk_mention_ro FOREIGN KEY (ro_id) REFERENCES repair_orders(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+INSERT INTO shop_settings (setting_key, setting_value) VALUES
+  ('lead_chase_hours', '72'),
+  ('mention_remind_hours', '24'),
+  ('mention_overdue_hours', '48')
+ON DUPLICATE KEY UPDATE setting_value = setting_value;

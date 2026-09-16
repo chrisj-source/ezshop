@@ -9,6 +9,7 @@ import { auditIn } from '../lib/audit';
 import { actorFrom } from './audit';
 import { refuseEmail } from '../lib/suppression';
 import { scrubCustomer } from '../permissions';
+import { clearMentionsFor, openMentions, raiseMentions, taggablePeople } from '../lib/mentions';
 
 /** Anything that stops this file being closed. Empty means it can be. */
 function closeBlockers(
@@ -111,6 +112,9 @@ export async function registerRepairOrders(app: FastifyInstance): Promise<void> 
       history: ctx.caps.viewNotes ? history : [],
       canReadNotes: ctx.caps.viewNotes,
       canAddNotes: ctx.caps.addNotes,
+      /* Who is still waiting on an answer here, and for how long. */
+      mentions: await openMentions(cid, id),
+      taggable: ctx.caps.addNotes ? await taggablePeople(cid) : [],
       promises,
       supplements: ctx.caps.money ? supplements : supplements.map(s => scrubMoney(s as Record<string, unknown>, ctx.caps)),
       sublets: sublets.map(s => scrubMoney(s as Record<string, unknown>, ctx.caps)),
@@ -254,11 +258,31 @@ export async function registerRepairOrders(app: FastifyInstance): Promise<void> 
     if (!ctx.caps.addNotes) return reply.code(403).send({ error: 'Not permitted to add notes' });
     if (!await mayTouch(ctx, id)) return reply.code(403).send({ error: 'Not your file' });
 
-    const r = await texec(ctx.company!.id,
+    const cid2 = ctx.company!.id;
+    const r = await texec(cid2,
       `INSERT INTO ro_notes (ro_id, kind, body, user_id, user_name) VALUES (?, 'note', ?, ?, ?)`,
       [id, body.trim(), ctx.user.id, ctx.user.name]
     );
-    return { ok: true, id: r.insertId };
+
+    /* Writing IS the answer. Their own open mentions on this file clear before
+       any new ones are raised, so replying to a tag and tagging somebody else
+       in the same note both work and do not cancel each other out. */
+    const cleared = await clearMentionsFor(cid2, id, ctx.user.id, r.insertId);
+
+    const roRow = await tqOne<RowDataPacket>(cid2,
+      'SELECT ro_number FROM repair_orders WHERE id = ?', [id]).catch(() => null);
+
+    const tagged = await raiseMentions({
+      companyId: cid2, roId: id, noteId: r.insertId, body: body.trim(),
+      byUserId: ctx.user.id, byUserName: ctx.user.name,
+      roNumber: roRow ? String(roRow.ro_number) : null
+    }).catch(() => []);
+
+    return {
+      ok: true, id: r.insertId,
+      tagged: tagged.map(t => t.name),
+      clearedMentions: cleared
+    };
   });
 
   app.post('/api/ro', async (req, reply) => {

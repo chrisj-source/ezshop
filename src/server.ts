@@ -36,8 +36,11 @@ import { registerPayroll } from './routes/payroll';
 import { registerCalendar } from './routes/gcal';
 import { registerMoney } from './routes/money';
 import { registerUnsubscribe } from './routes/unsubscribe';
+import { registerDemoRequests } from './routes/demo';
 import { purgeExpiredSessions } from './auth/session';
 import { startDemoReset } from './lib/demo';
+import { startMentionReminders } from './jobs/mentions';
+import { startLeadChase } from './jobs/leadchase';
 import { closeQueue, startWorker } from './queue';
 import { makeDerivatives } from './jobs/derivatives';
 import { prunePageCache } from './jobs/page-cache';
@@ -96,6 +99,8 @@ async function main(): Promise<void> {
      status email usually has no account. Authority is the signature on the
      link, not a session. */
   await registerUnsubscribe(app);
+  /* The marketing site's demo form. Public: the sender has no account. */
+  await registerDemoRequests(app);
 
   app.get('/api/health', async () => {
     const [r] = await master().query('SELECT 1 AS ok');
@@ -167,6 +172,13 @@ async function main(): Promise<void> {
      rather than scheduled to the second, so a box that was asleep or
      restarting at 2am still gets its reset. */
   startDemoReset(app.log);
+
+  /* Mentions that have gone unanswered. Hourly; the sweep decides what is due
+     from each shop's own setting. */
+  startMentionReminders();
+
+  /* Leads nobody has touched: 12 hours for a sales write-up, 48 for the rest. */
+  startLeadChase();
 
   /* Rendered PDF pages nobody has opened in a month. */
   const pageSweep = setInterval(() => {

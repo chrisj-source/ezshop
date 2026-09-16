@@ -137,6 +137,8 @@ export async function registerShopConfig(app: FastifyInstance): Promise<void> {
     sales_onboard_red_hours: { kind: 'int', min: 1, max: 168,
       label: 'Hours before an un-chased sales lead goes red' },
     sales_onboard_clock:     { kind: 'enum', values: ['actual', 'shop'], label: 'Onboarding clock' },
+    lead_chase_hours:        { kind: 'int', min: 1, max: 2160,
+      label: 'Hours of silence before flagging a lead' },
     lead_followup_days:      { kind: 'int', min: 1, max: 90, label: 'Days of silence before flagging' },
     lead_appointment_window_days: { kind: 'int', min: 1, max: 365,
       label: 'How far ahead a booking counts' },

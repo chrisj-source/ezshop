@@ -53,7 +53,13 @@ const LOST_REASONS = [
 ];
 
 interface FollowupCfg {
-  days: number;
+  /**
+   * Hours of silence before a lead is flagged AND messaged. One number, not
+   * two: it used to be `lead_followup_days` for the flag and
+   * `lead_chase_hours` for the message, which could disagree and gave nobody a
+   * way to say which was "the" setting.
+   */
+  chaseHours: number;
   windowDays: number;
   /**
    * A lead written on the sales screen is chased in HOURS, not days. Somebody
@@ -80,13 +86,17 @@ interface FollowupCfg {
 async function leadFollowupCfg(cid: number): Promise<FollowupCfg> {
   const rows = await tq<Array<RowDataPacket & { setting_key: string; setting_value: string }>>(
     cid, `SELECT setting_key, setting_value FROM shop_settings
-          WHERE setting_key IN ('lead_followup_days', 'lead_appointment_window_days',
+          WHERE setting_key IN ('lead_chase_hours', 'lead_followup_days',
+                                'lead_appointment_window_days',
                                 'sales_onboard_red_hours', 'sales_onboard_clock')`
   ).catch(() => []);
   const map: Record<string, string> = {};
   for (const r of rows) map[r.setting_key] = r.setting_value;
   return {
-    days: Math.max(1, Number(map.lead_followup_days ?? 3) || 3),
+    /* The old days setting is the fallback for a database that has not taken
+       migration 028 yet, so the flag never silently becomes "never". */
+    chaseHours: Math.max(1, Number(map.lead_chase_hours
+      ?? (Number(map.lead_followup_days ?? 3) || 3) * 24) || 72),
     windowDays: Math.max(1, Number(map.lead_appointment_window_days ?? 30) || 30),
     salesRedHours: Math.max(1, Number(map.sales_onboard_red_hours ?? 12) || 12),
     salesClock: map.sales_onboard_clock === 'shop' ? 'shop' : 'actual'
@@ -99,19 +109,25 @@ async function leadFollowupCfg(cid: number): Promise<FollowupCfg> {
  */
 function markFollowup(l: Record<string, unknown>, cfg: FollowupCfg, today: string): void {
   const settled = l.state === 'won' || l.state === 'lost';
-  const quiet = Number(l.quiet_days ?? 0);
+  /* Hours throughout now. `quiet_days` is still sent for the screen's wording
+     but no longer decides anything. */
+  const quiet = Number(l.quiet_hours ?? 0);
   const booked = !!l.next_appointment;
   /* A hold that runs out today is over. Compared as plain date strings so the
      server's own clock never enters into it. */
   const snoozed = !!l.followup_snooze_until &&
     String(l.followup_snooze_until).slice(0, 10) >= today;
 
-  l.needs_followup = !settled && !booked && !snoozed && quiet >= cfg.days;
-  l.followup_due_in = settled || booked ? null : Math.max(0, cfg.days - quiet);
+  l.needs_followup = !settled && !booked && !snoozed && quiet >= cfg.chaseHours;
+  l.followup_due_in_hours = settled || booked ? null : Math.max(0, cfg.chaseHours - quiet);
+  /* Days as well, rounded up, because "due in 2 days" reads better than "due
+     in 38 hours" on a list somebody scans. */
+  l.followup_due_in = l.followup_due_in_hours === null
+    ? null : Math.ceil(Number(l.followup_due_in_hours) / 24);
   l.followup_reason = settled ? null
     : booked ? 'booked'
     : snoozed ? 'held'
-    : quiet >= cfg.days ? 'quiet'
+    : quiet >= cfg.chaseHours ? 'quiet'
     : 'waiting';
 
   /**
@@ -208,6 +224,7 @@ export async function registerLeads(app: FastifyInstance): Promise<void> {
                 over in UTC. */
              ${daysBetweenSql('l.received_at', 'NOW()')} AS age_days,
              ${daysBetweenSql('COALESCE(l.last_followup_at, l.received_at)', 'NOW()')} AS quiet_days,
+             TIMESTAMPDIFF(HOUR, COALESCE(l.last_followup_at, l.received_at), NOW()) AS quiet_hours,
              (SELECT MIN(a.starts_at) FROM appointments a
                WHERE a.lead_id = l.id AND a.cancelled_at IS NULL
                  AND a.starts_at >= NOW()
@@ -300,7 +317,8 @@ export async function registerLeads(app: FastifyInstance): Promise<void> {
                 marking the lead chased. */
              TIMESTAMPDIFF(HOUR, l.received_at, NOW()) AS onboard_hours,
              (l.last_followup_at IS NOT NULL) AS onboard_done,
-             ${daysBetweenSql('COALESCE(l.last_followup_at, l.received_at)', 'NOW()')} AS quiet_days
+             ${daysBetweenSql('COALESCE(l.last_followup_at, l.received_at)', 'NOW()')} AS quiet_days,
+             TIMESTAMPDIFF(HOUR, COALESCE(l.last_followup_at, l.received_at), NOW()) AS quiet_hours
       FROM leads l
       LEFT JOIN repair_orders r ON r.id = l.ro_id WHERE l.id = ?`,
       [tzOffset(ctx.company!.timezone), tzOffset(ctx.company!.timezone),
@@ -357,6 +375,10 @@ export async function registerLeads(app: FastifyInstance): Promise<void> {
     await texec(cid, `
       UPDATE leads
       SET last_followup_at = NOW(),
+          /* The automatic chase message is per silence, not per lead: clearing
+             the stamp means the NEXT stretch of quiet earns a fresh one
+             instead of this lead never being reported again. */
+          chase_notified_at = NULL,
           /* Held from the shop's today, so a hold set at 9pm is not a day short. */
           followup_snooze_until = ${hold ? 'DATE_ADD(?, INTERVAL ? DAY)' : 'NULL'},
           first_reply_at = COALESCE(first_reply_at, NOW())
@@ -421,7 +443,8 @@ export async function registerLeads(app: FastifyInstance): Promise<void> {
       SET appointment_id = ?,
           state = IF(state IN ('new','contacted'), 'appraisal_booked', state),
           first_reply_at = COALESCE(first_reply_at, NOW()),
-          last_followup_at = NOW()
+          last_followup_at = NOW(),
+          chase_notified_at = NULL
       WHERE id = ?`, [res.insertId, id]);
 
     await texec(cid,
@@ -745,7 +768,11 @@ export async function registerLeads(app: FastifyInstance): Promise<void> {
     // Writing a note counts as making contact.
     await texec(cid,
       `UPDATE leads SET first_reply_at = COALESCE(first_reply_at, NOW()),
-         state = IF(state = 'new', 'contacted', state)
+         state = IF(state = 'new', 'contacted', state),
+         /* A note is contact. It resets the silence the same as marking it
+            chased does, or somebody who writes up a phone call still gets
+            told the lead has gone quiet. */
+         last_followup_at = NOW(), chase_notified_at = NULL
        WHERE id = ?`, [id]);
 
     return { ok: true };

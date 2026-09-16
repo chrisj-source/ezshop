@@ -185,6 +185,12 @@ export const EMAIL_EVENTS: Array<{
   key: string; label: string; fires: string;
   weight: 'rare' | 'some' | 'noisy'; defaultOn: boolean; scoped?: boolean;
 }> = [
+  { key: 'lead.chase', label: 'A lead of mine has gone quiet',
+    fires: 'nobody has contacted a lead inside the shop\'s window',
+    weight: 'some', defaultOn: true },
+  { key: 'mention', label: 'Somebody tags me in a note',
+    fires: 'your name is written in a note on a file',
+    weight: 'some', defaultOn: true },
   { key: 'assign.file', label: 'A car is assigned to me',
     fires: 'somebody puts your name on a file',
     weight: 'some', defaultOn: true },
