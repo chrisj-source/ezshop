@@ -210,12 +210,12 @@ export async function registerLeads(app: FastifyInstance): Promise<void> {
              TIMESTAMPDIFF(HOUR, l.received_at, COALESCE(l.first_reply_at, NOW())) AS hours_to_reply,
              TIMESTAMPDIFF(HOUR, l.received_at, NOW()) AS age_hours,
              /* The onboarding clock for a sales-app lead. Real elapsed hours,
-                not shop hours — a Friday evening sale needs the call on
-                Saturday. `onboard_done` is somebody having logged contact
-                since the lead was written; the sales route stamps
-                `first_reply_at` at creation, so that column cannot be the
-                signal, but `last_followup_at` is only ever set by a human
-                marking the lead chased. */
+                not shop hours: a Friday evening sale needs the call on
+                Saturday. onboard_done is somebody having logged contact since
+                the lead was written; the sales route stamps first_reply_at at
+                creation, so that column cannot be the signal, but
+                last_followup_at is only ever set by a human marking the lead
+                chased. */
              TIMESTAMPDIFF(HOUR, l.received_at, NOW()) AS onboard_hours,
              (l.last_followup_at IS NOT NULL) AS onboard_done,
              /* Calendar days in the shop's timezone. Elapsed hours called a lead
@@ -309,12 +309,12 @@ export async function registerLeads(app: FastifyInstance): Promise<void> {
              ${daysBetweenSql('l.received_at', 'NOW()')} AS age_days,
              TIMESTAMPDIFF(HOUR, l.received_at, NOW()) AS age_hours,
              /* The onboarding clock for a sales-app lead. Real elapsed hours,
-                not shop hours — a Friday evening sale needs the call on
-                Saturday. `onboard_done` is somebody having logged contact
-                since the lead was written; the sales route stamps
-                `first_reply_at` at creation, so that column cannot be the
-                signal, but `last_followup_at` is only ever set by a human
-                marking the lead chased. */
+                not shop hours: a Friday evening sale needs the call on
+                Saturday. onboard_done is somebody having logged contact since
+                the lead was written; the sales route stamps first_reply_at at
+                creation, so that column cannot be the signal, but
+                last_followup_at is only ever set by a human marking the lead
+                chased. */
              TIMESTAMPDIFF(HOUR, l.received_at, NOW()) AS onboard_hours,
              (l.last_followup_at IS NOT NULL) AS onboard_done,
              ${daysBetweenSql('COALESCE(l.last_followup_at, l.received_at)', 'NOW()')} AS quiet_days,

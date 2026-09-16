@@ -214,7 +214,7 @@ export async function registerBoard(app: FastifyInstance): Promise<void> {
         laborHours: Number(r.labor_hours),
         assigned: byRo.get(r.id) ?? {},
         assignedIds: idsByRo.get(r.id) ?? {}
-      }, ctx.caps);
+      }, ctx.caps), ctx.caps);
     });
 
     const statuses = await tq<RowDataPacket[]>(ctx.company!.id, `
