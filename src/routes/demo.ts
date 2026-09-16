@@ -57,16 +57,18 @@ export async function registerDemoRequests(app: FastifyInstance): Promise<void> 
       return reply.code(400).send({ error: 'That email address does not look right.', field: 'email' });
     }
 
-    const lines = [
-      name && `Name: ${name}`,
-      shop && `Shop: ${shop}`,
-      email && `Email: ${email}`,
-      phone && `Phone: ${phone}`,
-      clean(b.city, 120) && `City and state: ${clean(b.city, 120)}`,
-      clean(b.current, 160) && `Currently using: ${clean(b.current, 160)}`,
-      '',
-      clean(b.note, 4000) || '(no note)'
-    ].filter(v => v !== undefined && v !== false && v !== null) as string[];
+    const city = clean(b.city, 120);
+    const current = clean(b.current, 160);
+
+    const lines: string[] = [];
+    if (name) lines.push(`Name: ${name}`);
+    if (shop) lines.push(`Shop: ${shop}`);
+    if (email) lines.push(`Email: ${email}`);
+    if (phone) lines.push(`Phone: ${phone}`);
+    if (city) lines.push(`City and state: ${city}`);
+    if (current) lines.push(`Currently using: ${current}`);
+    lines.push('');
+    lines.push(clean(b.note, 4000) || '(no note)');
 
     const sent = await sendMail({
       /* The address the site advertises, not the automated-mail reply box. */

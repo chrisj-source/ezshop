@@ -179,12 +179,14 @@ export async function registerScheduler(app: FastifyInstance): Promise<void> {
      * instead. The override is recorded on the appointment.
      */
     const cal = await shopCalendar(cid, ctx.company!.timezone);
-    const why = closedReason(cal, when);
+    /* `when` is the string that goes into SQL; the calendar works in instants. */
+    const whenAt = new Date(String(when).replace(' ', 'T'));
+    const why = isNaN(whenAt.getTime()) ? null : closedReason(cal, whenAt);
     let hoursNote: string | null = null;
 
     if (why) {
       if (!b.override) {
-        const opens = nextOpen(cal, when);
+        const opens = nextOpen(cal, whenAt);
         return reply.code(409).send({
           error: `That time is outside shop hours — ${why}.`,
           outsideHours: true,

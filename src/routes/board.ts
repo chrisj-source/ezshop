@@ -3,6 +3,7 @@ import { RowDataPacket } from 'mysql2/promise';
 import { tq } from '../db/tenant';
 import { requireCompany, requireFeature } from '../middleware/context';
 import { scrubCustomer, scrubMoney } from '../permissions';
+import { openMentionCounts } from '../lib/mentions';
 
 interface BoardRow extends RowDataPacket {
   id: number; ro_number: string; status_slot: string | null; status_since: Date | null;

@@ -535,6 +535,8 @@ export async function registerLeads(app: FastifyInstance): Promise<void> {
 
     const b = req.body as {
       firstName?: string; lastName?: string; phone?: string; email?: string;
+      /* addrState, not state: on a lead, state is the status enum. */
+      address?: string; city?: string; addrState?: string; zip?: string;
       vehicleText?: string; damageNote?: string; source?: string; payer?: string;
       ownerUserId?: number | null; receivedAt?: string;
     };
