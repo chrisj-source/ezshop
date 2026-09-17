@@ -606,7 +606,8 @@
   <select id="fStatus"></select>
   <select id="fGroup"><option value="">All stages</option></select>
   <select id="fTech"><option value="">Everyone</option></select>
-  <label class="row" style="font:400 11.5px var(--font);color:var(--muted);gap:5px">
+  <label class="row" style="font:400 11.5px var(--font);color:var(--muted);gap:5px"
+    title="Vehicle Ready and past — including cars already picked up, which are off the board otherwise">
     <input type="checkbox" id="fDone"> Complete
   </label>
   <label class="row" style="font:400 11.5px var(--font);color:var(--muted);gap:5px">
@@ -1099,6 +1100,24 @@
     }).map(function (s) { return s.slot_id; });
   }
 
+  /** The car has physically gone: the Picked Up slot and anything after it, less
+     the close itself, which is already off the board.
+
+     Payment Collected is deliberately NOT here. Money is often taken at the
+     counter with the car still in the bay, so hiding that status would take a
+     car still standing in the shop off the board — the opposite of the point. */
+  function goneSlots() {
+    var up = STATUSES.filter(function (s) { return /picked\s*up/i.test(s.label || ''); })[0];
+    /* A shop that renamed it: fall back to the delivered band, which is the same
+       intent one step wider, rather than hiding nothing at all. */
+    if (!up) return deliveredSlots();
+    var from = boardPos(up);
+    var closing = closingSlots();
+    return STATUSES.filter(function (s) {
+      return boardPos(s) >= from && closing.indexOf(s.slot_id) < 0;
+    }).map(function (s) { return s.slot_id; });
+  }
+
   function fillStatusFilter(groupId) {
     var s = $('fStatus');
     s.innerHTML = '<option value="">All statuses (' + STATUSES.length + ')</option>';
@@ -1185,11 +1204,20 @@
     var asked = $('fClosed').checked || (st && past.indexOf(st) >= 0);
     var hide = asked ? null : past;
 
+    /* A car that has been picked up is gone. The file is still open work — the
+       paperwork tail is real — but it is off the board and out of the count
+       until Complete is ticked, which is the box that means "show me the
+       finished ones". Naming one of those statuses in the filter is asking for
+       them just as plainly. */
+    var gone = goneSlots();
+    var wantGone = $('fDone').checked || (st && gone.indexOf(st) >= 0);
+
     var out = FILES.filter(function (f) {
       if (g && f.group !== g) return false;
       if (st && f.statusSlot !== st) return false;
       if (done && done.indexOf(f.statusSlot) < 0) return false;
       if (hide && hide.indexOf(f.statusSlot) >= 0) return false;
+      if (!wantGone && gone.indexOf(f.statusSlot) >= 0) return false;
       /* A closed file, however it got here. The server filters these out, but an
          older build sends them and the board should not show them regardless. */
       if (!asked && f.closeDate) return false;
@@ -1945,12 +1973,14 @@
     if ($('fDone').checked) bits.push('complete');
     if ($('fClosed').checked) bits.push('closed files');
     /* Say what the sheet left off, so nobody reads it as the whole picture.
-       Delivered cars are off by default now, and a tech's sheet drops Vehicle
-       Ready as well. */
+       Picked-up cars are off unless Complete is ticked, and a tech's sheet drops
+       Vehicle Ready as well. */
     if (!$('fClosed').checked && !st.value) {
       bits.push(PRINTING && t.value && t.value !== 'none'
         ? 'finished cars left off'
-        : 'closed-out files left off');
+        : $('fDone').checked
+          ? 'closed-out files left off'
+          : 'picked-up and closed-out files left off');
     }
     var q = $('fSearch').value.trim();
     if (q) bits.push('matching “' + q + '”');
