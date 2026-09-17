@@ -86,3 +86,25 @@ export function daysBetweenSql(from: string, to: string): string {
     `DATEDIFF(DATE(CONVERT_TZ(${to}, '+00:00', ?)), DATE(CONVERT_TZ(${from}, '+00:00', ?))), ` +
     `DATEDIFF(DATE(${to}), DATE(${from})))`;
 }
+
+/**
+ * A typed date and time normalised to `YYYY-MM-DD HH:MM:SS`, or null.
+ *
+ * An appointment is a clock face on a day, not an instant: 9am at the counter
+ * is 9am whatever zone the server or the browser happens to run in. So the
+ * booking string is handed to MySQL as a string — passing a `Date` makes the
+ * driver convert it to UTC on the way in and back on the way out, which is what
+ * moved saved times.
+ *
+ * A bare date means 9am, which is the hour a shop means when it says "Tuesday".
+ *
+ * Lived in both `routes/scheduler.ts` and `routes/leads.ts` as identical
+ * copies. Two of these is how one of them ends up with a check the other does
+ * not have.
+ */
+export function wallClock(v: string): string | null {
+  const s = String(v).trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s + ' 09:00:00';
+  const m = s.match(/^(\d{4}-\d{2}-\d{2})[T ](\d{2}):(\d{2})/);
+  return m ? `${m[1]} ${m[2]}:${m[3]}:00` : null;
+}

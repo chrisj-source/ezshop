@@ -359,6 +359,7 @@
 <div class="kpis" id="kpis"></div>
 
 <main>
+  <div class="msg err" id="emptyNote" hidden style="margin:0 0 12px"></div>
   <div id="body"></div>
 </main>
 
@@ -500,12 +501,30 @@
       }).join('');
 
     return load().then(function () {
-      /* Coming back from a repair order opened off a parts line: the same file is
-         still expanded, where the desk left it. */
+      /* Two ways in, one parameter: coming back from a repair order opened off a
+         parts line, and "Open parts for this RO" from the file drawer. Either
+         way the file opens directly rather than dropping the desk on the whole
+         list to find it again.
+
+         The query is cleared straight away, so closing the modal leaves you on
+         the plain parts screen. */
       var back = new URLSearchParams(location.search).get('open');
       if (back) {
-        openFile(Number(back));
         history.replaceState(null, '', '/parts.html');
+        var want = Number(back);
+        var known = byRo().some(function (x) { return x.roId === want; });
+        if (known) {
+          openFile(want);
+        } else {
+          /* The list is files with parts or needing them. A file with no lines
+             at all is not on it, and silently landing on the list looks like
+             the link is broken. Say which file, and that it has nothing on it. */
+          var msg = 'That file has no parts on it yet — nothing to open. ' +
+            'Add a part from the file, or use Add part here once it has lines.';
+          if (Shell && Shell.announce) Shell.announce(msg);
+          var bar = $('emptyNote');
+          if (bar) { bar.textContent = msg; bar.hidden = false; }
+        }
       }
     });
   }).catch(function (e) { if (e.message !== 'signed out') console.error(e); });

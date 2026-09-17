@@ -188,6 +188,30 @@
   var ME = null, META = null, DATA = null, FROM = null, TYPE = null, STAFF = [];
   var CAL_MONTH = null, PICKED = null, BOOK_KIND = null, OPENINGS = null;
 
+  /* What the person has typed into the booking sheet.
+
+     The sheet redraws itself whole on every type click, month arrow and day
+     click, so the fields are destroyed and rebuilt each time. They used to live
+     only in the DOM, which meant picking the type after typing the name threw
+     the name away — and picking it first threw it away when you changed your
+     mind. The values are held here and put back after each redraw. */
+  var BOOK_DRAFT = {};
+  var DRAFT_FIELDS = ['bName', 'bPhone', 'bVehicle', 'bTime', 'bWho', 'bNote'];
+
+  function stashDraft() {
+    DRAFT_FIELDS.forEach(function (id) {
+      var el = $(id);
+      if (el) BOOK_DRAFT[id] = el.value;
+    });
+  }
+
+  function restoreDraft() {
+    DRAFT_FIELDS.forEach(function (id) {
+      var el = $(id);
+      if (el && BOOK_DRAFT[id]) el.value = BOOK_DRAFT[id];
+    });
+  }
+
   var TONE = {
     drop: 'var(--move)', pickup: 'var(--done)', return: 'var(--blocked)',
     estimate: 'var(--acc)', appraiser: 'var(--stopped)',
@@ -211,6 +235,39 @@
   function timeOf(v) {
     return wall(v).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
   }
+  /* An instant the server sent back (the next time the shop is open) in words.
+     Rendered in the browser's zone, which for anyone standing in the shop is
+     the shop's. */
+  function whenLabel(isoStr) {
+    try {
+      return new Date(isoStr).toLocaleString('en-US', {
+        weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'
+      });
+    } catch (e) { return ''; }
+  }
+
+  /* Any of the three shop-level refusals, as a box with the override in it:
+     outside hours, the day is full, or the person is off or already booked.
+     Shared by booking and moving, because they are the same warning about the
+     same rules. Returns null when the error is not one of them. */
+  function guardBox(message, data, onOverride) {
+    if (!data.outsideHours && !data.full && !data.conflict) return null;
+    if (!data.canOverride) return null;
+
+    var h = '<div class="clashbox"><div style="color:var(--acc)">' + esc(message) + '</div>';
+    var items = (data.clashes || []).map(function (c) { return esc(c.text); });
+    if (data.nextOpen) items.push('Next open: ' + esc(whenLabel(data.nextOpen)));
+    if (items.length) {
+      h += '<ul>' + items.map(function (t) { return '<li>' + t + '</li>'; }).join('') + '</ul>';
+    }
+    h += '<div class="row" style="margin-top:10px">' +
+      '<button class="btn btn-solid" id="ovr">Do it anyway</button>' +
+      '<span class="sub" style="flex:1;min-width:120px">The override is recorded on the ' +
+      'appointment.</span></div></div>';
+
+    return { html: h, wire: function () { $('ovr').addEventListener('click', onOverride); } };
+  }
+
   function kindLabel(k) {
     return (META.kinds.filter(function (x) { return x.key === k; })[0] || {}).label || k;
   }
@@ -402,6 +459,7 @@
   function openBooking(day) {
     PICKED = day || iso(new Date());
     BOOK_KIND = null;
+    BOOK_DRAFT = {};
     CAL_MONTH = new Date(PICKED + 'T12:00');
     CAL_MONTH.setDate(1);
 
@@ -415,6 +473,7 @@
   }
 
   function renderBooking() {
+    stashDraft();
     var h = [];
 
     h.push('<div class="sec">What kind</div><div class="row">' +
@@ -452,6 +511,7 @@
 
     $('dBody').innerHTML = h.join('');
     wireBooking();
+    restoreDraft();
   }
 
   function calendar() {
@@ -524,6 +584,30 @@
     save.addEventListener('click', function () { submit(false); });
   }
 
+  /* Moving is the same act as booking, so it takes the same refusal and the
+     same override rather than a bare error line. */
+  function move(id, override) {
+    var msg = $('aMsg');
+    api('/api/schedule/' + id, {
+      method: 'PATCH',
+      body: JSON.stringify({
+        startsAt: $('mDate').value + 'T' + ($('mTime').value || '09:00'),
+        override: override
+      })
+    }).then(function () { closeDrawer(); return load(); })
+      .catch(function (e) {
+        var d = e.data || {};
+        msg.className = 'msg err';
+        var box = guardBox(e.message, d, function () { move(id, true); });
+        if (box) {
+          msg.innerHTML = box.html;
+          box.wire();
+        } else {
+          msg.textContent = e.message;
+        }
+      });
+  }
+
   function syncCapLine() {
     var el = $('capLine');
     if (!el) return;
@@ -589,22 +673,12 @@
       msg.className = 'msg err';
       var d = e.data || {};
 
-      // Two different warnings, both overridable rather than refusals: the day
-      // is full, or the person is off or already booked at that hour.
-      if (d.conflict) {
-        msg.innerHTML = '<div class="clashbox"><div style="color:var(--acc)">' +
-          esc(e.message) + '</div><ul>' +
-          (d.clashes || []).map(function (c) { return '<li>' + esc(c.text) + '</li>'; }).join('') +
-          '</ul><div class="row" style="margin-top:10px">' +
-          '<button class="btn btn-solid" id="ovr">Book it anyway</button>' +
-          '<span class="sub" style="flex:1;min-width:120px">The override is recorded on the ' +
-          'appointment.</span></div></div>';
-        $('ovr').addEventListener('click', function () { submit(true); });
-      } else if (/full/i.test(e.message) && ME.caps.admin) {
-        msg.innerHTML = esc(e.message) +
-          ' <button class="btn btn-ghost" id="ovr" style="padding:4px 9px;font-size:10.5px;margin-left:6px">' +
-          'Overbook anyway</button>';
-        $('ovr').addEventListener('click', function () { submit(true); });
+      // Hours, the day's limit and the person's own day: all three warn and can
+      // be overridden rather than refusing outright.
+      var box = guardBox(e.message, d, function () { submit(true); });
+      if (box) {
+        msg.innerHTML = box.html;
+        box.wire();
       } else {
         msg.textContent = e.message;
       }
@@ -652,13 +726,7 @@
 
     $('dBody').innerHTML = h.join('');
 
-    $('mSave').addEventListener('click', function () {
-      api('/api/schedule/' + id, {
-        method: 'PATCH',
-        body: JSON.stringify({ startsAt: $('mDate').value + 'T' + ($('mTime').value || '09:00') })
-      }).then(function () { closeDrawer(); return load(); })
-        .catch(function (e) { $('aMsg').textContent = e.message; $('aMsg').className = 'msg err'; });
-    });
+    $('mSave').addEventListener('click', function () { move(id, false); });
 
     $('cancelAppt').addEventListener('click', function () {
       if (!confirm('Cancel this appointment?')) return;

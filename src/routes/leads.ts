@@ -4,12 +4,15 @@ import { mq } from '../db/master';
 import { tq, texec, tqOne, withTenantTx } from '../db/tenant';
 import { requireCompany, requireFeature } from '../middleware/context';
 import { notify } from '../notify';
-import { daysBetweenSql, shopToday, tzOffset } from '../lib/shoptime';
+import { daysBetweenSql, shopToday, tzOffset, wallClock } from '../lib/shoptime';
 import { audit } from '../lib/audit';
 import { actorFrom } from './audit';
 import { isSuppressed, noteSuppressionHit, refuseEmail } from '../lib/suppression';
 import { scrubCustomer } from '../permissions';
-import { shopCalendar, workingHoursBetween, Calendar } from '../lib/shophours';
+import {
+  workingHoursBetween, shopCalendar, Calendar
+} from '../lib/shophours';
+import { scheduleGuards, Kind } from './scheduler';
 
 /**
  * Re-measure the onboarding clock in WORKING hours.
@@ -410,14 +413,29 @@ export async function registerLeads(app: FastifyInstance): Promise<void> {
     const id = Number((req.params as { id: string }).id);
     const b = req.body as {
       startsAt: string; kind?: string; durationMin?: number;
-      note?: string; assignedUserId?: number | null;
+      note?: string; assignedUserId?: number | null; override?: boolean;
     };
-    if (!b.startsAt || !wallClock(b.startsAt)) {
+    const when = b.startsAt ? wallClock(b.startsAt) : null;
+    if (!when) {
       return reply.code(400).send({ error: 'Pick a date and time.' });
     }
 
-    const kind = ['estimate', 'drop', 'appraiser', 'pickup', 'return'].includes(b.kind ?? '')
-      ? b.kind! : 'estimate';
+    const kind = (['estimate', 'drop', 'appraiser', 'pickup', 'return'].includes(b.kind ?? '')
+      ? b.kind! : 'estimate') as Kind;
+
+    /* The same shop-level rules the scheduler applies: hours, that kind's daily
+       limit, and the person's own day. Booking from the lead was a second door
+       into `appointments` that skipped all of it, so a lead could be booked for
+       a Sunday, onto a full day, or onto somebody's time off — none of which
+       the counter could have done. */
+    const guard = await scheduleGuards({
+      cid, tz: ctx.company!.timezone, kind, when,
+      durationMin: b.durationMin ?? 30,
+      assignedUserId: b.assignedUserId ?? null,
+      ignoreApptId: null, isOwner: ctx.role === 'owner', override: !!b.override
+    });
+    if ('refuse' in guard) return reply.code(409).send(guard.refuse);
+    const hoursNote = guard.note;
 
     const lead = await tqOne<RowDataPacket & {
       first_name: string | null; last_name: string | null;
@@ -431,10 +449,10 @@ export async function registerLeads(app: FastifyInstance): Promise<void> {
     const res = await texec(cid, `
       INSERT INTO appointments
         (kind, starts_at, duration_min, lead_id, customer_name, vehicle_text, phone,
-         note, assigned_user_id, created_by)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [kind, wallClock(b.startsAt), b.durationMin ?? 30, id, who, lead.vehicle_text, lead.phone,
-       b.note ?? null, b.assignedUserId ?? null, ctx.user.id]);
+         note, assigned_user_id, created_by, override_note)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [kind, when, b.durationMin ?? 30, id, who, lead.vehicle_text, lead.phone,
+       b.note ?? null, b.assignedUserId ?? null, ctx.user.id, hoursNote]);
 
     /* The lead points at its appointment too, so the scheduler and the lead
        agree without a join in either direction. */
@@ -450,9 +468,10 @@ export async function registerLeads(app: FastifyInstance): Promise<void> {
     await texec(cid,
       `INSERT INTO lead_events (lead_id, kind, body, user_id, user_name)
        VALUES (?, 'appointment', ?, ?, ?)`,
-      [id, `Booked ${kind} for ${b.startsAt.replace('T', ' ')}.`, ctx.user.id, ctx.user.name]);
+      [id, `Booked ${kind} for ${when.slice(0, 16)}.` + (hoursNote ? ' ' + hoursNote : ''),
+       ctx.user.id, ctx.user.name]);
 
-    return { ok: true, appointmentId: res.insertId };
+    return { ok: true, appointmentId: res.insertId, overrode: hoursNote };
   });
 
   /**
@@ -1124,13 +1143,7 @@ async function openFileForLink(
 }
 
 /*
- * Same rule the scheduler follows: an appointment is a clock face, so the
- * booking goes to MySQL as a `YYYY-MM-DD HH:MM:SS` string and is never turned
- * into a Date on the way in — that conversion is what shifted saved times.
+ * `wallClock()` is in `lib/shoptime.ts`, shared with the scheduler. It used to
+ * be a second identical copy here, which is how this path ended up without the
+ * hours check the scheduler had.
  */
-function wallClock(v: string): string | null {
-  const s = String(v).trim();
-  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s + ' 09:00:00';
-  const m = s.match(/^(\d{4}-\d{2}-\d{2})[T ](\d{2}):(\d{2})/);
-  return m ? `${m[1]} ${m[2]}:${m[3]}:00` : null;
-}

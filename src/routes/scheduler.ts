@@ -3,10 +3,11 @@ import { RowDataPacket, ResultSetHeader } from 'mysql2/promise';
 import { tq, texec, tqOne, withTenantTx } from '../db/tenant';
 import { requireCompany, requireFeature } from '../middleware/context';
 import { pushAppointment } from './gcal';
-import { closedReason, nextOpen, shopCalendar } from '../lib/shophours';
+import { atShopWallClock, closedReason, nextOpen, shopCalendar } from '../lib/shophours';
+import { wallClock } from '../lib/shoptime';
 
 const KINDS = ['drop', 'pickup', 'return', 'estimate', 'appraiser', 'sublet'] as const;
-type Kind = typeof KINDS[number];
+export type Kind = typeof KINDS[number];
 
 const KIND_LABEL: Record<Kind, string> = {
   drop: 'Drop off', pickup: 'Pick up', return: 'Return',
@@ -167,87 +168,17 @@ export async function registerScheduler(app: FastifyInstance): Promise<void> {
     if (!when) return reply.code(400).send({ error: 'That date is not valid.' });
 
     const day = when.slice(0, 10);
-
-    const capRow = await tqOne<RowDataPacket & { setting_value: string }>(cid,
-      'SELECT setting_value FROM shop_settings WHERE setting_key = ?', ['cap_' + b.kind]);
-    const cap = Number(capRow?.setting_value ?? 0);
-
-    /**
-     * The TIME, not just the day.
-     *
-     * The day limit below has always been checked; the hour never was, so a
-     * drop could be booked for 9pm on a Tuesday or for Christmas Day and the
-     * scheduler would take it happily. An appointment at 9am has to mean 9am,
-     * and 9am on a day the shop is shut is not a time.
-     *
-     * Warn-and-override rather than refuse outright, like the person-conflict
-     * check below: shops genuinely do take a car in early as a favour, and a
-     * scheduler that makes that impossible gets worked around with a note
-     * instead. The override is recorded on the appointment.
-     */
-    const cal = await shopCalendar(cid, ctx.company!.timezone);
-    /* `when` is the string that goes into SQL; the calendar works in instants. */
-    const whenAt = new Date(String(when).replace(' ', 'T'));
-    const why = isNaN(whenAt.getTime()) ? null : closedReason(cal, whenAt);
-    let hoursNote: string | null = null;
-
-    if (why) {
-      if (!b.override) {
-        const opens = nextOpen(cal, whenAt);
-        return reply.code(409).send({
-          error: `That time is outside shop hours — ${why}.`,
-          outsideHours: true,
-          canOverride: true,
-          nextOpen: opens ? opens.toISOString() : null
-        });
-      }
-      hoursNote = `Booked outside shop hours (${why}).`;
-    }
-
-    if (cap > 0) {
-      const [cnt] = await tq<RowDataPacket[]>(cid, `
-        SELECT COUNT(*) AS n FROM appointments
-        WHERE cancelled_at IS NULL AND kind = ? AND DATE(starts_at) = ?`, [b.kind, day]);
-      const used = Number(cnt.n ?? 0);
-
-      if (used >= cap) {
-        const isOwner = ctx.role === 'owner';
-        if (!isOwner || !b.override) {
-          return reply.code(409).send({
-            error: `${day} is full for ${KIND_LABEL[b.kind].toLowerCase()}s — ${used} of ${cap} booked.`,
-            full: true, used, cap,
-            canOverride: isOwner
-          });
-        }
-      }
-    }
-
-    // Booking onto a person who is off, or on top of their own booking, warns
-    // and can be overridden — it never refuses. What was overridden is written
-    // onto the appointment so the day can be explained later.
     const assignedUserId = b.assignedUserId ?? null;
-    let overrideNote: string | null = null;
 
-    if (assignedUserId) {
-      const clashes = await conflictsFor(cid, assignedUserId, when, b.durationMin ?? 30, null);
-      if (clashes.length) {
-        if (!b.override) {
-          return reply.code(409).send({
-            error: clashes.map(c => c.text).join(' '),
-            conflict: true, clashes, canOverride: true
-          });
-        }
-        overrideNote = clashes.map(c => c.text).join(' ').slice(0, 255);
-      }
-    }
-
-    /* Both overrides land on the same note, so the day can be explained later
-       without two columns saying different halves of it. */
-    if (hoursNote) {
-      overrideNote = (overrideNote ? overrideNote + ' ' : '') + hoursNote;
-      overrideNote = overrideNote.slice(0, 255);
-    }
-
+    /* Shop hours, the day's limit for this kind, and the person's own day — all
+       three, in one place, shared with the move path. See `scheduleGuards`. */
+    const guard = await scheduleGuards({
+      cid, tz: ctx.company!.timezone, kind: b.kind, when,
+      durationMin: b.durationMin ?? 30, assignedUserId,
+      ignoreApptId: null, isOwner: ctx.role === 'owner', override: !!b.override
+    });
+    if ('refuse' in guard) return reply.code(409).send(guard.refuse);
+    const overrideNote = guard.note;
     const result = await withTenantTx(cid, async (c) => {
       const [r] = await c.query<ResultSetHeader>(`
         INSERT INTO appointments
@@ -322,25 +253,75 @@ export async function registerScheduler(app: FastifyInstance): Promise<void> {
       startsAt: 'starts_at', durationMin: 'duration_min', customerName: 'customer_name',
       vehicleText: 'vehicle_text', phone: 'phone', note: 'note', kind: 'kind'
     };
+
+    /**
+     * A move has to answer the same questions a booking does.
+     *
+     * This wrote the new time and stopped — no hours, no daily limit, no check
+     * of the person's own day — so every rule the shop sets could be walked
+     * around by booking something legal and dragging the card. The guards are
+     * re-run whenever anything they depend on moves: the time, the kind (which
+     * decides which daily limit applies) or the duration.
+     */
+    const existing = await tqOne<RowDataPacket & {
+      kind: Kind; starts_at: Date | string; duration_min: number;
+      assigned_user_id: number | null; override_note: string | null;
+    }>(ctx.company!.id,
+      `SELECT kind, starts_at, duration_min, assigned_user_id, override_note
+         FROM appointments WHERE id = ? AND cancelled_at IS NULL`, [id]);
+    if (!existing) return reply.code(404).send({ error: 'That appointment no longer exists.' });
+
+    let moveTo: string | null = null;
+    let guardNote: string | null = null;
+
+    if (b.startsAt !== undefined) {
+      moveTo = wallClock(String(b.startsAt));
+      if (!moveTo) return reply.code(400).send({ error: 'That date is not valid.' });
+    }
+
+    const kindNow = (b.kind === undefined ? existing.kind : b.kind) as Kind;
+    if (!(KINDS as readonly string[]).includes(kindNow)) {
+      return reply.code(400).send({ error: 'Unknown appointment type.' });
+    }
+
+    if (b.startsAt !== undefined || b.kind !== undefined || b.durationMin !== undefined) {
+      /* The stored value is a clock face; the pool hands it back as a Date in
+         UTC, so it is read back as a string rather than converted. */
+      const whenNow = moveTo ?? storedWallClock(existing.starts_at);
+      const guard = await scheduleGuards({
+        cid: ctx.company!.id, tz: ctx.company!.timezone, kind: kindNow, when: whenNow,
+        durationMin: Number(b.durationMin ?? existing.duration_min ?? 30),
+        assignedUserId: existing.assigned_user_id,
+        /* Its own row must not count against the day's limit or clash with
+           itself when it is the thing being moved. */
+        ignoreApptId: id,
+        isOwner: ctx.role === 'owner', override: !!b.override,
+        moving: true
+      });
+      if ('refuse' in guard) return reply.code(409).send(guard.refuse);
+      guardNote = guard.note;
+    }
+
     const sets: string[] = [];
     const vals: unknown[] = [];
     for (const [k, col] of Object.entries(map)) {
       if (b[k] === undefined) continue;
       sets.push(`${col} = ?`);
-      if (k === 'startsAt') {
-        const w = wallClock(String(b[k]));
-        if (!w) return reply.code(400).send({ error: 'That date is not valid.' });
-        vals.push(w);
-      } else {
-        vals.push(b[k]);
-      }
+      vals.push(k === 'startsAt' ? moveTo : b[k]);
     }
     if (!sets.length) return reply.code(400).send({ error: 'Nothing to change' });
+
+    /* Appended rather than replaced: a card moved onto somebody's day off and
+       then moved again outside hours has two things worth explaining. */
+    if (guardNote) {
+      sets.push('override_note = ?');
+      vals.push(((existing.override_note ? existing.override_note + ' ' : '') + guardNote).slice(0, 255));
+    }
 
     vals.push(id);
     await texec(ctx.company!.id, `UPDATE appointments SET ${sets.join(', ')} WHERE id = ?`, vals);
     pushAppointment(ctx.company!.id, id, 'save').catch(() => {});
-    return { ok: true };
+    return { ok: true, overrode: guardNote };
   });
 
   app.delete('/api/schedule/:id', async (req, reply) => {
@@ -481,6 +462,119 @@ export async function registerScheduler(app: FastifyInstance): Promise<void> {
 }
 
 /**
+ * Every shop-level rule a time has to pass, in one place: the shop's hours, the
+ * daily limit for that kind, and the person's own day.
+ *
+ * It is one function because booking and moving are the same act, and they had
+ * drifted into two different answers — the move path checked none of it, so a
+ * shop's hours, its day limits and its time-off blocks were all enforced on the
+ * way in and ignored the moment somebody dragged the card. Every rule here is
+ * set at shop level (`shop_hours`, `shop_closures`, `shop_settings.cap_*`,
+ * `employee_time_off`) and read from there rather than assumed.
+ *
+ * Warn-and-override rather than refuse outright, throughout: shops genuinely do
+ * take a car in early as a favour, and a scheduler that makes that impossible
+ * gets worked around with a note instead. What was overridden is returned as a
+ * sentence to record on the appointment, so the day can be explained later.
+ *
+ * Returns either the refusal to send back or the note to keep — never both.
+ */
+export async function scheduleGuards(opts: {
+  cid: number; tz: string; kind: Kind; when: string; durationMin: number;
+  assignedUserId: number | null; ignoreApptId: number | null;
+  isOwner: boolean; override: boolean; moving?: boolean;
+}): Promise<{ refuse: Record<string, unknown> } | { note: string | null }> {
+  const {
+    cid, tz, kind, when, durationMin, assignedUserId,
+    ignoreApptId, isOwner, override, moving
+  } = opts;
+  const day = when.slice(0, 10);
+  const verb = moving ? 'Moved' : 'Booked';
+  const said: string[] = [];
+
+  /* The TIME, not just the day. An appointment at 9am has to mean 9am, and 9am
+     on a day the shop is shut is not a time. The conversion into an instant is
+     the shop timezone's job — `new Date(when)` reads it in the SERVER's zone,
+     which put a 10am Plano booking at 5am and refused it as before opening. */
+  const cal = await shopCalendar(cid, tz);
+  const at = atShopWallClock(when, tz);
+  const why = at ? closedReason(cal, at) : null;
+
+  if (why) {
+    if (!override) {
+      const opens = at ? nextOpen(cal, at) : null;
+      return {
+        refuse: {
+          error: `That time is outside shop hours — ${why}.`,
+          outsideHours: true,
+          canOverride: true,
+          nextOpen: opens ? opens.toISOString() : null
+        }
+      };
+    }
+    said.push(`${verb} outside shop hours (${why}).`);
+  }
+
+  /* The day's limit for this kind. Owner-only override, as it has always been —
+     a full day is the shop's own decision about how much work it can take. */
+  const capRow = await tqOne<RowDataPacket & { setting_value: string }>(cid,
+    'SELECT setting_value FROM shop_settings WHERE setting_key = ?', ['cap_' + kind]);
+  const cap = Number(capRow?.setting_value ?? 0);
+
+  if (cap > 0) {
+    const [cnt] = await tq<RowDataPacket[]>(cid, `
+      SELECT COUNT(*) AS n FROM appointments
+      WHERE cancelled_at IS NULL AND kind = ? AND DATE(starts_at) = ?
+        AND (? IS NULL OR id <> ?)`, [kind, day, ignoreApptId, ignoreApptId]);
+    const used = Number(cnt.n ?? 0);
+
+    if (used >= cap) {
+      if (!isOwner || !override) {
+        return {
+          refuse: {
+            error: `${day} is full for ${KIND_LABEL[kind].toLowerCase()}s — ${used} of ${cap} booked.`,
+            full: true, used, cap,
+            canOverride: isOwner
+          }
+        };
+      }
+      said.push(`${verb} past the daily limit of ${cap} (${used} already booked).`);
+    }
+  }
+
+  /* The person's own day: their other bookings, and any time they are off. */
+  if (assignedUserId) {
+    const clashes = await conflictsFor(cid, assignedUserId, when, durationMin, ignoreApptId);
+    if (clashes.length) {
+      if (!override) {
+        return {
+          refuse: {
+            error: clashes.map(c => c.text).join(' '),
+            conflict: true, clashes, canOverride: true
+          }
+        };
+      }
+      said.push(clashes.map(c => c.text).join(' '));
+    }
+  }
+
+  return { note: said.length ? said.join(' ').slice(0, 255) : null };
+}
+
+/**
+ * The clock face of a `starts_at` the pool read back.
+ *
+ * Both pools run in UTC, so a DATETIME comes back as a Date whose UTC fields
+ * ARE the stored wall clock. Reading it as a string keeps it that way; letting
+ * it through `toLocaleString` or a bare `new Date()` comparison is what moved
+ * saved times.
+ */
+function storedWallClock(v: Date | string): string {
+  if (v instanceof Date) return v.toISOString().slice(0, 19).replace('T', ' ');
+  return String(v).slice(0, 19).replace('T', ' ');
+}
+
+/**
  * Everything that collides with putting `userId` to work at `when`: their own
  * bookings and any time they are off. Returned as sentences, because the modal
  * that shows them is a warning the owner reads, not a machine check.
@@ -538,18 +632,9 @@ function localDay(d: Date): string {
 }
 
 /*
- * An appointment is a clock face on a day, not an instant: 9am at the counter
- * is 9am whatever zone the server or the browser happens to run in. So the
- * booking string is normalised to `YYYY-MM-DD HH:MM:SS` and handed to MySQL as
- * a string — passing a Date makes the driver convert it to UTC on the way in
- * and back on the way out, which is what moved saved times.
+ * The clock-face rule this file follows lives in `lib/shoptime.ts` as
+ * `wallClock()`, shared with the lead booking path.
  */
-function wallClock(v: string): string | null {
-  const s = String(v).trim();
-  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s + ' 09:00:00';
-  const m = s.match(/^(\d{4}-\d{2}-\d{2})[T ](\d{2}):(\d{2})/);
-  return m ? `${m[1]} ${m[2]}:${m[3]}:00` : null;
-}
 
 /** The stored clock face of a DATETIME the pool read back as UTC. */
 function wallTime(d: Date | string): string {

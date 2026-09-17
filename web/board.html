@@ -1440,13 +1440,19 @@
         return reopen();
       }).catch(function (e) {
         btn.disabled = false;
-        /* Outside shop hours is a warning, not a refusal — the scheduler says
-           so and offers the override, same as a person clash. */
-        if (/outside shop hours/i.test(e.message)) {
-          if (confirm(e.message + '\n\nBook it anyway?')) {
+        var d = e.data || {};
+        /* Hours, the day's limit and the assigned person's own day are all
+           warnings, not refusals — the scheduler says so and offers the
+           override. Read the flag, not the sentence. */
+        if ((d.outsideHours || d.full || d.conflict) && d.canOverride) {
+          var lines = [e.message];
+          (d.clashes || []).forEach(function (c) { lines.push('· ' + c.text); });
+          if (confirm(lines.join('\n') + '\n\nBook it anyway?')) {
             btn.disabled = true;
-            return post(true).then(function () { say('Booked, outside hours.', 'ok'); return reopen(); })
-              .catch(function (e2) { btn.disabled = false; msg.textContent = e2.message; });
+            return post(true).then(function () {
+              say(d.outsideHours ? 'Booked, outside hours.' : 'Booked, overridden.', 'ok');
+              return reopen();
+            }).catch(function (e2) { btn.disabled = false; msg.textContent = e2.message; });
           }
           msg.textContent = '';
           return;
@@ -2268,6 +2274,11 @@
     // Room for the sentence on a desk, not on a phone.
     var tight = window.matchMedia('(max-width:820px)').matches;
     $('dParts').textContent = tight ? 'Parts' : 'Open parts for this RO';
+    /* "for this RO" has to mean this RO. The link was a bare /parts.html, so it
+       landed on the whole list of files with or needing parts and the desk had
+       to find the car again. Closing the modal there still leaves them on the
+       plain list, which is where they want to be next. */
+    $('dParts').href = '/parts.html?open=' + OPEN;
     $('dDocs').textContent = tight
       ? 'Docs ' + d.documents.length
       : 'Documents ' + d.documents.length + ' file' + (d.documents.length === 1 ? '' : 's');
@@ -2673,38 +2684,14 @@
     }
 
     L.push('<div class="sec">Photos and documents</div>');
-      if (tiles.length) {
-        L.push('<div class="photogrid">' + tiles.map(function (p, i) {
-          var failed = p.thumb_state === 'failed' || (!p.has_thumb && p.is_pdf);
-          return '<button class="photocell' + (p.is_pdf ? ' pdf' : '') + '" data-media="' + i + '" ' +
-            'title="' + esc(p.label) + '">' +
-            (failed
-              ? '<span class="glyph">' + esc(extOf(p)) + '</span>'
-              : '<img loading="lazy" src="/api/documents/' + p.id +
-                (p.has_thumb ? '?variant=thumb' : '') + '" alt=""' +
-                (p.rotation ? ' style="transform:rotate(' + p.rotation + 'deg)"' : '') + '>') +
-            (p.is_pdf ? '<span class="kind">PDF</span>' : '') +
-            (p.is_pdf && p.page_count > 1 ? '<span class="pages">' + p.page_count + 'pp</span>' : '') +
-            '</button>';
-        }).join('') + '</div>');
-      }
-      if (pending) {
-        L.push('<div class="sub" style="margin-top:8px">' + pending + ' more being prepared…</div>');
-      }
-      files.forEach(function (doc) {
-        L.push('<div class="docrow">' +
-          '<span class="flag" style="color:var(--acc2);border:1px solid var(--line)">' +
-          esc(String(doc.doc_type).replace(/_/g, ' ')) + '</span>' +
-          '<div style="flex:1;min-width:0"><div class="log-b">' + esc(doc.label) + '</div>' +
-          '<div class="log-m">' + esc(doc.uploaded_name || '') + ' · ' + when(doc.created_at) +
-          ' · ' + Photos.bytes(doc.size_bytes) + '</div></div>' +
-          '<a class="btn btn-ghost" href="/api/documents/' + doc.id + '?download=1" ' +
-          'style="padding:4px 9px;font-size:10px">Download</a>' +
-          (ME.caps.deleteDocuments
-            ? '<button class="btn btn-danger" data-del="' + doc.id +
-              '" style="padding:4px 8px;font-size:10px">×</button>'
-            : '') + '</div>');
-      });
+      /* The list is its own container so an upload can redraw JUST this, rather
+         than reopening the whole drawer — which is what made the modal blink,
+         once on the upload and again on every poll for a thumbnail.
+
+         The type select and the dropzone sit OUTSIDE it on purpose: keeping the
+         file input's identity means a redraw cannot lose its listeners or clear
+         what it is holding. */
+      L.push('<div id="dDocsList">' + docsListHtml(tiles, files, pending) + '</div>');
       L.push('<div class="row" style="margin:12px 0 8px">' +
         '<select id="docType" style="flex:1;min-width:150px">' +
         '<option value="">Set the type from the file — a photo, or paperwork</option>' +
@@ -2712,10 +2699,15 @@
           return '<option value="' + esc(t.key) + '">' + esc(t.label) + '</option>';
         }).join('') + '</select></div>');
       L.push('<div class="dropzone" id="drop">' +
+        /* The prompt is its own element because the input is a CHILD of the
+           dropzone: setting textContent on the zone itself would delete the
+           input along with the words. */
+        '<span id="dropText">' +
         (ME.caps.viewPaperwork
           ? 'Drop files here, or choose a file — photos, estimate, supplement, invoice, ' +
             'proof of payment'
           : 'Drop photos here, or tap to choose — damage, teardown, progress') +
+        '</span>' +
         '<input type="file" id="fileInput" multiple hidden' +
         (ME.caps.viewPaperwork ? '' : ' accept="image/*"') + '></div>');
     }
@@ -3284,19 +3276,60 @@
       });
     });
 
-    Array.prototype.forEach.call(document.querySelectorAll('[data-del]'), function (b) {
-      b.addEventListener('click', function () {
-        if (!confirm('Delete this document?')) return;
-        api('/api/documents/' + b.dataset.del, { method: 'DELETE' })
-          .then(reopen).catch(function (e) { say(e.message, 'err'); });
+    /* Delegated on the container rather than bound per button, so redrawing the
+       list after an upload does not have to re-wire anything — and cannot leave
+       a stale handler behind. */
+    var docsList = $('dDocsList');
+    if (docsList) {
+      docsList.addEventListener('click', function (e) {
+        var tile = e.target.closest ? e.target.closest('[data-media]') : null;
+        if (tile) { showMedia(Number(tile.dataset.media)); return; }
+
+        var del = e.target.closest ? e.target.closest('[data-del]') : null;
+        if (del) {
+          if (!confirm('Delete this document?')) return;
+          api('/api/documents/' + del.dataset.del, { method: 'DELETE' })
+            .then(refreshDocs).catch(function (e2) { say(e2.message, 'err'); });
+        }
       });
-    });
+    }
 
-    Array.prototype.forEach.call(document.querySelectorAll('[data-media]'), function (el) {
-      el.addEventListener('click', function () { showMedia(Number(el.dataset.media)); });
-    });
+    /**
+     * Redraw the documents list, and nothing else.
+     *
+     * The drawer used to be reopened after an upload and again on every poll for
+     * a thumbnail — up to seven full rebuilds, which is the blinking. This asks
+     * `/api/ro/:id/media` for the list alone and rewrites one container. The
+     * scroll position, every open section, and anything half-typed in the drawer
+     * all stay where they were.
+     */
+    function refreshDocs() {
+      var forRo = OPEN;
+      return api('/api/ro/' + forRo + '/media').then(function (m) {
+        /* The drawer moved on while that was in flight. */
+        if (OPEN !== forRo || !$('dDocsList')) return { pending: 0 };
 
-    var drop = $('drop'), input = $('fileInput');
+        var all = m.media || [];
+        var tiles = all.filter(function (x) { return x.is_image || x.is_pdf; });
+        var files = all.filter(function (x) { return !x.is_image && !x.is_pdf; });
+        MEDIA = tiles;
+        $('dDocsList').innerHTML = docsListHtml(tiles, files, Number(m.pending || 0));
+
+        var n = all.length;
+        $('dDocs').textContent = window.matchMedia('(max-width:820px)').matches
+          ? 'Docs ' + n
+          : 'Documents ' + n + ' file' + (n === 1 ? '' : 's');
+
+        return m;
+      }).catch(function () { return { pending: 0 }; });
+    }
+
+    var drop = $('drop'), input = $('fileInput'), dropText = $('dropText');
+    /* Read off the element rather than retyped, so restoring it after an upload
+       cannot drift from the wording the markup chose for this person's
+       capabilities. */
+    var DROP_TEXT = dropText ? dropText.textContent : '';
+    function saying(t) { if (dropText) dropText.textContent = t; }
     if (drop) {
       drop.addEventListener('click', function () { input.click(); });
       input.addEventListener('change', function () { upload(input.files); });
@@ -3314,8 +3347,7 @@
     function upload(files) {
       if (!files || !files.length) return;
       var n = files.length;
-      drop.textContent = 'Preparing ' + n + ' file' + (n === 1 ? '' : 's') + '…';
-
+      saying('Preparing ' + n + ' file' + (n === 1 ? '' : 's') + '…');
       Photos.prepareAll(files).then(function (items) {
         var fd = new FormData();
         if ($('docType').value) fd.append('docType', $('docType').value);
@@ -3327,15 +3359,15 @@
             after += it.prepared.bytes || 0;
           }
         });
-        drop.textContent = 'Uploading' + (before
-          ? ' · ' + Photos.bytes(before) + ' → ' + Photos.bytes(after) : '') + '…';
+        saying('Uploading' + (before
+          ? ' · ' + Photos.bytes(before) + ' → ' + Photos.bytes(after) : '') + '…');
 
         return fetch('/api/ro/' + OPEN + '/documents', { method: 'POST', body: fd })
           .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
           .then(function (res) {
             if (!res.ok) {
               say(res.j.error, 'err');
-              drop.textContent = 'Drop files here, or tap to choose';
+              saying(DROP_TEXT);
               return;
             }
             /* Tiles do not appear until their thumbnail is made, so the toast is
@@ -3345,24 +3377,78 @@
               (res.j.pending ? ' · preparing thumbnails' : '') +
               (res.j.rejected && res.j.rejected.length
                 ? ' · ' + res.j.rejected.length + ' skipped, photos only' : ''), 'ok');
-            openRo(OPEN);
-            /* Come back for the ones still being made. */
-            if (res.j.pending) {
+
+            saying(DROP_TEXT);
+            input.value = '';
+
+            /* One redraw of the list, not a rebuild of the drawer. */
+            return refreshDocs().then(function (m) {
+              if (!Number(m.pending || 0)) return;
+              /* Come back for the ones still being made, and STOP as soon as
+                 there are none — the old poll ran its full six regardless. */
               var tries = 0;
               var poll = setInterval(function () {
-                if (++tries > 6 || OPEN == null) return clearInterval(poll);
-                openRo(OPEN);
+                if (++tries > 8 || OPEN == null || !$('dDocsList')) return clearInterval(poll);
+                refreshDocs().then(function (again) {
+                  if (!Number(again.pending || 0)) clearInterval(poll);
+                });
               }, 2500);
-            }
+            });
           });
       }).catch(function () {
         say('Upload failed.', 'err');
-        drop.textContent = 'Drop files here, or tap to choose';
+        saying(DROP_TEXT);
       });
     }
   }
 
   /* -------------------------------------------------------------- the viewer */
+
+  /**
+   * The photo grid and the paperwork rows — the only part of the documents block
+   * that changes when a file is uploaded. Kept as a string builder so it can be
+   * dropped into `#dDocsList` on its own, without reopening the drawer.
+   */
+  function docsListHtml(tiles, files, pending) {
+    var h = '';
+
+    if (tiles.length) {
+      h += '<div class="photogrid">' + tiles.map(function (p, i) {
+        var failed = p.thumb_state === 'failed' || (!p.has_thumb && p.is_pdf);
+        return '<button class="photocell' + (p.is_pdf ? ' pdf' : '') + '" data-media="' + i + '" ' +
+          'title="' + esc(p.label) + '">' +
+          (failed
+            ? '<span class="glyph">' + esc(extOf(p)) + '</span>'
+            : '<img loading="lazy" src="/api/documents/' + p.id +
+              (p.has_thumb ? '?variant=thumb' : '') + '" alt=""' +
+              (p.rotation ? ' style="transform:rotate(' + p.rotation + 'deg)"' : '') + '>') +
+          (p.is_pdf ? '<span class="kind">PDF</span>' : '') +
+          (p.is_pdf && p.page_count > 1 ? '<span class="pages">' + p.page_count + 'pp</span>' : '') +
+          '</button>';
+      }).join('') + '</div>';
+    }
+
+    if (pending) {
+      h += '<div class="sub" style="margin-top:8px">' + pending + ' more being prepared…</div>';
+    }
+
+    files.forEach(function (doc) {
+      h += '<div class="docrow">' +
+        '<span class="flag" style="color:var(--acc2);border:1px solid var(--line)">' +
+        esc(String(doc.doc_type).replace(/_/g, ' ')) + '</span>' +
+        '<div style="flex:1;min-width:0"><div class="log-b">' + esc(doc.label) + '</div>' +
+        '<div class="log-m">' + esc(doc.uploaded_name || '') + ' · ' + when(doc.created_at) +
+        ' · ' + Photos.bytes(doc.size_bytes) + '</div></div>' +
+        '<a class="btn btn-ghost" href="/api/documents/' + doc.id + '?download=1" ' +
+        'style="padding:4px 9px;font-size:10px">Download</a>' +
+        (ME.caps.deleteDocuments
+          ? '<button class="btn btn-danger" data-del="' + doc.id +
+            '" style="padding:4px 8px;font-size:10px">×</button>'
+          : '') + '</div>';
+    });
+
+    return h;
+  }
 
   /** The extension, for a tile we could not render. */
   function extOf(m) {

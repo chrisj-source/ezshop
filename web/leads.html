@@ -815,12 +815,34 @@
     });
 
     var bs = $('bSave');
-    if (bs) bs.addEventListener('click', function () {
+    if (bs) bs.addEventListener('click', function book(override) {
       if (!$('bWhen').value) return say('Pick a date and time.', 'err');
       api('/api/leads/' + lead.id + '/appointment', {
         method: 'POST',
-        body: JSON.stringify({ startsAt: $('bWhen').value.replace('T', ' ') + ':00', kind: $('bKind').value })
-      }).then(load).catch(function (e) { say(e.message, 'err'); });
+        body: JSON.stringify({
+          startsAt: $('bWhen').value.replace('T', ' ') + ':00',
+          kind: $('bKind').value,
+          override: override === true
+        })
+      }).then(load).catch(function (e) {
+        var d = e.data || {};
+        /* Hours, the day's limit and the person's own day all warn and allow,
+           the same as the scheduler — booking from a lead used to skip every
+           one of them. */
+        if ((d.outsideHours || d.full || d.conflict) && d.canOverride) {
+          msg.className = 'msg err';
+          msg.textContent = '';
+          msg.appendChild(document.createTextNode(e.message + ' '));
+          var btn = document.createElement('button');
+          btn.className = 'btn btn-ghost';
+          btn.style.cssText = 'padding:4px 9px;font-size:10.5px;margin-left:4px';
+          btn.textContent = 'Book it anyway';
+          btn.addEventListener('click', function () { book(true); });
+          msg.appendChild(btn);
+        } else {
+          say(e.message, 'err');
+        }
+      });
     });
 
     $('dState').addEventListener('change', function () {

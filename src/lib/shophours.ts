@@ -237,6 +237,24 @@ export function workingHoursBetween(cal: Calendar, from: Date, to: Date): number
 }
 
 /**
+ * A wall-clock string somebody typed at the shop — 'YYYY-MM-DD HH:MM[:SS]',
+ * with a space or a 'T' — as a real instant in the SHOP's timezone.
+ *
+ * This exists because `new Date(s)` on that string is wrong, and wrong in a way
+ * that looks like working code. An un-suffixed datetime is parsed in the
+ * SERVER's zone, so on a UTC droplet a 10:00 booking in Plano became 05:00
+ * shop time and the hours check refused it as before opening. Every comparison
+ * of a typed time against shop hours has to come through here.
+ */
+export function atShopWallClock(wall: string, tz: string): Date | null {
+  const m = /^(\d{4}-\d{2}-\d{2})[ T](\d{1,2}):(\d{2})(?::(\d{2}))?/.exec(String(wall).trim());
+  if (!m) return null;
+  const hh = String(m[2]).padStart(2, '0');
+  const at = zoned(m[1], `${hh}:${m[3]}:${m[4] ?? '00'}`, tz);
+  return isNaN(at.getTime()) ? null : at;
+}
+
+/**
  * A local date and time in a named zone, as a real instant.
  *
  * Done by guessing UTC and correcting by the offset that guess lands on, which
