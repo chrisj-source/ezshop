@@ -678,10 +678,16 @@
              only to refuse the change is worse than not offering it. */
           return !s.insuranceOnly || lead.payer === 'insurance' || s.key === lead.state;
         }).map(function (s) {
+          /* Won is reachable from here only by somebody who holds the tick —
+             picking it and being refused by the server is worse than seeing
+             why it is shut. Converting is the route that does not need it. */
+          var noWin = s.key === 'won' && lead.state !== 'won' && !ME.caps.winLeads;
+          var noAmount = s.key === 'estimate_written' && lead.estimate_cents == null;
           return '<option value="' + s.key + '"' + (s.key === lead.state ? ' selected' : '') +
-            (s.key === 'estimate_written' && lead.estimate_cents == null ? ' disabled' : '') + '>' +
+            (noAmount || noWin ? ' disabled' : '') + '>' +
             esc(s.label) +
-            (s.key === 'estimate_written' && lead.estimate_cents == null ? ' — needs an amount' : '') +
+            (noAmount ? ' — needs an amount' : '') +
+            (noWin ? ' — convert it, or ask an owner' : '') +
             '</option>';
         }).join('') + '</select></div>');
       h.push('<div><div class="detlbl">Owner</div><select class="detsel" id="dOwner">' +
@@ -710,13 +716,43 @@
           '<div style="font:500 13px var(--font);font-variant-numeric:tabular-nums">' +
           esc(lead.ro_number || '') + '</div>' +
           '<div style="font:400 10.5px/1.5 var(--font);color:var(--dim);margin-top:4px">' +
-          'This lead is on the board. <a href="/board.html?ro=' + lead.ro_id + '">Open the file</a>.' +
-          '</div></div>');
-      } else if (ME.caps.editRepairOrders) {
-        h.push('<div style="margin-top:14px"><div class="detlbl">Convert</div>' +
-          '<input id="convRo" placeholder="RO number" class="detsel" style="margin-bottom:8px">' +
-          '<input id="convVin" placeholder="VIN — optional" class="detsel">' +
-          '<button class="winbtn" id="convert">Convert to repair order</button></div>');
+          (lead.ro_link_kind === 'linked'
+            ? 'Linked to a file that was already open. '
+            : 'This lead is on the board. ') +
+          '<a href="/board.html?ro=' + lead.ro_id + '">Open the file</a>.' +
+          '</div>' +
+          (lead.ro_link_kind === 'linked' && ME.caps.winLeads
+            ? '<button class="ghostbtn" id="unlinkRo" style="margin-top:9px">Wrong file — unlink</button>'
+            : '') +
+          '</div>');
+      } else {
+        if (ME.caps.editRepairOrders) {
+          h.push('<div style="margin-top:14px"><div class="detlbl">Convert</div>' +
+            '<input id="convRo" placeholder="RO number" class="detsel" style="margin-bottom:8px">' +
+            '<input id="convVin" placeholder="VIN — optional" class="detsel">' +
+            '<button class="winbtn" id="convert">Convert to repair order</button></div>');
+        }
+
+        /* The other way in. Converting writes a file; this is for when one
+           already exists — the customer dropped the car off and somebody at
+           the desk opened it, so converting would write a second file for the
+           same car. */
+        if (ME.caps.winLeads) {
+          var won = lead.state === 'won';
+          h.push('<div style="margin-top:14px;padding-top:13px;border-top:1px solid var(--whisper)">' +
+            '<div class="detlbl">' + (won ? 'Link to a file' : 'Won without converting') + '</div>' +
+            '<div style="font:400 10.5px/1.5 var(--font);color:var(--dim);margin-bottom:8px">' +
+            (won
+              ? 'This lead is won with no file on it. Point it at the one that was opened for the car.'
+              : 'For a car somebody has already written a file for. Pick the file if it exists — ' +
+                'leave it blank if the work is won and the file is not open yet.') +
+            '</div>' +
+            '<select class="detsel" id="winRo" style="margin-bottom:8px">' +
+            '<option value="">' + (won ? 'Pick an open file…' : 'No file yet') + '</option></select>' +
+            (won ? '' : '<input id="winNote" placeholder="Note — optional" class="detsel">') +
+            '<button class="winbtn" id="' + (won ? 'linkRo' : 'winLead') + '">' +
+            (won ? 'Link this file' : 'Mark won') + '</button></div>');
+        }
       }
 
       h.push('<div style="margin-top:16px"><div class="detlbl">Activity</div>');
@@ -861,6 +897,56 @@
         body: JSON.stringify({ roNumber: ro, vin: $('convVin').value.trim() || undefined })
       }).then(function (r) { location.href = '/board.html?ro=' + r.roId; })
         .catch(function (e) { say(e.message, 'err'); });
+    });
+
+    /* Marking won by hand, and linking a lead to a file that already exists.
+       The picker is filled after the panel is drawn — the list is a query and
+       the rest of the screen should not wait on it. */
+    var winSel = $('winRo');
+    if (winSel) {
+      api('/api/leads/open-files').then(function (r) {
+        (r.files || []).forEach(function (f) {
+          var o = document.createElement('option');
+          o.value = f.id;
+          o.textContent = f.ro_number +
+            (f.customer_name ? ' · ' + f.customer_name : '') +
+            (f.vehicle_text ? ' · ' + f.vehicle_text : '');
+          winSel.appendChild(o);
+        });
+        if (!(r.files || []).length) {
+          winSel.appendChild(Object.assign(document.createElement('option'),
+            { disabled: true, textContent: 'No unlinked open files' }));
+        }
+      }).catch(function () { /* the note-only path still works */ });
+    }
+
+    var winBtn = $('winLead');
+    if (winBtn) winBtn.addEventListener('click', function () {
+      var roId = $('winRo').value;
+      api('/api/leads/' + lead.id + '/win', {
+        method: 'POST',
+        body: JSON.stringify({
+          roId: roId ? Number(roId) : null,
+          note: ($('winNote').value || '').trim() || undefined
+        })
+      }).then(function () { return load(); }).catch(function (e) { say(e.message, 'err'); });
+    });
+
+    var linkBtn = $('linkRo');
+    if (linkBtn) linkBtn.addEventListener('click', function () {
+      var roId = $('winRo').value;
+      if (!roId) return say('Pick the file to link.', 'err');
+      api('/api/leads/' + lead.id + '/link-ro', {
+        method: 'POST', body: JSON.stringify({ roId: Number(roId) })
+      }).then(function () { return load(); }).catch(function (e) { say(e.message, 'err'); });
+    });
+
+    var unlink = $('unlinkRo');
+    if (unlink) unlink.addEventListener('click', function () {
+      if (!window.confirm('Unlink ' + (lead.ro_number || 'this file') + ' from lead ' +
+        lead.lead_number + '?\n\nThe lead stays won. The file is untouched.')) return;
+      api('/api/leads/' + lead.id + '/link-ro', { method: 'DELETE' })
+        .then(function () { return load(); }).catch(function (e) { say(e.message, 'err'); });
     });
 
     var del = $('delLead');

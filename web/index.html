@@ -103,7 +103,7 @@
         {
           "@type": "Question",
           "name": "What happens to old closed jobs?",
-          "acceptedAnswer": { "@type": "Answer", "text": "A closed file is kept as a record. After a year it moves to archival storage, and personal details have a ten-year outer limit. The accounting shell — the RO number, the dates, the amounts and the labour — is never purged, because that is your business record. Wholesale and insurance client records are never purged." }
+          "acceptedAnswer": { "@type": "Answer", "text": "A closed file is kept as a record. After a year it moves to archival storage, and personal details have a ten-year outer limit. The accounting shell — the RO number, the dates, the amounts and the labor — is never purged, because that is your business record. Wholesale and insurance client records are never purged." }
         }
       ]
     }
@@ -188,7 +188,7 @@
             <li><div><b>Leads</b><span>Everyone who came by for an estimate, and when it is time to reach back out.</span></div></li>
             <li><div><b>Wholesale accounts</b><span>Trade customers, their rates, and what each of them owes you.</span></div></li>
             <li><div><b>Insurance work</b><span>Claim, adjuster, supplements and approval dates carried on the job.</span></div></li>
-            <li><div><b>Estimate importing</b><span>Import estimates from CCC One and Mitchell — parts, labour hours, and the claim details.</span></div></li>
+            <li><div><b>Estimate importing</b><span>Import estimates from CCC One and Mitchell — parts, labor hours, and the claim details.</span></div></li>
             <li><div><b>Reporting</b><span>What came in, what went out, and where the week actually went.</span></div></li>
           </ul>
         </div>
@@ -277,7 +277,7 @@
         <div class="stack">
           <span class="tag tag-accent">Included</span>
           <h3>Insurance work with the claim on the file</h3>
-          <p class="muted" style="margin:0;max-width:50ch">Carrier, policy, claim number, deductible, date of loss, adjuster and estimator ride on the job. Import the estimate from CCC One or Mitchell and they fill themselves in, along with the parts lines and the labour hours.</p>
+          <p class="muted" style="margin:0;max-width:50ch">Carrier, policy, claim number, deductible, date of loss, adjuster and estimator ride on the job. Import the estimate from CCC One or Mitchell and they fill themselves in, along with the parts lines and the labor hours.</p>
           <ul>
             <li>Supplements tracked as their own checkpoints in each lane</li>
             <li>Approved amounts overwrite the guess, and every change is recorded</li>
@@ -331,7 +331,7 @@
       <div style="display:grid;gap:10px;min-width:0">
         <div class="card"><b style="font-weight:500;font-size:15px">Roles you define</b><br><span class="muted" style="font-size:13px">Owner and Technician are the only fixed ones, and you can rename both. Everything else is a row you name, tick and delete.</span></div>
         <div class="card"><b style="font-weight:500;font-size:15px">Technician logins</b><br><span class="muted" style="font-size:13px">Every tech signs in as themselves. Their work, their hours, their cars.</span></div>
-        <div class="card"><b style="font-weight:500;font-size:15px">Money is not one switch</b><br><span class="muted" style="font-size:13px">File totals, parts cost and margin, and commission are three separate ticks. Labour hours is a fourth, separate from money entirely.</span></div>
+        <div class="card"><b style="font-weight:500;font-size:15px">Money is not one switch</b><br><span class="muted" style="font-size:13px">File totals, parts cost and margin, and commission are three separate ticks. Labor hours is a fourth, separate from money entirely.</span></div>
         <div class="card"><b style="font-weight:500;font-size:15px">Only their own work</b><br><span class="muted" style="font-size:13px">One tick per role narrows the board, the leads and the schedule to what that person is assigned.</span></div>
         <div class="card"><b style="font-weight:500;font-size:15px">Every change is recorded</b><br><span class="muted" style="font-size:13px">Who changed what, when, and what it was before. Append-only, and nobody can edit it.</span></div>
       </div>
@@ -390,7 +390,7 @@
       </details>
       <details class="faq">
         <summary><span>What happens to old closed jobs?</span></summary>
-        <p>A closed file is kept as a record. After a year it moves to archival storage, and personal details have a ten-year outer limit. The accounting shell — the RO number, the dates, the amounts and the labour — is never purged, because that is your business record. Wholesale and insurance client records are never purged.</p>
+        <p>A closed file is kept as a record. After a year it moves to archival storage, and personal details have a ten-year outer limit. The accounting shell — the RO number, the dates, the amounts and the labor — is never purged, because that is your business record. Wholesale and insurance client records are never purged.</p>
       </details>
     </div>
   </section>
@@ -505,7 +505,12 @@
       body: JSON.stringify(body)
     }).then(function (r) {
       return r.json().catch(function () { return {}; }).then(function (j) {
-        if (!r.ok) throw new Error(j.error || 'That did not go through.');
+        if (!r.ok) {
+          /* The provider's reason, when the server sends one — otherwise this
+             form can only be debugged over SSH. */
+          throw new Error((j.error || 'That did not go through.') +
+            (j.detail ? ' (' + j.detail + ')' : ''));
+        }
         return j;
       });
     }).then(function () {
@@ -516,7 +521,9 @@
     }).catch(function (err) {
       btn.disabled = false;
       btn.textContent = label;
-      msg.textContent = err.message + ' You can also call 401-203-5823.';
+      msg.textContent = /401-203-5823/.test(err.message)
+        ? err.message
+        : err.message + ' You can also call 401-203-5823.';
       msg.className = 'formmsg err';
     });
   });

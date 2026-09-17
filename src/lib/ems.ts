@@ -202,7 +202,7 @@ export function parseEms(files: Array<{ filename: string; buffer: Buffer }>): Em
   const ven = table(set, 'ven', warnings);
 
   if (!env) warnings.push('No envelope (.env) in the set — RO number and supplement flag may be missing.');
-  if (!lin.length) warnings.push('No estimate lines (.lin) in the set — parts and labour will not import.');
+  if (!lin.length) warnings.push('No estimate lines (.lin) in the set — parts and labor will not import.');
 
   const sysCode = (pickStr(env, ['EST_SYSTEM', 'SYSTEM', 'EST_SYS']) ?? '').toUpperCase().charAt(0);
   const suppNo = pickStr(env, ['SUPP_NO', 'SUPPLEMENT', 'SUPP']);
@@ -212,7 +212,7 @@ export function parseEms(files: Array<{ filename: string; buffer: Buffer }>): Em
   const timeStr = pickStr(env, ['CREATE_TM', 'CREATE_TIME']);
   const clock = /^(\d{2})(\d{2})(\d{2})?$/.exec(timeStr ?? '');
 
-  // Labour and parts subtotals both live in .stl, keyed by family (LA, PA) and
+  // Labor and parts subtotals both live in .stl, keyed by family (LA, PA) and
   // code (LAB, LAR, PAO …). The .pf* files are the shop's rate and tax profile,
   // not this estimate's numbers.
   const sub = stl.map(r => ({
@@ -237,7 +237,7 @@ export function parseEms(files: Array<{ filename: string; buffer: Buffer }>): Em
 
   const laborTotalRow = sub.find(s => s.code === 'LAT');
 
-  // CCC writes one .lin record per labour operation, so a part with body and
+  // CCC writes one .lin record per labor operation, so a part with body and
   // paint time appears twice carrying the same price. Charging both double-bills
   // the parts total, so the price stays on the first record only. ACT_PRICE is
   // the charged price: when PRICE_INC says the part is included in another

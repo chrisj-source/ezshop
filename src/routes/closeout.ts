@@ -3,9 +3,9 @@ import { RowDataPacket } from 'mysql2/promise';
 import { tq, tqOne, texec } from '../db/tenant';
 import { requireCompany, requireFeature } from '../middleware/context';
 import {
-  Basis, LABOUR_TRADES, LabourEntry, RENTAL_PROVIDERS, Trade, TRADE_LABEL,
-  assignmentsFor, emsHoursFor, fileFor, labourFor, priceEntry, profitFor,
-  ratesFor, suggestLabour
+  Basis, LABOR_TRADES, LaborEntry, RENTAL_PROVIDERS, Trade, TRADE_LABEL,
+  assignmentsFor, emsHoursFor, fileFor, laborFor, priceEntry, profitFor,
+  ratesFor, suggestLabor
 } from '../lib/profit';
 import { reconcile } from '../lib/pay';
 
@@ -25,16 +25,16 @@ import { reconcile } from '../lib/pay';
  */
 export async function registerCloseout(app: FastifyInstance): Promise<void> {
 
-  function parseEntries(body: unknown): LabourEntry[] {
-    const raw = (body as { labour?: unknown[] }).labour;
+  function parseEntries(body: unknown): LaborEntry[] {
+    const raw = (body as { labor?: unknown[] }).labor;
     if (!Array.isArray(raw)) return [];
-    const out: LabourEntry[] = [];
+    const out: LaborEntry[] = [];
     for (const r of raw as Array<Record<string, unknown>>) {
       const trade = String(r.positionKey ?? '') as Trade;
-      if (!(LABOUR_TRADES as readonly string[]).includes(trade)) continue;
+      if (!(LABOR_TRADES as readonly string[]).includes(trade)) continue;
       const basis = String(r.basis ?? 'hours') as Basis;
       if (!['hours', 'flat', 'ems', 'pct'].includes(basis)) continue;
-      const e: LabourEntry = {
+      const e: LaborEntry = {
         positionKey: trade,
         basis,
         hours: Math.max(0, Number(r.hours) || 0),
@@ -72,7 +72,7 @@ export async function registerCloseout(app: FastifyInstance): Promise<void> {
     const f = await fileFor(cid, id);
     if (!f) return reply.code(404).send({ error: 'No such repair order' });
 
-    const entries = await suggestLabour(cid, id);
+    const entries = await suggestLabor(cid, id);
 
     /* What was already flagged on the floor. The sheet says so on the row, so
        the desk can see the figure came from the shop rather than from here. */
@@ -115,7 +115,7 @@ export async function registerCloseout(app: FastifyInstance): Promise<void> {
         name: sales.name,
         payable: !!f.commission_payable
       } : null,
-      labour: entries.map(e => ({
+      labor: entries.map(e => ({
         ...e,
         label: TRADE_LABEL[e.positionKey],
         /* PDR has always been able to take a share of the job. Any trade can
@@ -162,7 +162,7 @@ export async function registerCloseout(app: FastifyInstance): Promise<void> {
     const entries = parseEntries(req.body);
     const profit = await profitFor(cid, id, entries);
     if (!profit) return reply.code(404).send({ error: 'No such repair order' });
-    return { profit, labour: entries };
+    return { profit, labor: entries };
   });
 
   /** Read back what a closed file settled at. */
@@ -176,12 +176,12 @@ export async function registerCloseout(app: FastifyInstance): Promise<void> {
 
     const settled = await tqOne<RowDataPacket>(cid,
       'SELECT * FROM ro_profit WHERE ro_id = ?', [id]);
-    const entries = await labourFor(cid, id);
+    const entries = await laborFor(cid, id);
     /* Recomputed alongside the settled figure: if a rate changed since, the two
        will differ, and that difference is worth seeing rather than hiding. */
     const now = await profitFor(cid, id, entries);
 
-    return { settled, labour: entries, current: now };
+    return { settled, labor: entries, current: now };
   });
 
   /* ------------------------------------------- the file: deductible, rental */

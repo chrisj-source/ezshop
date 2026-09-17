@@ -419,7 +419,7 @@ export async function registerEms(app: FastifyInstance): Promise<void> {
           overwrite: over, importId: id, roId, target: 'ro', area: 'Money', actor,
           fields: [
             { col: 'amount_cents', label: 'Approval amount', next: imp.total_cents as number, format: dollars },
-            { col: 'labor_hours', label: 'Labour hours', next: hours || null }
+            { col: 'labor_hours', label: 'Labor hours', next: hours || null }
           ]
         }));
         /* The approval stamp is set once and never moved by a re-import — it is

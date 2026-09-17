@@ -190,7 +190,10 @@
 
   var TONE = {
     drop: 'var(--move)', pickup: 'var(--done)', return: 'var(--blocked)',
-    estimate: 'var(--acc)', appraiser: 'var(--stopped)'
+    estimate: 'var(--acc)', appraiser: 'var(--stopped)',
+    /* A car at a vendor is not in the shop and not with the customer — the
+       muted tone says "elsewhere" rather than competing with the lanes. */
+    sublet: 'var(--dim)'
   };
   var DAYNAMES = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
 
@@ -339,6 +342,17 @@
             '<button class="apx" data-cancel="' + a.id + '" title="Cancel">×</button></div>' +
             '<div class="apwho">' + esc(a.customer_name) + '</div>' +
             '<div class="apveh">' + esc(a.vehicle_text || a.ro_vehicle || '—') + '</div>' +
+            /* Who has the car, and when a sublet is due back. A sublet with no
+               return date says so: a blank reads as "on time", which is the
+               wrong thing to tell somebody about a car at a vendor. */
+            (a.carrier || a.kind === 'sublet'
+              ? '<div class="apveh" style="color:var(--dim)">' +
+                [a.carrier ? esc(a.carrier) : null,
+                 a.kind === 'sublet'
+                   ? (a.due_back ? 'back ' + esc(String(a.due_back).slice(5))
+                                 : '<span style="color:var(--stopped)">no return date</span>')
+                   : null].filter(Boolean).join(' \u00b7 ') + '</div>'
+              : '') +
             '<div class="aprow"><div class="apro" style="color:' +
             (a.ro_number ? 'var(--muted)' : 'var(--dim)') + ';border:1px ' +
             (a.ro_number ? 'solid' : 'dashed') + ' var(--line)">' +

@@ -68,7 +68,7 @@ export interface CapDef {
 export const CAP_DEFS: CapDef[] = [
   { key: 'ro_totals',     label: 'Repair order totals',        section: 'Money',    see: 'money',            change: 'editMoney' },
   { key: 'parts_money',   label: 'Parts cost and margin',      section: 'Money',    see: 'partsMoney',       change: 'editPartsMoney' },
-  { key: 'labour_money',  label: 'Labour hours, paint and PDR', section: 'Money',   see: 'labourMoney',      change: 'editLabourMoney' },
+  { key: 'labour_money',  label: 'Labor hours, paint and PDR', section: 'Money',   see: 'laborMoney',       change: 'editLaborMoney' },
   { key: 'commission',    label: 'Commission',                 section: 'Money',    see: 'commissionMoney' },
   /* Payments are three separate answers, not one: the desk that takes a check
      is not always the desk allowed to change one after the fact. See and add
@@ -90,6 +90,7 @@ export const CAP_DEFS: CapDef[] = [
 
   { key: 'leads',         label: 'Leads',                      section: 'Leads',    see: 'viewLeads',        change: 'manageLeads' },
   { key: 'del_lead',      label: 'Delete a lead',              section: 'Leads',    see: 'deleteLeads' },
+  { key: 'win_lead',      label: 'Mark a lead won, and link it to an existing file', section: 'Leads', see: 'winLeads' },
 
   { key: 'paperwork',     label: 'Paperwork and PDFs',         section: 'Paperwork', see: 'viewPaperwork',   change: 'uploadPaperwork' },
   { key: 'del_doc',       label: 'Delete a document',          section: 'Paperwork', see: 'deleteDocuments' },
@@ -115,8 +116,8 @@ export interface Caps {
   editMoney: boolean;
   partsMoney: boolean;
   editPartsMoney: boolean;
-  labourMoney: boolean;
-  editLabourMoney: boolean;
+  laborMoney: boolean;
+  editLaborMoney: boolean;
   commissionMoney: boolean;
   /** See what has been paid on a file, and the balance. */
   viewPayments: boolean;
@@ -149,6 +150,17 @@ export interface Caps {
   viewLeads: boolean;
   manageLeads: boolean;
   deleteLeads: boolean;
+  /**
+   * Mark a lead won by hand, and point a lead at a file that already exists.
+   *
+   * Its own tick, and owner-only to start with, because it is the one way to
+   * reach `won` without converting — which is the step that writes the file.
+   * The case it exists for is real and common: the customer drops the car off,
+   * somebody opens a file at the desk, and converting would now write a second
+   * file for the same car. A shop ticks this outward to whoever it trusts with
+   * its close rate.
+   */
+  winLeads: boolean;
   /* paperwork */
   viewPaperwork: boolean;
   uploadPaperwork: boolean;
@@ -183,10 +195,10 @@ export interface Caps {
 }
 
 const CAPS_FIELDS: Array<keyof Caps> = [
-  'money', 'editMoney', 'partsMoney', 'editPartsMoney', 'labourMoney', 'editLabourMoney',
+  'money', 'editMoney', 'partsMoney', 'editPartsMoney', 'laborMoney', 'editLaborMoney',
   'commissionMoney', 'viewPayments', 'recordPayments', 'editPayments', 'seesRepairOrders', 'viewNotes', 'addNotes', 'seesAllRepairOrders', 'ownWorkOnly',
   'editRepairOrders', 'anyStatus', 'markTotalLoss', 'voidRepairOrders', 'closeRepairOrders',
-  'uncloseRepairOrders', 'manageWholesaleClients', 'viewLeads', 'manageLeads', 'deleteLeads', 'viewPaperwork',
+  'uncloseRepairOrders', 'manageWholesaleClients', 'viewLeads', 'manageLeads', 'deleteLeads', 'winLeads', 'viewPaperwork',
   'uploadPaperwork', 'deleteDocuments', 'acceptImports', 'editAssignments', 'manageParts',
   'manageSublet', 'viewReports', 'exportReports', 'viewMoneyReports', 'viewPayPlans',
   'editPayPlans', 'viewCustomerContact', 'editCustomerContact', 'viewAudit', 'admin', 'managePermissions'
@@ -399,10 +411,10 @@ export function needsTech(assigned: Record<string, unknown>): boolean {
 export function scrubMoney<T extends Record<string, unknown>>(row: T, caps: Caps): T {
   if (caps.money) return row;
   const out = { ...row } as Record<string, unknown>;
-  const keepLabour = caps.labourMoney;
+  const keepLabor = caps.laborMoney;
   const keepParts = caps.partsMoney;
   for (const k of Object.keys(out)) {
-    if (keepLabour && /^labor_hours$|^labour_hours$|hours$/i.test(k)) continue;
+    if (keepLabor && /^labor_hours$|^labour_hours$|hours$/i.test(k)) continue;
     if (keepParts && /^parts_/i.test(k)) continue;
     if (/_cents$|^amount|^deductible|commission|^rate$/i.test(k)) delete out[k];
   }

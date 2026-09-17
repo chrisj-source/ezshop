@@ -203,7 +203,7 @@
       { v: d.totals.files, k: 'files in window' },
       { v: d.totals.openFiles, k: 'still open' },
       { v: d.totals.delivered, k: 'delivered' },
-      { v: num(d.totals.hours), k: 'labour hours' },
+      { v: num(d.totals.hours), k: 'labor hours' },
       { v: d.totals.avgDays == null ? '—' : d.totals.avgDays, k: 'avg days in shop' }
     ]));
 
@@ -396,7 +396,7 @@
       { v: money(t.grossCents), k: 'gross' },
       { v: money(t.grossProfitCents), k: 'after parts and sublet' },
       { v: money(t.avgTicketCents), k: 'average ticket' },
-      { v: num(t.hours, 0), k: 'labour hours' },
+      { v: num(t.hours, 0), k: 'labor hours' },
       { v: t.effectiveRateCents == null ? '—' : money2(t.effectiveRateCents), k: 'per flagged hour' },
       { v: t.files, k: 'files' }
     ]));

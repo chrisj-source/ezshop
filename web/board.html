@@ -1131,7 +1131,7 @@
     var cells = [{ v: s.inList, k: 'In list' }];
     if (s.severityCents != null) cells.push({ v: money0(s.severityCents), k: 'Severity' });
     cells.push(
-      { v: s.laborHours.toFixed(1), k: 'Labour hrs' },
+      { v: s.laborHours.toFixed(1), k: 'Labor hrs' },
       { v: s.avgDays + 'd', k: 'Avg days' },
       { v: s.onHold, k: 'On hold', tone: s.onHold ? 'var(--stopped)' : '' },
       { v: s.stalled, k: 'Stalled > 4d', tone: s.stalled ? 'var(--blocked)' : '' },
@@ -1372,6 +1372,90 @@
    * space in it: "@Ray Whitlock, can you" is ambiguous the moment a comma
    * follows, and "@RayW, can you" is not.
    */
+  /**
+   * Booking a movement from inside the file.
+   *
+   * The point of this being here rather than on the schedule screen: the car,
+   * the customer and the phone number are already known, so nothing is
+   * re-typed — which is how a pickup ends up booked against the wrong vehicle.
+   *
+   * The form grows as it is answered rather than showing eight fields at once:
+   * a drop needs a time, a pickup wants to know who is collecting, and only a
+   * sublet has a return date.
+   */
+  function wireMovements() {
+    var kind = $('mvKind');
+    if (!kind) return;
+
+    function shape() {
+      var k = kind.value;
+      var on = !!k;
+      $('mvWhenRow').hidden = !on;
+      $('mvNoteRow').hidden = !on;
+      $('mvActions').hidden = !on;
+      /* A drop is the customer arriving; nobody is carrying it. */
+      $('mvWhoRow').hidden = !on || k === 'drop';
+      $('mvBackRow').hidden = k !== 'sublet';
+      $('mvWhoLbl').textContent = k === 'sublet' ? 'Vendor' : 'Carrier';
+      $('mvWho').placeholder = k === 'sublet'
+        ? 'Who is doing the work'
+        : k === 'pickup' ? 'Transport company, or who is collecting'
+        : 'Who is bringing it back';
+    }
+
+    kind.addEventListener('change', shape);
+    shape();
+
+    $('mvSave').addEventListener('click', function () {
+      var msg = $('mvMsg'), btn = $('mvSave');
+      var k = kind.value, when = $('mvWhen').value;
+      if (!k) return;
+      if (!when) { msg.textContent = 'Pick a date and time.'; return; }
+
+      var r = DTL && DTL.ro;
+      var body = {
+        kind: k,
+        startsAt: when.replace('T', ' ') + ':00',
+        roId: OPEN,
+        /* Taken from the file, not re-typed. */
+        customerName: (r && r.customer_name) || 'Customer',
+        vehicleText: r ? [r.year, r.make, r.model].filter(Boolean).join(' ') : undefined,
+        phone: (r && r.customer_phone) || undefined,
+        carrier: $('mvWho').value || undefined,
+        dueBack: k === 'sublet' ? ($('mvBack').value || undefined) : undefined,
+        note: $('mvNote').value || undefined
+      };
+
+      btn.disabled = true;
+      msg.textContent = 'Booking…';
+
+      var post = function (override) {
+        if (override) body.override = true;
+        return api('/api/schedule', { method: 'POST', body: JSON.stringify(body) });
+      };
+
+      post(false).then(function () {
+        msg.textContent = '';
+        say('Booked.', 'ok');
+        return reopen();
+      }).catch(function (e) {
+        btn.disabled = false;
+        /* Outside shop hours is a warning, not a refusal — the scheduler says
+           so and offers the override, same as a person clash. */
+        if (/outside shop hours/i.test(e.message)) {
+          if (confirm(e.message + '\n\nBook it anyway?')) {
+            btn.disabled = true;
+            return post(true).then(function () { say('Booked, outside hours.', 'ok'); return reopen(); })
+              .catch(function (e2) { btn.disabled = false; msg.textContent = e2.message; });
+          }
+          msg.textContent = '';
+          return;
+        }
+        msg.textContent = e.message;
+      });
+    });
+  }
+
   function wireTagPicker(box, list, people) {
     if (!box || !list || !people.length) return;
 
@@ -1464,6 +1548,9 @@
 
     box.addEventListener('blur', function () { setTimeout(close, 120); });
   }
+
+  var MVLABEL = { drop: 'Drop off', pickup: 'Pick up', return: 'Return',
+    sublet: 'Out to sublet', estimate: 'Estimate', appraiser: 'Appraiser' };
 
   function laneLabel(key) {
     if (!key) return '';
@@ -1962,7 +2049,7 @@
     ['m_amount', 'm_deduct', 'm_hours'].forEach(function (id) {
       var el = $(id);
       if (el && el.value !== el.dataset.was) out.push('an edit to ' +
-        (id === 'm_amount' ? 'the amount' : id === 'm_deduct' ? 'the deductible' : 'labour hours'));
+        (id === 'm_amount' ? 'the amount' : id === 'm_deduct' ? 'the deductible' : 'labor hours'));
     });
 
     var assigns = Array.prototype.slice.call(document.querySelectorAll('[data-assign]'))
@@ -2228,11 +2315,29 @@
         'Opening the file does not.</div>');
     }
 
+    if (canEdit) {
+      /* The number, correctable in place. A voided file is parked on VOID-<id>
+         and `canEdit` is already false for it, so the placeholder is never
+         offered here as if it were a typo — a reopen is what gives it a
+         number. */
+      L.push('<div class="sec">File</div>');
+      L.push('<div class="fieldset">' + ef('roNumber', 'RO number', r.ro_number) + '</div>' +
+        saveRow('ronum', 'For a mistyped number. Everything on the file follows it.'));
+    }
+
     L.push('<div class="sec">Customer</div>');
     /* The contact block is stripped server-side for anyone without the
        capability, so "is the field absent" is the honest test — not a
        permission check repeated in the browser. The name always arrives. */
     var seesContact = r.customer_phone !== undefined || r.customer_addr !== undefined;
+    if (canEdit && !r.client_id) {
+      /* A file with no client row at all. Until 16 Sep 2026 the name read blank
+         here and every correction was accepted and written nowhere. Saying so
+         is the difference between a blank field and a lie. */
+      L.push('<div class="hint" style="color:var(--stopped)">This file has no customer ' +
+        'record — it was opened without a name. Type the name in and save, and the ' +
+        'record is created and attached to the file.</div>');
+    }
     if (canEdit) {
       L.push('<div class="fieldset">' +
         ef('customerName', 'Name', r.customer_name) +
@@ -2337,7 +2442,7 @@
         '<input type="number" step="0.01" min="0" id="m_deduct" style="width:100%" value="' +
         ((r.deductible_cents || 0) / 100).toFixed(2) + '" data-was="' +
         ((r.deductible_cents || 0) / 100).toFixed(2) + '"></div>' +
-        '<div><div class="fl2">Labour hours</div>' +
+        '<div><div class="fl2">Labor hours</div>' +
         '<input type="number" step="0.1" min="0" id="m_hours" style="width:100%" value="' +
         (Number(r.labor_hours) || 0) + '" data-was="' + (Number(r.labor_hours) || 0) + '"></div>' +
         f2('Parts cost', money(r.parts_cost_cents), 1) +
@@ -2514,7 +2619,60 @@
       var files = ready.filter(function (x) { return !x.is_image && !x.is_pdf; });
       MEDIA = tiles;
 
-      L.push('<div class="sec">Photos and documents</div>');
+      /* ---- movements: drop, pick up, return, out to sublet ---- */
+    L.push('<div class="sec">Movements</div>');
+    var MV = d.movements || [];
+    if (MV.length) {
+      L.push('<div class="fieldset">' + MV.map(function (m) {
+        var when = new Date(String(m.starts_at).replace(' ', 'T'));
+        var gone = !!m.cancelled_at;
+        var label = MVLABEL[m.kind] || m.kind;
+        var bits = [when.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + ' ' +
+          when.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })];
+        if (m.carrier) bits.push(m.carrier);
+        if (m.kind === 'sublet') {
+          bits.push(m.due_back
+            ? 'back ' + new Date(String(m.due_back) + 'T00:00:00')
+                .toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+            /* No date is the honest state, and saying so is better than a blank
+               that reads as "on time". */
+            : 'no return date');
+        }
+        return '<div class="drow"><div class="dk"' + (gone ? ' style="opacity:.5"' : '') + '>' +
+          esc(label) + (gone ? ' · cancelled' : '') + '</div>' +
+          '<div class="dv"' + (gone ? ' style="opacity:.5;text-decoration:line-through"' : '') + '>' +
+          esc(bits.join(' · ')) + (m.note ? ' — ' + esc(m.note) : '') + '</div></div>';
+      }).join('') + '</div>');
+    } else {
+      L.push('<div class="hint">Nothing booked on this car yet.</div>');
+    }
+
+    if (canEdit) {
+      L.push('<div class="fieldset" id="mvBook" style="margin-top:6px">' +
+        '<div class="drow"><div class="dk">Book</div><div class="dv">' +
+        '<select id="mvKind" class="dinput" style="width:100%">' +
+        '<option value="">Choose…</option>' +
+        '<option value="drop">Drop off</option>' +
+        '<option value="pickup">Pick up</option>' +
+        '<option value="return">Return</option>' +
+        '<option value="sublet">Out to sublet</option>' +
+        '</select></div></div>' +
+        '<div class="drow" id="mvWhenRow" hidden><div class="dk">When</div><div class="dv">' +
+        '<input id="mvWhen" class="dinput" type="datetime-local" style="width:100%"></div></div>' +
+        '<div class="drow" id="mvWhoRow" hidden><div class="dk" id="mvWhoLbl">Carrier</div>' +
+        '<div class="dv"><input id="mvWho" class="dinput" style="width:100%" ' +
+        'placeholder="Transport company, or who is collecting"></div></div>' +
+        '<div class="drow" id="mvBackRow" hidden><div class="dk">Due back</div><div class="dv">' +
+        '<input id="mvBack" class="dinput" type="date" style="width:100%"></div></div>' +
+        '<div class="drow" id="mvNoteRow" hidden><div class="dk">Note</div><div class="dv">' +
+        '<input id="mvNote" class="dinput" style="width:100%" placeholder="Optional"></div></div>' +
+        '</div>' +
+        '<div class="row" id="mvActions" hidden style="margin-top:6px">' +
+        '<button class="btn btn-solid" id="mvSave">Book it</button>' +
+        '<span class="sub" id="mvMsg"></span></div>');
+    }
+
+    L.push('<div class="sec">Photos and documents</div>');
       if (tiles.length) {
         L.push('<div class="photogrid">' + tiles.map(function (p, i) {
           var failed = p.thumb_state === 'failed' || (!p.has_thumb && p.is_pdf);
@@ -2788,8 +2946,8 @@
       R.push('<div class="sec">Payments</div>');
       R.push('<div id="paySec"><div class="sub">Loading…</div></div>');
     }
-    if (ME.caps.labourMoney) {
-      R.push('<div class="sec">Labour</div>');
+    if (ME.caps.laborMoney) {
+      R.push('<div class="sec">Labor</div>');
       R.push('<div id="flagSec"><div class="sub">Loading…</div></div>');
     }
 
@@ -3097,6 +3255,7 @@
     });
 
     wireTagPicker($('newNote'), $('tagList'), (DTL && DTL.taggable) || []);
+    wireMovements();
 
     var an = $('addNote');
     if (an) an.addEventListener('click', function () {
@@ -3351,7 +3510,7 @@
         if (el) el.innerHTML = '<div class="sub">' + esc(e.message) + '</div>';
       });
     }
-    if (ME.caps.labourMoney) {
+    if (ME.caps.laborMoney) {
       api('/api/ro/' + id + '/flags').then(function (d) {
         if (OPEN !== id) return;
         FLAGS = d;
@@ -3983,7 +4142,7 @@
     api('/api/ro/' + roId + '/closeout').then(function (d) {
       CO = {
         roId: roId, date: date, paid: paid,
-        labour: (d.labour || []).map(function (e) { return Object.assign({}, e); }),
+        labor: (d.labor || []).map(function (e) { return Object.assign({}, e); }),
         data: d, profit: d.profit
       };
       $('coTitle').textContent = 'Closing RO ' + d.roNumber;
@@ -4015,17 +4174,17 @@
       api('/api/ro/' + CO.roId + '/closeout/preview', {
         method: 'POST',
         body: JSON.stringify({
-          labour: CO.labour,
+          labor: CO.labor,
           materialsFlatCents: CO.materialsFlatCents,
           rentalCostCents: CO.rentalCostCents
         })
       }).then(function (res) {
         if (!CO) return;
         CO.profit = res.profit;
-        CO.labour = res.labour.map(function (e, i) {
+        CO.labor = res.labor.map(function (e, i) {
           /* Keep the display fields the sheet renders from; the server only
              returns the figures it needs. */
-          return Object.assign({}, CO.labour[i], e);
+          return Object.assign({}, CO.labor[i], e);
         });
         coRender();
       }).catch(function (e) { coSay(e.message, 'err'); });
@@ -4037,9 +4196,9 @@
     var d = CO.data, p = CO.profit || { lines: [] };
     var out = [];
 
-    out.push('<div class="cosec">Labour</div>');
-    if (!CO.labour.length) {
-      out.push('<div class="conote warn">Nobody is assigned to this car, so there is no labour on it. ' +
+    out.push('<div class="cosec">Labor</div>');
+    if (!CO.labor.length) {
+      out.push('<div class="conote warn">Nobody is assigned to this car, so there is no labor on it. ' +
         'Assign a tech on the file if that is wrong.</div>');
     } else {
       out.push('<div class="cosub">Each trade is paid the way its plan says — hours at their rate, ' +
@@ -4049,7 +4208,7 @@
         '<div>Who</div><div>Paid on</div>' +
         '<div style="text-align:right">Cost</div></div>');
 
-      CO.labour.forEach(function (e, i) {
+      CO.labor.forEach(function (e, i) {
         var pct = e.basis === 'pct';
         var ems = e.basis === 'ems';
         var flat = e.basis === 'flat';
@@ -4103,7 +4262,7 @@
 
     /* Paint materials: hours × the shop rate, or a figure by hand when the
        painter is on a flat dollar and there are no hours to work from. */
-    var paint = CO.labour.filter(function (e) { return e.positionKey === 'paint'; })[0];
+    var paint = CO.labor.filter(function (e) { return e.positionKey === 'paint'; })[0];
     if (paint) {
       var ph = paint.basis === 'flat' ? 0 : Number(paint.hours) || 0;
       var mline = (p.lines || []).filter(function (l) { return l.key === 'materials'; })[0];
@@ -4207,7 +4366,7 @@
   function coWire() {
     Array.prototype.forEach.call($('coBody').querySelectorAll('select[data-b2]'), function (sel) {
       sel.addEventListener('change', function () {
-        var e = CO.labour[Number(sel.dataset.b2)];
+        var e = CO.labor[Number(sel.dataset.b2)];
         var was = e.basis;
         e.basis = sel.value;
         /* Switching to hours or EMS means the figure was a dollar amount and is
@@ -4224,7 +4383,7 @@
 
     Array.prototype.forEach.call($('coBody').querySelectorAll('.segsm button[data-pdr]'), function (b) {
       b.addEventListener('click', function () {
-        CO.labour[Number(b.dataset.i)].pctAfterCosts = b.dataset.pdr === 'after';
+        CO.labor[Number(b.dataset.i)].pctAfterCosts = b.dataset.pdr === 'after';
         coRender();
         coPreview();
       });
@@ -4232,7 +4391,7 @@
 
     Array.prototype.forEach.call($('coBody').querySelectorAll('input[data-v]'), function (inp) {
       inp.addEventListener('change', function () {
-        var e = CO.labour[Number(inp.dataset.v)];
+        var e = CO.labor[Number(inp.dataset.v)];
         if (e.basis === 'pct') e.ratePct = parseFloat(inp.value) || 0;
         else if (e.basis === 'flat') e.hours = toCents(inp.value);
         else e.hours = parseFloat(inp.value) || 0;
@@ -4264,7 +4423,7 @@
     api('/api/ro/' + CO.roId + '/close', {
       method: 'POST',
       body: JSON.stringify({
-        paid: CO.paid, closeDate: CO.date, labour: CO.labour
+        paid: CO.paid, closeDate: CO.date, labor: CO.labor
       })
     }).then(function (res) {
       btn.disabled = false;

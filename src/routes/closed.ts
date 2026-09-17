@@ -4,7 +4,7 @@ import { tq, tqOne, texec, withTenantTx } from '../db/tenant';
 import { requireCompany, requireFeature } from '../middleware/context';
 import { scrubMoney } from '../permissions';
 import { correctTrigger, fireTrigger } from '../lib/pay';
-import { Basis, LABOUR_TRADES, LabourEntry, Trade, priceEntry, saveCloseout } from '../lib/profit';
+import { Basis, LABOR_TRADES, LaborEntry, Trade, priceEntry, saveCloseout } from '../lib/profit';
 
 /**
  * Closing a file.
@@ -516,19 +516,19 @@ function blockersFor(ro: RowDataPacket): Array<{ what: string; where: string }> 
 }
 
 /**
- * The labour the close-out sheet sent with the close. Same shape the close-out
+ * The labor the close-out sheet sent with the close. Same shape the close-out
  * endpoints take; kept here so closing is one request rather than two.
  */
-function closeoutEntries(body: unknown): LabourEntry[] {
-  const raw = (body as { labour?: unknown[] }).labour;
+function closeoutEntries(body: unknown): LaborEntry[] {
+  const raw = (body as { labor?: unknown[] }).labor;
   if (!Array.isArray(raw)) return [];
-  const out: LabourEntry[] = [];
+  const out: LaborEntry[] = [];
   for (const r of raw as Array<Record<string, unknown>>) {
     const trade = String(r.positionKey ?? '') as Trade;
-    if (!(LABOUR_TRADES as readonly string[]).includes(trade)) continue;
+    if (!(LABOR_TRADES as readonly string[]).includes(trade)) continue;
     const basis = String(r.basis ?? 'hours') as Basis;
     if (!['hours', 'flat', 'ems', 'pct'].includes(basis)) continue;
-    const e: LabourEntry = {
+    const e: LaborEntry = {
       positionKey: trade,
       basis,
       hours: Math.max(0, Number(r.hours) || 0),

@@ -175,6 +175,29 @@ async function main(): Promise<void> {
 
   /* Mentions that have gone unanswered. Hourly; the sweep decides what is due
      from each shop's own setting. */
+  /**
+   * Say out loud whether mail is on.
+   *
+   * `RESEND_API_KEY` defaults to an empty string, and `sendMail` then refuses
+   * every message with "mail is switched off" — at SEND time, into a log
+   * nobody is watching. The result is a box that looks healthy while every
+   * notification, every password reset and every demo request silently goes
+   * nowhere. That is exactly what happened: the first anybody knew was an empty
+   * Resend dashboard.
+   *
+   * A subsystem that is off has to say so at boot.
+   */
+  if (!config.mail.apiKey) {
+    app.log.error(
+      'MAIL IS OFF — RESEND_API_KEY is not set in the environment. ' +
+      'Nothing will send: no notifications, no password resets, no demo requests. ' +
+      'Add it to /srv/easyshop/.env and restart.');
+  } else {
+    app.log.info({ from: config.mail.from, replyTo: config.mail.replyTo,
+                   demoTo: config.mail.demoTo },
+      'mail is on (Resend)');
+  }
+
   startMentionReminders();
 
   /* Leads nobody has touched: 12 hours for a sales write-up, 48 for the rest. */

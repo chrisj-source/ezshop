@@ -11,7 +11,7 @@ import {
 import {
   JOB_TYPES, JOB_LABEL, JobType, PlanBasis, flagRowsFor, fileBasis, plansFor, priceFlag
 } from '../lib/tech-pay';
-import { LABOUR_TRADES, Trade, TRADE_LABEL } from '../lib/profit';
+import { LABOR_TRADES, Trade, TRADE_LABEL } from '../lib/profit';
 
 /**
  * Money that arrives, and money that goes out to the floor.
@@ -349,7 +349,7 @@ export async function registerMoney(app: FastifyInstance): Promise<void> {
   app.get('/api/ro/:id/flags', async (req, reply) => {
     const ctx = requireCompany(req, reply);
     if (!ctx) return;
-    if (!ctx.caps.labourMoney) return reply.code(403).send({ error: 'Labour figures are money.' });
+    if (!ctx.caps.laborMoney) return reply.code(403).send({ error: 'Labor figures are money.' });
 
     const id = Number((req.params as { id: string }).id);
     const cid = ctx.company!.id;
@@ -371,7 +371,7 @@ export async function registerMoney(app: FastifyInstance): Promise<void> {
       flagged: rows.filter(r => r.flagged).length,
       total: rows.length,
       flaggedCents: rows.filter(r => r.flagged).reduce((a, r) => a + r.amountCents, 0),
-      canFlag: ctx.caps.editLabourMoney && !ro.closed_at
+      canFlag: ctx.caps.editLaborMoney && !ro.closed_at
     };
   });
 
@@ -383,7 +383,7 @@ export async function registerMoney(app: FastifyInstance): Promise<void> {
   app.put('/api/ro/:id/flags', async (req, reply) => {
     const ctx = requireCompany(req, reply);
     if (!ctx) return;
-    if (!ctx.caps.editLabourMoney) return reply.code(403).send({ error: 'Not permitted' });
+    if (!ctx.caps.editLaborMoney) return reply.code(403).send({ error: 'Not permitted' });
 
     const id = Number((req.params as { id: string }).id);
     const cid = ctx.company!.id;
@@ -406,7 +406,7 @@ export async function registerMoney(app: FastifyInstance): Promise<void> {
 
     for (const r of raw as Array<Record<string, unknown>>) {
       const trade = String(r.positionKey ?? '') as Trade;
-      if (!(LABOUR_TRADES as readonly string[]).includes(trade)) continue;
+      if (!(LABOR_TRADES as readonly string[]).includes(trade)) continue;
 
       const flagged = r.flagged === true;
       const basis = String(r.basis ?? 'hours') as PlanBasis;
@@ -486,7 +486,7 @@ export async function registerMoney(app: FastifyInstance): Promise<void> {
 
     const out: Record<string, unknown> = {};
     if (ctx.caps.viewPayments) out.balance = await balanceFor(cid, id);
-    if (ctx.caps.labourMoney) {
+    if (ctx.caps.laborMoney) {
       const { rows } = await flagRowsFor(cid, id);
       out.flags = {
         flagged: rows.filter(r => r.flagged).length,

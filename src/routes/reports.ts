@@ -77,7 +77,7 @@ export async function registerReports(app: FastifyInstance): Promise<void> {
         { key: 'status', label: 'By status', money: false, note: 'Counts and average age per status.' },
         { key: 'salesperson', label: 'By salesperson', money: true, note: 'Files written and value.' },
         { key: 'approval', label: 'By approval date', money: true, note: 'What was approved when.' },
-        { key: 'revenue', label: 'Revenue', money: true, note: 'Labour, parts, sublet, materials.' },
+        { key: 'revenue', label: 'Revenue', money: true, note: 'Labor, parts, sublet, materials.' },
         { key: 'leads', label: 'Leads', money: false, note: 'Sources, close rate, response time.' },
         { key: 'clients', label: 'By client', money: true, note: 'Volume and value per wholesale account.' },
         { key: 'voids', label: 'Voided', money: false, note: 'What was voided, why, and what came back.' }

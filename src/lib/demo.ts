@@ -406,7 +406,7 @@ async function seedFiles(
       }
     }
 
-    /* Closed files carry flagged labour, a settled profit and real receipts. */
+    /* Closed files carry flagged labor, a settled profit and real receipts. */
     if (closed) {
       const body = techs('body')[i % Math.max(1, techs('body').length)];
       const paint = techs('paint')[i % Math.max(1, techs('paint').length)];

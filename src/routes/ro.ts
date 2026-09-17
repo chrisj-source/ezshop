@@ -114,6 +114,20 @@ export async function registerRepairOrders(app: FastifyInstance): Promise<void> 
       canAddNotes: ctx.caps.addNotes,
       /* Who is still waiting on an answer here, and for how long. */
       mentions: await openMentions(cid, id),
+      /**
+       * Every movement booked on this car: drop, pick up, return, out to
+       * sublet. Shown in the drawer so a return can be booked from the file
+       * rather than by going to the schedule screen and re-typing the car —
+       * which is how a pickup ends up on the wrong vehicle.
+       *
+       * Cancelled ones are kept and marked rather than hidden: "we moved it"
+       * is part of the story of the car.
+       */
+      movements: await tq<RowDataPacket[]>(cid,
+        `SELECT id, kind, starts_at, duration_min, carrier, due_back, note,
+                assigned_user_id, cancelled_at, override_note
+           FROM appointments WHERE ro_id = ?
+          ORDER BY starts_at`, [id]).catch(() => []),
       taggable: ctx.caps.addNotes ? await taggablePeople(cid) : [],
       promises,
       supplements: ctx.caps.money ? supplements : supplements.map(s => scrubMoney(s as Record<string, unknown>, ctx.caps)),
@@ -459,7 +473,7 @@ export async function registerRepairOrders(app: FastifyInstance): Promise<void> 
     }
     if (b.laborHours !== undefined) {
       sets.push('labor_hours = ?'); vals.push(Math.max(0, Number(b.laborHours)));
-      notes.push('Labour hours set to ' + Number(b.laborHours));
+      notes.push('Labor hours set to ' + Number(b.laborHours));
     }
     if (!sets.length) return reply.code(400).send({ error: 'Nothing to change' });
 
@@ -593,7 +607,7 @@ export async function registerRepairOrders(app: FastifyInstance): Promise<void> 
     };
 
     const ro = await tqOne<RowDataPacket>(cid,
-      `SELECT r.id, r.client_id, r.vehicle_id, r.insurer_client_id,
+      `SELECT r.id, r.client_id, r.vehicle_id, r.insurer_client_id, r.ro_number, r.voided_at,
               r.claim_number, r.policy_number, r.date_of_loss, r.adjuster, r.ro_type,
               c.name AS customer_name, c.phone AS customer_phone, c.email AS customer_email,
               ins.name AS insurer_name,
@@ -654,7 +668,36 @@ export async function registerRepairOrders(app: FastifyInstance): Promise<void> 
         custSets.push(`${col} = ?`);
         custVals.push(v);
       }
-      if (custSets.length && ro.client_id) {
+      /* A file whose customer edits used to vanish.
+       *
+       * `client_id` can be NULL — `POST /api/ro` only writes a client row when a
+       * name was given, and an EMS import can land without one. This block
+       * used to be `if (custSets.length && ro.client_id)`, so on such a file the
+       * name read blank, every correction was accepted, written nowhere, and
+       * reported as saved. Typing the name back in did nothing, forever.
+       *
+       * Now the missing record is created, the file is pointed at it, and an
+       * orphan vehicle row is adopted at the same time. */
+      if (custSets.length && !ro.client_id) {
+        const name = str(b.customerName, 190);
+        if (!name) {
+          throw Object.assign(new Error(
+            'This file has no customer record yet — type the name in with the rest and it will be created.'
+          ), { statusCode: 400 });
+        }
+        const cols = custSets.map(s => s.split(' = ')[0]);
+        const [cl] = await c.query<ResultSetHeader>(
+          `INSERT INTO clients (kind, ${cols.join(', ')})
+           VALUES ('retail', ${cols.map(() => '?').join(', ')})`, custVals);
+        await c.query('UPDATE repair_orders SET client_id = ? WHERE id = ?', [cl.insertId, id]);
+        /* The car was on the file with nobody owning it. */
+        if (ro.vehicle_id) {
+          await c.query('UPDATE vehicles SET client_id = ? WHERE id = ? AND client_id IS NULL',
+            [cl.insertId, ro.vehicle_id]);
+        }
+        changes.push(`Customer record created for ${name}`);
+        ro.client_id = cl.insertId;
+      } else if (custSets.length && ro.client_id) {
         custVals.push(ro.client_id);
         await c.query(`UPDATE clients SET ${custSets.join(', ')} WHERE id = ?`, custVals);
       }
@@ -694,6 +737,36 @@ export async function registerRepairOrders(app: FastifyInstance): Promise<void> 
       /* -------------------------------------------- insurance and loss */
       const roSets: string[] = [];
       const roVals: unknown[] = [];
+
+      /**
+       * The file's number, correctable.
+       *
+       * A voided file parks on `VOID-<id>` so the real number can be reused,
+       * and that placeholder is what somebody sees when they open a file that
+       * was voided — it is not corruption and it is not fixed here: reopening
+       * the file is what gives it a number back, and renaming a voided row
+       * would put the released number back into use behind the shop's back.
+       */
+      if (b.roNumber !== undefined) {
+        const want = str(b.roNumber, 32);
+        if (!want) {
+          throw Object.assign(new Error('A file needs a number.'), { statusCode: 400 });
+        }
+        if (ro.voided_at) {
+          throw Object.assign(new Error(
+            'That file is voided, so it is parked on a placeholder number. Bring it back from the void to give it a number — that is where the number is chosen.'
+          ), { statusCode: 400 });
+        }
+        if (want !== String(ro.ro_number)) {
+          const [dup] = await c.query<RowDataPacket[]>(
+            'SELECT id FROM repair_orders WHERE ro_number = ? AND id <> ?', [want, id]);
+          if (dup.length) {
+            throw Object.assign(new Error(`RO ${want} is already taken.`), { statusCode: 409 });
+          }
+          changed('RO number', ro.ro_number, want);
+          roSets.push('ro_number = ?'); roVals.push(want);
+        }
+      }
 
       if (b.insurer !== undefined) {
         const name = str(b.insurer, 190);

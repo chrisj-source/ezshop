@@ -19,7 +19,7 @@ import { removeFile } from '../lib/storage';
  *  **Purge at ten years.** Not reversible, and deliberately narrow. Documents
  *  leave the disk, the insurance contact columns are cleared, and a retail
  *  customer with no newer file loses their contact details. What stays is the
- *  accounting shell: RO number, dates, amounts, labour, who worked on it. That
+ *  accounting shell: RO number, dates, amounts, labor, who worked on it. That
  *  is a business record the shop is entitled to keep, and in several states
  *  required to. Purging it would be destroying their books, not protecting a
  *  customer.

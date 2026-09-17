@@ -5,12 +5,15 @@ import { requireCompany, requireFeature } from '../middleware/context';
 import { pushAppointment } from './gcal';
 import { closedReason, nextOpen, shopCalendar } from '../lib/shophours';
 
-const KINDS = ['drop', 'pickup', 'return', 'estimate', 'appraiser'] as const;
+const KINDS = ['drop', 'pickup', 'return', 'estimate', 'appraiser', 'sublet'] as const;
 type Kind = typeof KINDS[number];
 
 const KIND_LABEL: Record<Kind, string> = {
   drop: 'Drop off', pickup: 'Pick up', return: 'Return',
-  estimate: 'Estimate', appraiser: 'Appraiser'
+  estimate: 'Estimate', appraiser: 'Appraiser',
+  /* Out to a vendor, not a customer movement — it shares the table because it
+     is still a car leaving on a date somebody has to remember. */
+  sublet: 'Out to sublet'
 };
 
 export async function registerScheduler(app: FastifyInstance): Promise<void> {
@@ -148,6 +151,10 @@ export async function registerScheduler(app: FastifyInstance): Promise<void> {
       customerName: string; vehicleText?: string; phone?: string; note?: string;
       assignedUserId?: number | null;
       override?: boolean;
+      /* Transport company on a pickup or return; the vendor on a sublet. */
+      carrier?: string;
+      /* Sublet only: when the vendor says it is coming back. */
+      dueBack?: string;
     };
 
     if (!(KINDS as readonly string[]).includes(b.kind)) {
@@ -245,11 +252,17 @@ export async function registerScheduler(app: FastifyInstance): Promise<void> {
       const [r] = await c.query<ResultSetHeader>(`
         INSERT INTO appointments
           (kind, starts_at, duration_min, ro_id, lead_id, customer_name, vehicle_text, phone, note,
-           created_by, assigned_user_id, override_note)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           created_by, assigned_user_id, override_note, carrier, due_back)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [b.kind, when, b.durationMin ?? 30, b.roId ?? null, b.leadId ?? null,
          b.customerName.trim(), b.vehicleText ?? null, b.phone ?? null, b.note ?? null,
-         ctx.user.id, assignedUserId, overrideNote]);
+         ctx.user.id, assignedUserId, overrideNote,
+         /* Who is carrying the car: a transport company on a pickup, the vendor
+            on a sublet. Free text — a sublet vendor is usually a shop down the
+            road that will never be a row in this database. */
+         (b.carrier ?? '').trim() || null,
+         /* Sublet only. Null is the honest "nobody has said yet". */
+         b.kind === 'sublet' ? (b.dueBack || null) : null]);
 
       const apptId = r.insertId;
       let leadId: number | null = b.leadId ?? null;

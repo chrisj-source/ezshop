@@ -324,6 +324,20 @@ input, textarea {
   border-radius: var(--radius); padding: 10px 12px; min-height: 44px;
 }
 input:focus-visible, textarea:focus-visible { border-color: var(--accent); }
+/* Chrome paints its own pale-blue fill on autofilled fields, which on a dark
+   ground turns a styled input into a white box with invisible text. There is no
+   way to set the background, so the fill is faked with an inset shadow the size
+   of the field and the text colour is forced. */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus,
+textarea:-webkit-autofill {
+  -webkit-text-fill-color: var(--text);
+  -webkit-box-shadow: 0 0 0 40px var(--field) inset;
+  box-shadow: 0 0 0 40px var(--field) inset;
+  caret-color: var(--text);
+  transition: background-color 9999s;
+}
 textarea { resize: vertical; }
 .grid-2 { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); }
 

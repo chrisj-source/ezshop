@@ -710,6 +710,18 @@ export async function registerLeads(app: FastifyInstance): Promise<void> {
       notes.push(`Moved from ${before.state.replace(/_/g, ' ')} to ${next.replace(/_/g, ' ')}`);
 
       if (next === 'won' || next === 'lost') sets.push('settled_at = NOW()');
+      /* Reaching `won` from the dropdown is the same act as the Won button, so
+         it is the same capability and it is stamped the same way. Without this
+         the select would be a way around the tick. */
+      if (next === 'won' && before.state !== 'won') {
+        if (!ctx.caps.winLeads) {
+          return reply.code(403).send({
+            error: 'Marking a lead won by hand is not yours to do. Convert it to a repair order, or ask somebody who holds that permission.'
+          });
+        }
+        sets.push('won_by_hand = 1', 'won_at = NOW()', 'won_by_user_id = ?', 'won_by_name = ?');
+        vals.push(ctx.user.id, ctx.user.name);
+      }
       // First move off "new" is the first reply — that is the clock that matters.
       if (!before.first_reply_at && next !== 'new') sets.push('first_reply_at = NOW()');
     }
@@ -776,6 +788,199 @@ export async function registerLeads(app: FastifyInstance): Promise<void> {
             told the lead has gone quiet. */
          last_followup_at = NOW(), chase_notified_at = NULL
        WHERE id = ?`, [id]);
+
+    return { ok: true };
+  });
+
+  /* ------------------------------------------------- won by hand, and linking
+   *
+   * Converting writes the file. This is the other half: the customer dropped
+   * the car off, somebody at the desk opened a file for them, and the lead is
+   * now stranded — converting it would write a SECOND file for the same car.
+   *
+   * Both routes are behind `win_lead`, owner-only until a shop ticks it
+   * outward, because between them they are the way to reach `won` without the
+   * step the close rate is measured off.
+   */
+
+  /** Open files, for the picker. Searchable, and already-claimed files are out. */
+  app.get('/api/leads/open-files', async (req, reply) => {
+    const ctx = requireCompany(req, reply);
+    if (!ctx) return;
+    if (!requireFeature(ctx, 'leads', reply)) return;
+    if (!ctx.caps.winLeads) return reply.code(403).send({ error: 'Not permitted' });
+
+    const q = String((req.query as { q?: string }).q ?? '').trim();
+    const like = '%' + q + '%';
+    const rows = await tq<RowDataPacket[]>(ctx.company!.id, `
+      SELECT r.id, r.ro_number, r.opened_at, s.label AS status_label,
+             c.name AS customer_name,
+             TRIM(CONCAT_WS(' ', v.year, v.make, v.model)) AS vehicle_text
+      FROM repair_orders r
+      LEFT JOIN clients c  ON c.id = r.client_id
+      LEFT JOIN vehicles v ON v.id = r.vehicle_id
+      LEFT JOIN statuses s ON s.slot_id = r.status_slot
+      WHERE r.close_date IS NULL AND r.closed_at IS NULL AND r.voided_at IS NULL
+        /* A file already answering to a lead is not offered. The unique index
+           would refuse it anyway; this is so nobody picks it and finds out. */
+        AND NOT EXISTS (SELECT 1 FROM leads l WHERE l.ro_id = r.id)
+        ${q ? `AND (r.ro_number LIKE ? OR c.name LIKE ?
+                    OR TRIM(CONCAT_WS(' ', v.year, v.make, v.model)) LIKE ?)` : ''}
+      ORDER BY r.opened_at DESC
+      LIMIT 40`, q ? [like, like, like] : []);
+
+    return { files: rows.map(r => scrubCustomer(r as Record<string, unknown>, ctx.caps)) };
+  });
+
+  /**
+   * Mark this lead won without converting it, optionally pointing it at the
+   * file somebody has already opened.
+   *
+   * The file is optional on purpose. A lead can be genuinely won with no file
+   * yet — the car is booked in for next month — and refusing the mark until
+   * there is one would leave the lead sitting in the follow-up queue being
+   * chased for work the shop already has.
+   */
+  app.post('/api/leads/:id/win', async (req, reply) => {
+    const ctx = requireCompany(req, reply);
+    if (!ctx) return;
+    if (!requireFeature(ctx, 'leads', reply)) return;
+    if (!ctx.caps.winLeads) {
+      return reply.code(403).send({
+        error: 'Marking a lead won by hand is not yours to do. Convert it to a repair order, or ask somebody who holds that permission.'
+      });
+    }
+
+    const cid = ctx.company!.id;
+    const id = Number((req.params as { id: string }).id);
+    const b = (req.body ?? {}) as { roId?: number | null; note?: string };
+
+    const lead = await tqOne<RowDataPacket & {
+      lead_number: string; state: string; ro_id: number | null; deleted_at: Date | null;
+    }>(cid, 'SELECT lead_number, state, ro_id, deleted_at FROM leads WHERE id = ?', [id]);
+    if (!lead) return reply.code(404).send({ error: 'No such lead' });
+    if (lead.deleted_at) return reply.code(400).send({ error: 'That lead is deleted. Restore it first.' });
+    if (lead.state === 'won') return reply.code(409).send({ error: 'That lead is already won.' });
+
+    const wantRo = b.roId ? Number(b.roId) : null;
+    let file: (RowDataPacket & { id: number; ro_number: string }) | null = null;
+    if (wantRo) {
+      if (lead.ro_id) {
+        return reply.code(409).send({ error: 'That lead is already on a file. Unlink it first.' });
+      }
+      file = await openFileForLink(cid, wantRo, reply);
+      if (!file) return;
+    }
+
+    const note = (b.note ?? '').trim().slice(0, 255);
+
+    await texec(cid, `
+      UPDATE leads
+      SET state = 'won', settled_at = NOW(),
+          won_by_hand = 1, won_at = NOW(), won_by_user_id = ?, won_by_name = ?,
+          win_note = NULLIF(?, ''),
+          ${wantRo ? "ro_id = ?, ro_link_kind = 'linked', ro_linked_at = NOW(), ro_linked_by = ?," : ''}
+          first_reply_at = COALESCE(first_reply_at, NOW()),
+          chase_notified_at = NULL
+      WHERE id = ?`,
+      wantRo
+        ? [ctx.user.id, ctx.user.name, note, wantRo, ctx.user.id, id]
+        : [ctx.user.id, ctx.user.name, note, id]);
+
+    const body = (file
+      ? `Marked won by hand and linked to RO ${file.ro_number}, which was already open.`
+      : 'Marked won by hand. No file linked yet.') + (note ? ' ' + note : '');
+
+    await texec(cid,
+      `INSERT INTO lead_events (lead_id, kind, body, user_id, user_name)
+       VALUES (?, 'auto', ?, ?, ?)`, [id, body, ctx.user.id, ctx.user.name]);
+
+    await audit(cid, actorFrom(req), {
+      entity: 'lead', entityId: id, action: 'lead_won_manual', area: 'Lead',
+      roId: file ? Number(file.id) : undefined,
+      label: `Lead ${lead.lead_number} — marked won by hand` +
+        (file ? `, linked to RO ${file.ro_number}` : ', no file'),
+      changes: [{ field: 'State', from: lead.state, to: 'won' }]
+    });
+
+    return { ok: true, roId: file ? Number(file.id) : null };
+  });
+
+  /** Point a lead at a file that already exists, without touching its state. */
+  app.post('/api/leads/:id/link-ro', async (req, reply) => {
+    const ctx = requireCompany(req, reply);
+    if (!ctx) return;
+    if (!requireFeature(ctx, 'leads', reply)) return;
+    if (!ctx.caps.winLeads) return reply.code(403).send({ error: 'Not permitted' });
+
+    const cid = ctx.company!.id;
+    const id = Number((req.params as { id: string }).id);
+    const roId = Number((req.body as { roId?: number })?.roId);
+    if (!roId) return reply.code(400).send({ error: 'Pick the file to link.' });
+
+    const lead = await tqOne<RowDataPacket & { lead_number: string; ro_id: number | null }>(
+      cid, 'SELECT lead_number, ro_id FROM leads WHERE id = ?', [id]);
+    if (!lead) return reply.code(404).send({ error: 'No such lead' });
+    if (lead.ro_id) {
+      return reply.code(409).send({ error: 'That lead is already on a file. Unlink it first.' });
+    }
+
+    const file = await openFileForLink(cid, roId, reply);
+    if (!file) return;
+
+    await texec(cid, `
+      UPDATE leads
+      SET ro_id = ?, ro_link_kind = 'linked', ro_linked_at = NOW(), ro_linked_by = ?
+      WHERE id = ?`, [roId, ctx.user.id, id]);
+
+    await texec(cid,
+      `INSERT INTO lead_events (lead_id, kind, body, user_id, user_name)
+       VALUES (?, 'auto', ?, ?, ?)`,
+      [id, `Linked to RO ${file.ro_number}, which was already open.`, ctx.user.id, ctx.user.name]);
+
+    await audit(cid, actorFrom(req), {
+      entity: 'lead', entityId: id, action: 'lead_link_ro', area: 'Lead', roId,
+      label: `Lead ${lead.lead_number} — linked to RO ${file.ro_number}`,
+      changes: [{ field: 'Repair order', from: null, to: file.ro_number }]
+    });
+
+    return { ok: true, roId };
+  });
+
+  /**
+   * Undo a link. Only a link: a converted lead wrote its file and unpicking
+   * that would leave a repair order with no history of where it came from.
+   * The state is left alone — being wrong about which file is not being wrong
+   * about having won the work.
+   */
+  app.delete('/api/leads/:id/link-ro', async (req, reply) => {
+    const ctx = requireCompany(req, reply);
+    if (!ctx) return;
+    if (!ctx.caps.winLeads) return reply.code(403).send({ error: 'Not permitted' });
+
+    const cid = ctx.company!.id;
+    const id = Number((req.params as { id: string }).id);
+    const lead = await tqOne<RowDataPacket & {
+      lead_number: string; ro_id: number | null; ro_link_kind: string | null;
+    }>(cid, 'SELECT lead_number, ro_id, ro_link_kind FROM leads WHERE id = ?', [id]);
+    if (!lead) return reply.code(404).send({ error: 'No such lead' });
+    if (!lead.ro_id) return reply.code(400).send({ error: 'That lead is not on a file.' });
+    if (lead.ro_link_kind !== 'linked') {
+      return reply.code(400).send({
+        error: 'That lead was converted, so the file came from it and the link stays. Void the file instead.'
+      });
+    }
+
+    const was = await tqOne<RowDataPacket & { ro_number: string }>(
+      cid, 'SELECT ro_number FROM repair_orders WHERE id = ?', [lead.ro_id]);
+
+    await texec(cid,
+      `UPDATE leads SET ro_id = NULL, ro_link_kind = NULL, ro_linked_at = NULL, ro_linked_by = NULL
+       WHERE id = ?`, [id]);
+    await texec(cid,
+      `INSERT INTO lead_events (lead_id, kind, body, user_id, user_name)
+       VALUES (?, 'auto', ?, ?, ?)`,
+      [id, `Unlinked from RO ${was?.ro_number ?? lead.ro_id}.`, ctx.user.id, ctx.user.name]);
 
     return { ok: true };
   });
@@ -856,8 +1061,9 @@ export async function registerLeads(app: FastifyInstance): Promise<void> {
 
       await c.query(
         `UPDATE leads SET state = 'won', ro_id = ?, settled_at = NOW(),
+           ro_link_kind = 'converted', ro_linked_at = NOW(), ro_linked_by = ?,
            first_reply_at = COALESCE(first_reply_at, NOW())
-         WHERE id = ?`, [r.insertId, id]);
+         WHERE id = ?`, [r.insertId, ctx.user.id, id]);
 
       await c.query(
         `INSERT INTO lead_events (lead_id, kind, body, user_id, user_name) VALUES (?, 'auto', ?, ?, ?)`,
@@ -878,6 +1084,44 @@ export async function registerLeads(app: FastifyInstance): Promise<void> {
   });
 }
 
+
+/**
+ * The file a lead is being pointed at, or a refusal already sent.
+ *
+ * Open only. A closed or voided file is not somewhere a live lead lands, and
+ * one already answering to another lead is refused here rather than by the
+ * unique index, so the person picking gets a sentence instead of a database
+ * error.
+ */
+async function openFileForLink(
+  cid: number, roId: number, reply: { code: (n: number) => { send: (b: unknown) => unknown } }
+): Promise<(RowDataPacket & { id: number; ro_number: string }) | null> {
+  const file = await tqOne<RowDataPacket & {
+    id: number; ro_number: string; close_date: string | null;
+    closed_at: Date | null; voided_at: Date | null;
+  }>(cid, `SELECT id, ro_number, close_date, closed_at, voided_at
+           FROM repair_orders WHERE id = ?`, [roId]);
+  if (!file) { reply.code(404).send({ error: 'No such repair order.' }); return null; }
+  if (file.voided_at) {
+    reply.code(400).send({ error: `RO ${file.ro_number} is voided.` });
+    return null;
+  }
+  if (file.close_date || file.closed_at) {
+    reply.code(400).send({
+      error: `RO ${file.ro_number} is closed. A lead can only be linked to an open file.`
+    });
+    return null;
+  }
+  const taken = await tqOne<RowDataPacket & { lead_number: string }>(
+    cid, 'SELECT lead_number FROM leads WHERE ro_id = ?', [roId]);
+  if (taken) {
+    reply.code(409).send({
+      error: `RO ${file.ro_number} is already linked to lead ${taken.lead_number}.`
+    });
+    return null;
+  }
+  return file;
+}
 
 /*
  * Same rule the scheduler follows: an appointment is a clock face, so the

@@ -22,6 +22,21 @@ import { config } from '../config';
  */
 export async function registerDemoRequests(app: FastifyInstance): Promise<void> {
 
+  /**
+   * Is the mail path actually configured?
+   *
+   * `curl -s https://easyshopauto.com/api/demo-request/health` answers in one
+   * line what otherwise takes a journalctl and a guess. It reports shape, never
+   * the key itself.
+   */
+  app.get('/api/demo-request/health', async () => ({
+    resendKey: config.mail.apiKey ? 'set (' + config.mail.apiKey.slice(0, 6) + '…)' : 'MISSING',
+    from: config.mail.from || 'MISSING',
+    to: config.mail.demoTo || 'MISSING',
+    replyToDefault: config.mail.replyTo || 'MISSING'
+  }));
+
+
   app.post('/api/demo-request', async (req, reply) => {
     const b = (req.body ?? {}) as Record<string, string>;
 
@@ -84,9 +99,28 @@ export async function registerDemoRequests(app: FastifyInstance): Promise<void> 
     if (!sent.ok) {
       /* The visitor is not told about our mail provider. They are told the
          thing they can act on, which is the phone number. */
-      req.log.error({ err: sent.error }, 'demo request could not be sent');
+      /* The provider's own words, at error level with the destination, because
+         "something went wrong" in the browser is all the visitor should see and
+         all I could see too when this first failed in front of the founder. */
+      req.log.error({ err: sent.error, to: config.mail.demoTo, from: email },
+        'demo request could not be sent');
+
+      /**
+       * The provider's own reason goes back to the browser.
+       *
+       * Normally a visitor should never see our infrastructure talking. But a
+       * form that says "something went wrong" and nothing else is a form
+       * nobody can fix without shell access, and this one failed twice in a
+       * row with the reason sitting in a log file. Resend's message is a
+       * sentence about configuration ("domain not verified", "you can only
+       * send to your own address"), not customer data — so it is safe to show
+       * and it is the only thing that ends the guessing.
+       *
+       * Worth removing once the form has been seen to work.
+       */
       return reply.code(502).send({
-        error: 'Something went wrong sending that. Call 401-203-5823 and we will pick it up.'
+        error: 'That did not send. Call 401-203-5823 and we will pick it up.',
+        detail: sent.error || 'No reason given by the mail provider.'
       });
     }
 

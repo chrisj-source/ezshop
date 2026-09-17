@@ -1,6 +1,6 @@
 import { RowDataPacket } from 'mysql2/promise';
 import { tq, tqOne } from '../db/tenant';
-import { LABOUR_TRADES, Trade, TRADE_LABEL, emsHoursFor, assignmentsFor } from './profit';
+import { LABOR_TRADES, Trade, TRADE_LABEL, emsHoursFor, assignmentsFor } from './profit';
 
 /**
  * What a technician is owed on one file.
@@ -103,7 +103,7 @@ export interface FileBasis {
 
 /**
  * What the percentages run off on this file, and whether it counts as having
- * paint. Paint means paint labour on the estimate, or a painter flagged with
+ * paint. Paint means paint labor on the estimate, or a painter flagged with
  * hours — not merely that a painter is assigned, because an assignment that
  * never worked should not halve a body tech's pay.
  */
@@ -133,7 +133,7 @@ export async function fileBasis(companyId: number, roId: number): Promise<FileBa
       ? `${emsPaint} paint hours on the estimate`
       : flaggedPaintHours > 0
         ? `${flaggedPaintHours} paint hours flagged`
-        : 'no paint labour on this file'
+        : 'no paint labor on this file'
   };
 }
 
@@ -181,7 +181,7 @@ export async function flagRowsFor(companyId: number, roId: number): Promise<{
   if (!file) throw new Error('No such repair order');
 
   const assigned = (await assignmentsFor(companyId, roId))
-    .filter(a => (LABOUR_TRADES as readonly string[]).includes(a.positionKey));
+    .filter(a => (LABOR_TRADES as readonly string[]).includes(a.positionKey));
 
   const plans = await plansFor(companyId,
     assigned.map(a => a.userId).filter((n): n is number => n !== null));

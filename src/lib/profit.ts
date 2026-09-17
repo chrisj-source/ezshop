@@ -12,7 +12,7 @@
  *     − promises                     (anything else given away)
  *     − rental the shop carries      (nil when the policy covers it)
  *     − parts cost
- *     − labour, one line per assigned trade
+ *     − labor, one line per assigned trade
  *     − paint materials
  *     − sublet
  *     − sales pay                    (only when marked payable on this file)
@@ -28,15 +28,15 @@ import { tq, tqOne, texec } from '../db/tenant';
 import { loadPlan } from './pay';
 
 /** The trades a close-out sheet can ask about, in the order it lists them. */
-export const LABOUR_TRADES = ['pdr', 'body', 'paint', 'ri', 'detail'] as const;
-export type Trade = typeof LABOUR_TRADES[number];
+export const LABOR_TRADES = ['pdr', 'body', 'paint', 'ri', 'detail'] as const;
+export type Trade = typeof LABOR_TRADES[number];
 
 export type Basis = 'hours' | 'flat' | 'ems' | 'pct';
 
 /** Rental providers, alphabetical, with the shop's own loaner last. */
 export const RENTAL_PROVIDERS = ['Avis', 'Budget', 'Enterprise', 'Hertz', 'Loaner'];
 
-export interface LabourEntry {
+export interface LaborEntry {
   positionKey: Trade;
   basis: Basis;
   hours: number;
@@ -119,7 +119,7 @@ export async function ratesFor(companyId: number, userIds: number[]): Promise<Ma
 /**
  * Hours the EMS import brought over, per trade. Nothing to pull is a real answer.
  *
- * Estimating systems name labour by their own codes, so they are mapped onto the
+ * Estimating systems name labor by their own codes, so they are mapped onto the
  * shop's trades here — frame work is body work, refinish is paint. Only the last
  * accepted import counts; a pending one has not been agreed to yet.
  */
@@ -135,15 +135,15 @@ export async function emsHoursFor(companyId: number, roId: number): Promise<Reco
 
   const out: Record<string, number> = {};
   for (const r of rows) {
-    const trade = tradeForLabourCode(r.labor_type);
+    const trade = tradeForLaborCode(r.labor_type);
     if (!trade) continue;
     out[trade] = (out[trade] ?? 0) + (Number(r.hours) || 0);
   }
   return out;
 }
 
-/** An estimating system's labour code, in the shop's own terms. */
-export function tradeForLabourCode(code: string | null): Trade | null {
+/** An estimating system's labor code, in the shop's own terms. */
+export function tradeForLaborCode(code: string | null): Trade | null {
   const c = (code ?? '').toUpperCase().replace(/[^A-Z]/g, '');
   if (!c) return null;
   if (/^(RFN|REF|PNT|PAINT|P)$/.test(c)) return 'paint';
@@ -161,7 +161,7 @@ export interface CostLine { key: string; label: string; note: string; cents: num
 export interface Profit {
   approvalCents: number;
   lines: CostLine[];
-  labourCents: number;
+  laborCents: number;
   materialsCents: number;
   rentalCents: number;
   salesPayCents: number;
@@ -201,7 +201,7 @@ export function priceEntry(
 export async function profitFor(
   companyId: number,
   roId: number,
-  entries: LabourEntry[]
+  entries: LaborEntry[]
 ): Promise<Profit | null> {
   const f = await fileFor(companyId, roId);
   if (!f) return null;
@@ -212,7 +212,7 @@ export async function profitFor(
   const matRate = await setting(companyId, 'materials_rate_cents', 4200);
   const thinPct = await setting(companyId, 'thin_profit_pct', 25);
 
-  const byTrade = new Map<string, LabourEntry>(entries.map(e => [e.positionKey, e]));
+  const byTrade = new Map<string, LaborEntry>(entries.map(e => [e.positionKey, e]));
   const paint = byTrade.get('paint');
   /* Paint hours drive materials. A painter on a flat dollar leaves no hours to
      work from, so the file's own flat figure is used instead. */
@@ -227,17 +227,17 @@ export async function profitFor(
      rows arrive already priced from the flag, but a row that came off the sheet
      unpriced is worked out here rather than silently costing nothing. */
   const pctBase = Math.max(0, approval - (Number(f.parts_cost_cents) || 0));
-  let labour = 0;
-  const labourLines: CostLine[] = [];
-  for (const trade of LABOUR_TRADES) {
+  let labor = 0;
+  const laborLines: CostLine[] = [];
+  for (const trade of LABOR_TRADES) {
     if (trade === 'pdr') continue;
     const e = byTrade.get(trade);
     if (!e) continue;
     const cents = e.basis === 'pct' && !e.costCents
       ? Math.round(pctBase * ((Number(e.ratePct) || 0) / 100))
       : e.costCents;
-    labour += cents;
-    labourLines.push({
+    labor += cents;
+    laborLines.push({
       key: trade,
       label: TRADE_LABEL[trade] + ' cost',
       note: (e.displayName ?? 'Unassigned') +
@@ -257,13 +257,13 @@ export async function profitFor(
       const pct = (Number(pdr.ratePct) || 0) / 100;
       const base = pdr.pctAfterCosts
         ? Math.max(0, approval - given - rental - Number(f.parts_cost_cents) -
-            Number(f.sublet_cost_cents) - materials - labour)
+            Number(f.sublet_cost_cents) - materials - labor)
         : approval;
       pdrCents = Math.round(base * pct);
     } else {
       pdrCents = pdr.costCents;
     }
-    labour += pdrCents;
+    labor += pdrCents;
   }
 
   /* Sales pay: only when someone is on it and the commission is marked payable
@@ -328,7 +328,7 @@ export async function profitFor(
         : `${pdr.displayName ?? 'Unassigned'} — flat`
     });
   }
-  lines.push(...labourLines);
+  lines.push(...laborLines);
 
   if (paint) {
     lines.push({
@@ -347,7 +347,7 @@ export async function profitFor(
   return {
     approvalCents: approval,
     lines,
-    labourCents: labour,
+    laborCents: labor,
     materialsCents: materials,
     rentalCents: rental,
     salesPayCents: salesPay,
@@ -367,7 +367,7 @@ function usd(cents: number | string): string {
 }
 
 /** Read back what was punched in. */
-export async function labourFor(companyId: number, roId: number): Promise<LabourEntry[]> {
+export async function laborFor(companyId: number, roId: number): Promise<LaborEntry[]> {
   const rows = await tq<Array<RowDataPacket & {
     position_key: Trade; basis: Basis; hours: string; rate_cents: number; rate_pct: string;
     pct_after_costs: number; cost_cents: number; user_id: number | null; display_name: string | null;
@@ -388,16 +388,16 @@ export async function labourFor(companyId: number, roId: number): Promise<Labour
  * tech's own basis and rate, with hours pulled from the estimate where there are
  * any. Whatever the desk has already saved wins over the suggestion.
  */
-export async function suggestLabour(companyId: number, roId: number): Promise<LabourEntry[]> {
+export async function suggestLabor(companyId: number, roId: number): Promise<LaborEntry[]> {
   const assigned = await assignmentsFor(companyId, roId);
-  const trades = assigned.filter(a => (LABOUR_TRADES as readonly string[]).includes(a.positionKey));
+  const trades = assigned.filter(a => (LABOR_TRADES as readonly string[]).includes(a.positionKey));
   if (!trades.length) return [];
 
   const rates = await ratesFor(companyId, trades.map(t => t.userId).filter((n): n is number => n !== null));
   const ems = await emsHoursFor(companyId, roId);
-  const saved = new Map((await labourFor(companyId, roId)).map(e => [e.positionKey, e]));
+  const saved = new Map((await laborFor(companyId, roId)).map(e => [e.positionKey, e]));
 
-  return LABOUR_TRADES.flatMap<LabourEntry>(trade => {
+  return LABOR_TRADES.flatMap<LaborEntry>(trade => {
     const a = trades.find(t => t.positionKey === trade);
     if (!a) return [];
     const already = saved.get(trade);
@@ -411,7 +411,7 @@ export async function suggestLabour(companyId: number, roId: number): Promise<La
     const hours = basis === 'flat' ? (r?.rateCents ?? 0) : basis === 'ems' ? emsHours : 0;
     const rateCents = r?.rateCents ?? 0;
 
-    const entry: LabourEntry = {
+    const entry: LaborEntry = {
       positionKey: trade, basis, hours,
       rateCents: basis === 'flat' ? 0 : rateCents,
       ratePct: r?.ratePct ?? 0,
@@ -436,7 +436,7 @@ export async function suggestLabour(companyId: number, roId: number): Promise<La
 export async function saveCloseout(
   companyId: number,
   roId: number,
-  entries: LabourEntry[],
+  entries: LaborEntry[],
   actorId: number
 ): Promise<Profit | null> {
   const flagged = new Map<string, string>();
@@ -479,19 +479,19 @@ export async function saveCloseout(
   await texec(companyId, `
     INSERT INTO ro_profit
       (ro_id, approval_cents, deductible_given_cents, promises_cents, rental_cents,
-       parts_cents, labour_cents, materials_cents, sublet_cents, sales_pay_cents,
+       parts_cents, labor_cents, materials_cents, sublet_cents, sales_pay_cents,
        profit_cents, profit_pct, settled_by)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON DUPLICATE KEY UPDATE
       approval_cents = VALUES(approval_cents),
       deductible_given_cents = VALUES(deductible_given_cents),
       promises_cents = VALUES(promises_cents), rental_cents = VALUES(rental_cents),
-      parts_cents = VALUES(parts_cents), labour_cents = VALUES(labour_cents),
+      parts_cents = VALUES(parts_cents), labor_cents = VALUES(labor_cents),
       materials_cents = VALUES(materials_cents), sublet_cents = VALUES(sublet_cents),
       sales_pay_cents = VALUES(sales_pay_cents), profit_cents = VALUES(profit_cents),
       profit_pct = VALUES(profit_pct), settled_by = VALUES(settled_by)`,
     [roId, p.approvalCents, p.deductibleGivenCents, pick('promises'), p.rentalCents,
-     pick('parts'), p.labourCents, p.materialsCents, pick('sublet'), p.salesPayCents,
+     pick('parts'), p.laborCents, p.materialsCents, pick('sublet'), p.salesPayCents,
      p.profitCents, p.profitPct, actorId]);
 
   return p;
