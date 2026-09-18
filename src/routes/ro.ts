@@ -5,7 +5,7 @@ import { requireCompany, requireFeature, Ctx } from '../middleware/context';
 import { mayMoveTo, scrubMoney } from '../permissions';
 import { notify } from '../notify';
 import { fireTrigger, correctTrigger } from '../lib/pay';
-import { auditIn } from '../lib/audit';
+import { audit, auditIn } from '../lib/audit';
 import { actorFrom } from './audit';
 import { refuseEmail } from '../lib/suppression';
 import { scrubCustomer } from '../permissions';
@@ -71,7 +71,19 @@ export async function registerRepairOrders(app: FastifyInstance): Promise<void> 
 
     const [assigned, notes, history, promises, supplements, sublets, parts, docs, voids, insurers] = await Promise.all([
       tq<RowDataPacket[]>(cid, `SELECT position_key, user_id, display_name, assigned_at FROM ro_assignments WHERE ro_id = ?`, [id]),
-      tq<RowDataPacket[]>(cid, `SELECT id, kind, body, user_name, created_at FROM ro_notes WHERE ro_id = ? ORDER BY created_at DESC, id DESC`, [id]),
+      tq<RowDataPacket[]>(cid, `
+        SELECT n.id, n.kind, n.body, n.user_name, n.created_at, n.internal
+          FROM ro_notes n
+         WHERE n.ro_id = ?
+           /* An internal note is readable three ways and no others: the
+              capability, its own author, or a tag in that one note. Everybody
+              else is shown NOTHING — the row never leaves the server, so there
+              is no placeholder to notice and no count to infer. */
+           AND (n.internal = 0 OR ? = 1 OR n.user_id = ?
+                OR EXISTS (SELECT 1 FROM ro_mentions m
+                            WHERE m.note_id = n.id AND m.user_id = ?))
+         ORDER BY n.created_at DESC, n.id DESC`,
+        [id, ctx.caps.viewInternalNotes ? 1 : 0, ctx.user.id, ctx.user.id]),
       tq<RowDataPacket[]>(cid, `SELECT id, from_slot, to_slot, from_label, to_label, lane_changed, reason, is_rework, user_name, created_at
                                 FROM ro_status_history WHERE ro_id = ? ORDER BY created_at DESC, id DESC`, [id]),
       tq<RowDataPacket[]>(cid, `SELECT id, body, done, created_at FROM ro_promises WHERE ro_id = ? ORDER BY id`, [id]),
@@ -113,6 +125,7 @@ export async function registerRepairOrders(app: FastifyInstance): Promise<void> 
       history: ctx.caps.viewNotes ? history : [],
       canReadNotes: ctx.caps.viewNotes,
       canAddNotes: ctx.caps.addNotes,
+      canReadInternalNotes: ctx.caps.viewInternalNotes,
       /* Who is still waiting on an answer here, and for how long. */
       mentions: await openMentions(cid, id),
       /**
@@ -230,11 +243,13 @@ export async function registerRepairOrders(app: FastifyInstance): Promise<void> 
         );
       }
 
-      /* A note ridden in on a status change is still a note. */
+      /* A note ridden in on a status change is still a note — including the
+         "# " flag, which must mean the same thing in both boxes. */
       if (note && note.trim() && ctx.caps.addNotes) {
         await c.query(
-          `INSERT INTO ro_notes (ro_id, kind, body, user_id, user_name) VALUES (?, 'note', ?, ?, ?)`,
-          [id, note.trim(), ctx.user.id, ctx.user.name]
+          `INSERT INTO ro_notes (ro_id, kind, body, internal, user_id, user_name)
+           VALUES (?, 'note', ?, ?, ?, ?)`,
+          [id, note.trim(), /^#\s/.test(note.trim()) ? 1 : 0, ctx.user.id, ctx.user.name]
         );
       }
     });
@@ -287,9 +302,19 @@ export async function registerRepairOrders(app: FastifyInstance): Promise<void> 
     if (!await mayTouch(ctx, id)) return reply.code(403).send({ error: 'Not your file' });
 
     const cid2 = ctx.company!.id;
+    const text = body.trim();
+
+    /* "# " at the very front marks the note internal. The space is the whole
+       difference between a flag and an RO number: "# call the owner" is
+       internal, "#1204 came in on the truck" is an ordinary note. The hash is
+       kept in the stored text — it is how the note reads as internal to the
+       people who can see it. */
+    const internal = /^#\s/.test(text);
+
     const r = await texec(cid2,
-      `INSERT INTO ro_notes (ro_id, kind, body, user_id, user_name) VALUES (?, 'note', ?, ?, ?)`,
-      [id, body.trim(), ctx.user.id, ctx.user.name]
+      `INSERT INTO ro_notes (ro_id, kind, body, internal, user_id, user_name)
+       VALUES (?, 'note', ?, ?, ?, ?)`,
+      [id, text, internal ? 1 : 0, ctx.user.id, ctx.user.name]
     );
 
     /* Writing IS the answer. Their own open mentions on this file clear before
@@ -301,16 +326,94 @@ export async function registerRepairOrders(app: FastifyInstance): Promise<void> 
       'SELECT ro_number FROM repair_orders WHERE id = ?', [id]).catch(() => null);
 
     const tagged = await raiseMentions({
-      companyId: cid2, roId: id, noteId: r.insertId, body: body.trim(),
+      companyId: cid2, roId: id, noteId: r.insertId, body: text,
       byUserId: ctx.user.id, byUserName: ctx.user.name,
-      roNumber: roRow ? String(roRow.ro_number) : null
+      roNumber: roRow ? String(roRow.ro_number) : null,
+      /* A tag on an internal note is what lets that person read it — so it must
+         not also put the text in their inbox. In-app only, where the same
+         visibility test applies when they open the file. */
+      internal
     }).catch(() => []);
 
     return {
       ok: true, id: r.insertId,
+      internal,
       tagged: tagged.map(t => t.name),
       clearedMentions: cleared
     };
+  });
+
+  /**
+   * Every note on one file as plain text, for pasting into an email or a file.
+   *
+   * Internal notes are NEVER in it, whoever exports and whatever they can read
+   * on the screen: the export leaves the app as a flat block of text that gets
+   * forwarded, and nothing about it can enforce who reads it next. It does not
+   * say how many were left out either — a withheld count is the same leak as a
+   * placeholder in the drawer.
+   *
+   * Text, not a download: it opens as a plain page, which is what a desk
+   * actually does with it — select, copy, paste.
+   */
+  app.get('/api/ro/:id/notes.txt', async (req, reply) => {
+    const ctx = requireCompany(req, reply);
+    if (!ctx) return;
+    const id = Number((req.params as { id: string }).id);
+    if (!ctx.caps.viewNotes) return reply.code(403).send({ error: 'Not permitted to read notes' });
+    if (!await mayTouch(ctx, id)) return reply.code(403).send({ error: 'Not your file' });
+    const cid = ctx.company!.id;
+
+    const ro = await tqOne<RowDataPacket>(cid, `
+      SELECT r.ro_number, c.name AS customer_name,
+             v.year, v.make, v.model, v.plate
+        FROM repair_orders r
+        LEFT JOIN clients c ON c.id = r.client_id
+        LEFT JOIN vehicles v ON v.id = r.vehicle_id
+       WHERE r.id = ?`, [id]);
+    if (!ro) return reply.code(404).send({ error: 'No such repair order' });
+
+    const rows = await tq<RowDataPacket[]>(cid, `
+      SELECT kind, body, user_name, created_at
+        FROM ro_notes
+       WHERE ro_id = ? AND internal = 0
+       ORDER BY created_at, id`, [id]);
+
+    const stamp = (d: unknown): string => {
+      const t = new Date(String(d).replace(' ', 'T'));
+      return isNaN(t.getTime()) ? String(d) : t.toISOString().slice(0, 16).replace('T', ' ');
+    };
+
+    const car = [ro.year, ro.make, ro.model].filter(Boolean).join(' ');
+    const head = [
+      `RO ${ro.ro_number}`,
+      ro.customer_name ? String(ro.customer_name) : null,
+      car || null,
+      ro.plate ? `Plate ${ro.plate}` : null
+    ].filter(Boolean).join(' — ');
+
+    const out = [
+      head,
+      `Notes exported ${stamp(new Date().toISOString())} by ${ctx.user.name}`,
+      '',
+      ...(rows.length
+        ? rows.map(n => `${stamp(n.created_at)}  ${n.user_name || 'System'}` +
+            `${n.kind === 'auto' ? ' (automatic)' : ''}\n${String(n.body).trim()}\n`)
+        : ['Nothing recorded on this file yet.'])
+    ].join('\n');
+
+    /* Notes leaving the app is worth a row every time, so this is `audit` and
+       not `auditRead` — the read helper folds repeats inside an hour, which is
+       right for opening a screen and wrong for taking a copy. */
+    await audit(cid, actorFrom(req), {
+      entity: 'ro_notes', entityId: id, roId: id,
+      action: 'exported', area: 'Access',
+      label: `Notes exported as text — RO ${ro.ro_number}`,
+      detail: { notes: rows.length }
+    });
+
+    reply.header('content-type', 'text/plain; charset=utf-8');
+    reply.header('x-robots-tag', 'noindex');
+    return out;
   });
 
   app.post('/api/ro', async (req, reply) => {

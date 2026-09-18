@@ -294,10 +294,15 @@ CREATE TABLE ro_notes (
   ro_id           BIGINT UNSIGNED NOT NULL,
   kind            ENUM('note','auto','customer','insurance','sms','email') NOT NULL DEFAULT 'note',
   body            TEXT          NOT NULL,
+  -- A note typed "# …" is internal: readable only by roles holding
+  -- `internal_notes`, by its author, and by anybody tagged in that one note.
+  -- Everyone else is shown nothing at all — no placeholder, no count.
+  internal        TINYINT(1)    NOT NULL DEFAULT 0,
   user_id         BIGINT UNSIGNED NULL,
   user_name       VARCHAR(120)  NULL,
   created_at      DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
   KEY ix_notes_ro (ro_id, created_at),
+  KEY ix_notes_internal (ro_id, internal),
   CONSTRAINT fk_notes_ro FOREIGN KEY (ro_id) REFERENCES repair_orders(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -1375,6 +1380,20 @@ ON DUPLICATE KEY UPDATE setting_value = setting_value;
 INSERT INTO role_caps (role_key, cap_key, can_see, can_change) VALUES
   ('owner', 'web_forms', 1, 1)
 ON DUPLICATE KEY UPDATE can_see = 1, can_change = 1;
+
+-- Internal notes: the owner, accounting, and whoever already holds shop
+-- settings or permissions. Not the estimator or the front office — a shop ticks
+-- that outward itself, knowing it did.
+INSERT INTO role_caps (role_key, cap_key, can_see, can_change)
+SELECT r.role_key, 'internal_notes', 1, 0
+  FROM roles r
+ WHERE r.locked = 'owner'
+    OR r.role_key = 'accounting'
+    OR EXISTS (SELECT 1 FROM role_caps rc
+                WHERE rc.role_key = r.role_key
+                  AND rc.cap_key IN ('admin', 'perms')
+                  AND rc.can_see = 1)
+ON DUPLICATE KEY UPDATE can_see = 1;
 
 -- ===========================================================================
 -- TCPA consent (migration 032)

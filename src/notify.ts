@@ -41,6 +41,15 @@ export interface NotifyInput {
   directUserIds?: number[];
   /** one row per person per event per file */
   dedupeKey?: string;
+  /**
+   * In-app only — no email copy, whatever the person has switched on.
+   *
+   * For a message whose text is restricted at the source: a tag on an internal
+   * note. The in-app notification is safe because opening it goes back through
+   * the file, which applies the same visibility test; an email is a copy nobody
+   * can take back.
+   */
+  appOnly?: boolean;
 }
 
 interface GroupRow extends RowDataPacket {
@@ -167,7 +176,7 @@ async function deliver(input: NotifyInput, recipients: Set<number>): Promise<num
   /* And out of the building, for anyone who asked for it. Deliberately not
      awaited: a slow provider must never hold up the request that caused the
      notification, and a failed send is recorded rather than thrown. */
-  void mirrorToEmail(cid, [...recipients], input).catch(() => undefined);
+  if (!input.appOnly) void mirrorToEmail(cid, [...recipients], input).catch(() => undefined);
 
   return recipients.size;
 }

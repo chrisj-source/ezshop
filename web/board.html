@@ -2759,7 +2759,13 @@
           '<div id="tagList" class="taglist" role="listbox" aria-label="People you can tag" hidden></div>' +
           '</div>' +
           '<div class="hint" style="margin-top:4px">Type <strong>@</strong> to tag somebody. ' +
-          'They get it in their inbox and this file stays marked until they reply here.</div>'
+          'They get it in their inbox and this file stays marked until they reply here.</div>' +
+          '<div class="hint" style="margin-top:3px">Start a note with <strong>#</strong> and a space ' +
+          'to make it internal' +
+          (d.canReadInternalNotes
+            ? ' — only roles allowed internal notes, you, and anyone you tag can read it.'
+            : ' — then only management, you, and anyone you tag can read it.') +
+          '</div>'
         : '') +
       '<div class="row"><button class="btn btn-solid" id="saveStatus">' +
       (d.canAddNotes ? 'Add a note or pick a status' : 'Pick a status') + '</button>' +
@@ -2948,12 +2954,22 @@
 
     if (d.canReadNotes) {
     R.push('<div class="sec">Notes and history</div>');
+    R.push('<div class="row" style="margin:0 0 8px">' +
+      '<button class="btn btn-ghost" id="exportNotes" style="padding:6px 11px">Export notes as text</button>' +
+      '<span class="sub" style="flex:1;min-width:140px">Opens as plain text to copy. ' +
+      'Internal notes are never in it.</span></div>');
     if (!d.notes.length) R.push('<div class="sub">Nothing recorded yet.</div>');
     d.notes.forEach(function (n) {
-      R.push('<div class="log"><div class="row" style="gap:7px;align-items:baseline">' +
+      var int = Number(n.internal) === 1;
+      R.push('<div class="log"' +
+        /* Internal notes read as internal at a glance: a dashed edge, and the
+           # left in the text where it was typed. */
+        (int ? ' style="border:1px dashed var(--acc2);border-radius:4px;padding:8px 10px"' : '') +
+        '><div class="row" style="gap:7px;align-items:baseline">' +
         '<span class="flag" style="color:' +
-        (n.kind === 'auto' ? 'var(--dim)' : 'var(--acc2)') + ';border:1px solid var(--line)">' +
-        esc(n.kind === 'auto' ? 'auto' : 'note') + '</span>' +
+        (n.kind === 'auto' ? 'var(--dim)' : 'var(--acc2)') + ';border:1px' +
+        (int ? ' dashed var(--acc2)' : ' solid var(--line)') + '">' +
+        esc(int ? 'internal' : n.kind === 'auto' ? 'auto' : 'note') + '</span>' +
         '<span style="font:400 11px var(--font);color:var(--muted)">' +
         esc(n.user_name || 'System') + '</span>' +
         '<span class="log-m" style="margin:0 0 0 auto">' + when(n.created_at) + '</span></div>' +
@@ -3285,6 +3301,11 @@
       if (!body) return say('The note is empty.', 'err');
       api('/api/ro/' + OPEN + '/notes', { method: 'POST', body: JSON.stringify({ body: body }) })
         .then(reopen).catch(function (e) { say(e.message, 'err'); });
+    });
+
+    var ex = $('exportNotes');
+    if (ex) ex.addEventListener('click', function () {
+      window.open('/api/ro/' + OPEN + '/notes.txt', '_blank', 'noopener');
     });
 
     var add = $('addPart');

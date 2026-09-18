@@ -79,6 +79,7 @@ export const CAP_DEFS: CapDef[] = [
   { key: 'sees_all',      label: 'Sees files on the board',    section: 'Files',    see: 'seesRepairOrders' },
   { key: 'cust_contact',  label: "Customer address and contact details", section: 'Files', see: 'viewCustomerContact', change: 'editCustomerContact' },
   { key: 'notes',         label: 'Notes and history on a file', section: 'Files',   see: 'viewNotes',        change: 'addNotes' },
+  { key: 'internal_notes', label: 'Internal notes on a file',   section: 'Files',    see: 'viewInternalNotes' },
   { key: 'edit_ro',       label: 'Create and edit repair orders', section: 'Files', see: 'editRepairOrders' },
   { key: 'any_status',    label: 'Move a file to any status',  section: 'Files',    see: 'anyStatus' },
   { key: 'total_loss',    label: 'Mark a total loss',          section: 'Files',    see: 'markTotalLoss' },
@@ -133,6 +134,18 @@ export interface Caps {
       may want the floor reading it, or may not. */
   viewNotes: boolean;
   addNotes: boolean;
+  /**
+   * Internal notes — the ones typed "# …".
+   *
+   * Read-only as a capability: there is no separate right to write one, because
+   * anybody who can add a note can mark it internal and can always read their
+   * own back. What this tick buys is reading everybody else's.
+   *
+   * Two ways past it, both narrow: the author, and anybody tagged in that one
+   * note. A tag is somebody deliberately handing one note to one person, so it
+   * carries the note with it — and only that note.
+   */
+  viewInternalNotes: boolean;
   /** Every file, not only their own. Derived: sees files AND not own-only. */
   seesAllRepairOrders: boolean;
   /** True when every role held is own-only. Narrows leads, files and reports. */
@@ -208,7 +221,7 @@ export interface Caps {
 
 const CAPS_FIELDS: Array<keyof Caps> = [
   'money', 'editMoney', 'partsMoney', 'editPartsMoney', 'laborMoney', 'editLaborMoney',
-  'commissionMoney', 'viewPayments', 'recordPayments', 'editPayments', 'seesRepairOrders', 'viewNotes', 'addNotes', 'seesAllRepairOrders', 'ownWorkOnly',
+  'commissionMoney', 'viewPayments', 'recordPayments', 'editPayments', 'seesRepairOrders', 'viewNotes', 'addNotes', 'viewInternalNotes', 'seesAllRepairOrders', 'ownWorkOnly',
   'editRepairOrders', 'anyStatus', 'markTotalLoss', 'voidRepairOrders', 'closeRepairOrders',
   'uncloseRepairOrders', 'manageWholesaleClients', 'viewLeads', 'manageLeads', 'deleteLeads', 'winLeads', 'viewPaperwork',
   'uploadPaperwork', 'deleteDocuments', 'acceptImports', 'editAssignments', 'manageParts',
@@ -277,6 +290,7 @@ const LEGACY: Record<string, Array<[string, 0 | 1, 0 | 1]>> = {
     ['sees_all', 1, 0], ['close_ro', 1, 1], ['unclose', 1, 1], ['wholesale_clients', 1, 1],
     ['leads', 1, 0], ['paperwork', 1, 1],
     ['reports', 1, 1], ['money_reports', 1, 0], ['pay_plans', 1, 1], ['notes', 1, 1],
+    ['internal_notes', 1, 0],
     ['cust_contact', 1, 0]],
   estimator: [['ro_totals', 1, 1], ['parts_money', 1, 1], ['labour_money', 1, 1], ['commission', 1, 0],
     ['payments', 1, 0],

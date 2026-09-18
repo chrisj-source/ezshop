@@ -90,13 +90,14 @@
 
     <div class="sec">Vehicle</div>
     <div class="grid">
-      <div><label for="vin">VIN</label><input id="vin" maxlength="17" style="text-transform:uppercase"></div>
+      <div><label for="vin">VIN</label><input id="vin" maxlength="17" style="text-transform:uppercase" autocomplete="off" spellcheck="false"></div>
       <div><label for="year">Year</label><input id="year" type="number" min="1950" max="2030"></div>
       <div><label for="make">Make</label><input id="make"></div>
       <div><label for="model">Model</label><input id="model"></div>
       <div><label for="color">Colour</label><input id="color"></div>
       <div><label for="plate">Plate</label><input id="plate" style="text-transform:uppercase"></div>
     </div>
+    <div class="hint" id="vinOut">Type or paste a VIN and the year, make and model fill themselves in.</div>
 
     <div class="sec">Claim</div>
     <div class="grid">
@@ -173,6 +174,61 @@
     });
 
   $('roType').addEventListener('change', paintType);
+
+  /* --------------------------------------------------------- VIN decode */
+
+  /* Same decode the check-in screen uses. It fills what is still empty and
+     never overwrites something typed — a corrected make is the shop knowing
+     better than the VIN. */
+  var vinSeen = '', vinTimer = null;
+
+  function decode(vin) {
+    vinSeen = vin;
+    $('vinOut').className = 'hint';
+    $('vinOut').textContent = 'Decoding…';
+    fetch('/api/vin/' + encodeURIComponent(vin), { headers: { accept: 'application/json' } })
+      .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+      .then(function (res) {
+        if (vinSeen !== vin) return;
+        if (!res.ok) {
+          $('vinOut').className = 'hint warn';
+          $('vinOut').textContent = res.j.error || 'That VIN could not be decoded.';
+          return;
+        }
+        var d = res.j;
+        if (d.year && !$('year').value) $('year').value = d.year;
+        if (d.make && !$('make').value) $('make').value = d.make;
+        if (d.model && !$('model').value) $('model').value = d.model;
+        var head = [d.year, d.make, d.model].filter(Boolean).join(' ');
+        var extra = [d.trim && 'Trim ' + d.trim, d.bodyClass, d.engine, d.driveType]
+          .filter(Boolean).join(' · ');
+        $('vinOut').className = 'hint';
+        $('vinOut').innerHTML = head
+          ? '<strong>' + esc(head) + '</strong>' + (extra ? '<br>' + esc(extra) : '')
+          : 'Decoded, but the VIN carried no year, make or model.';
+      })
+      .catch(function () {
+        if (vinSeen !== vin) return;
+        $('vinOut').className = 'hint warn';
+        $('vinOut').textContent = 'Could not reach the decoder. Fill the vehicle in by hand.';
+      });
+  }
+
+  $('vin').addEventListener('input', function () {
+    var vin = $('vin').value.toUpperCase().replace(/[^A-HJ-NPR-Z0-9]/g, '');
+    if ($('vin').value !== vin) $('vin').value = vin;
+    clearTimeout(vinTimer);
+    if (vin.length < 17) {
+      vinSeen = '';
+      $('vinOut').className = 'hint';
+      $('vinOut').textContent = vin.length
+        ? 'A VIN is 17 characters — ' + vin.length + ' so far.'
+        : 'Type or paste a VIN and the year, make and model fill themselves in.';
+      return;
+    }
+    if (vin === vinSeen) return;
+    vinTimer = setTimeout(function () { decode(vin); }, 250);
+  });
 
   /* Leaving to set the account up must not cost the half-typed file, so the
      form is stashed on the way out and the new id comes back in the URL. */

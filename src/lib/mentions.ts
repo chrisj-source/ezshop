@@ -144,6 +144,14 @@ function escapeRe(s: string): string {
 export async function raiseMentions(opts: {
   companyId: number; roId: number; noteId: number; body: string;
   byUserId: number; byUserName: string; roNumber?: string | null;
+  /**
+   * The note is internal, so the tag is told in-app only.
+   *
+   * The tag is the thing granting this person the note; mirroring it to email
+   * would put restricted text in an inbox, outside every check that made it
+   * restricted in the first place.
+   */
+  internal?: boolean;
 }): Promise<Taggable[]> {
   const people = await taggablePeople(opts.companyId);
   const tagged = findMentions(opts.body, people).filter(p => p.id !== opts.byUserId);
@@ -171,6 +179,7 @@ export async function raiseMentions(opts: {
     body: trim(opts.body, 400),
     actorUserId: opts.byUserId,
     directUserIds: tagged.map(p => p.id),
+    appOnly: !!opts.internal,
     dedupeKey: `mention:${opts.noteId}`
   }).catch(() => undefined);
 
