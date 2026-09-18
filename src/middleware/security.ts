@@ -122,8 +122,23 @@ function applyHeaders(req: FastifyRequest, reply: FastifyReply): void {
    * gated per request by the key and the domain allowlist, not by who can
    * download the file.
    */
-  reply.header('cross-origin-resource-policy',
-    isEmbedScript(req.url) ? 'cross-origin' : 'same-origin');
+  if (isEmbedScript(req.url)) {
+    reply.header('cross-origin-resource-policy', 'cross-origin');
+    /**
+     * Five minutes, and `must-revalidate`.
+     *
+     * This file lives on somebody else's website and we cannot ask them to
+     * clear anything. Left to the default it would be cached by the browser
+     * and by whatever CDN sits in front of their site, which means a fix could
+     * not be shipped at all — the first version of this was already being
+     * served stale while the server had the new one. Five minutes is short
+     * enough that a fix reaches every page inside a coffee break and long
+     * enough that a busy landing page is not refetching it per visitor.
+     */
+    reply.header('cache-control', 'public, max-age=300, must-revalidate');
+  } else {
+    reply.header('cross-origin-resource-policy', 'same-origin');
+  }
 
   if (isPublic) {
     /* The marketing pages are meant to be found. `max-image-preview:large`

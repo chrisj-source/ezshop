@@ -470,7 +470,8 @@
         send.disabled = true;
         send.textContent = 'Sending…';
 
-        api('/api/f/submit', { method: 'POST', body: JSON.stringify(body) })
+        api('/api/f/submit?k=' + encodeURIComponent(KEY),
+          { method: 'POST', body: JSON.stringify(body) })
           .then(function (r) { done(r); })
           .catch(function (e) {
             state.busy = false;

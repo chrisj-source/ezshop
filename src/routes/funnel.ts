@@ -70,6 +70,15 @@ async function gate(
   const key = String((req.query as { k?: string }).k ?? (req.body as { k?: string })?.k ?? '');
   const origin = String(req.headers.origin ?? '');
 
+  /* Echoed before anything is decided, so a refusal below is READABLE to the
+     page rather than arriving as an opaque network failure. */
+  if (origin) {
+    reply.header('access-control-allow-origin', origin);
+    reply.header('vary', 'Origin');
+    reply.header('access-control-allow-credentials', 'false');
+    reply.header('cache-control', 'no-store');
+  }
+
   const resolved = await resolveKey(key);
   if (!resolved) { void refuse(reply); return null; }
 
@@ -79,21 +88,32 @@ async function gate(
     return null;
   }
 
-  allowOrigin(reply, origin);
   void touchKey(key);
   return { companyId: resolved.companyId, publicKey: key, origin };
 }
 
 function refuse(reply: FastifyReply): void {
-  /* No allow-origin header on a refusal: the browser is meant to be unable to
-     read this, and saying nothing is the honest answer to a page that has no
-     business asking. */
+  /**
+   * The refusal DOES carry an allow-origin header.
+   *
+   * The first version withheld it on the reasoning that a page with no
+   * business asking should be told nothing. That was wrong in practice: the
+   * browser then blocks the response and the console says "Failed to fetch",
+   * which is indistinguishable from the server being down. The shop's web
+   * person — who is the person who has to fix it — learns nothing.
+   *
+   * The body says only that the form is not set up for this website. It
+   * confirms nothing about which keys or which domains exist, so there is
+   * nothing here worth withholding at the cost of making it undiagnosable.
+   */
   void reply.code(403).send({ error: 'This form is not set up for this website.' });
 }
 
 function allowOrigin(reply: FastifyReply, origin: string): void {
-  /* Echoed, never '*': the answer is specific to one allowlisted page and a
-     wildcard would let any site read a shop's availability. */
+  /* Echoed, never '*': the answer is specific to the page that asked, and a
+     wildcard would let any site read a shop's availability. Folded into
+     `gate()` above, which sets it before deciding so that a refusal is
+     readable rather than opaque. */
   reply.header('access-control-allow-origin', origin);
   reply.header('vary', 'Origin');
   reply.header('cache-control', 'no-store');
@@ -105,16 +125,37 @@ function allowOrigin(reply: FastifyReply, origin: string): void {
 
 export async function registerFunnelPublic(app: FastifyInstance): Promise<void> {
 
-  /* Preflight. The snippet POSTs JSON, which is never a simple request. */
+  /**
+   * Preflight. The snippet POSTs JSON, which is never a simple request.
+   *
+   * Answered for ANY origin, deliberately, and this is not a hole — two
+   * reasons, and the first one is the bug that taught me:
+   *
+   *  1. **A preflight cannot know which shop it is for.** The key travels in
+   *     the body on a POST, and a preflight has no body. Gating it on `?k=`
+   *     meant `/api/f/submit` never got CORS headers at all, so the browser
+   *     refused to send the real request and the form said "Failed to fetch" —
+   *     while the GETs, which do carry `?k=`, worked fine.
+   *
+   *  2. **A preflight is not an authorisation decision.** It only tells the
+   *     browser it may send the request. Every real request still goes through
+   *     `gate()`, which resolves the key and checks the shop's own domain
+   *     allowlist. Nothing is read and nothing is written here.
+   *
+   * And refusing a preflight is actively worse for the shop: it turns every
+   * misconfiguration into an undiagnosable network error in the console.
+   * Allowing it lets the real request come back as a readable 403 saying the
+   * form is not set up for this website — which is the sentence their web
+   * person needs.
+   */
   app.options('/api/f/*', async (req, reply) => {
     const origin = String(req.headers.origin ?? '');
-    const key = String((req.query as { k?: string }).k ?? '');
-    const resolved = key ? await resolveKey(key) : null;
-
-    if (resolved && await originAllowed(resolved.companyId, origin)) {
-      allowOrigin(reply, origin);
+    if (origin) {
+      reply.header('access-control-allow-origin', origin);
+      reply.header('vary', 'Origin');
       reply.header('access-control-allow-methods', 'GET, POST, OPTIONS');
       reply.header('access-control-allow-headers', 'content-type');
+      reply.header('access-control-allow-credentials', 'false');
       reply.header('access-control-max-age', CORS_MAX_AGE);
     }
     return reply.code(204).send();
