@@ -235,24 +235,25 @@
             dayRow.textContent = '';
             var any = false;
 
+            /* Every day here has times on it — the server drops the closed and
+               full ones rather than sending them to be greyed out. So there is
+               no disabled state to draw and no "closed" caption: a customer
+               sees the days they can have. */
             state.days.forEach(function (d) {
-              if (!d.slots.length && !any && state.days.indexOf(d) > 13) return;
               var b = el('button', 'flex:0 1 auto;min-width:64px;text-align:center;padding:8px 10px');
               b.type = 'button';
-              b.disabled = !d.slots.length;
-              if (d.why) b.title = d.why;
               var wd = el('span', 'display:block;font-size:0.75em');
               wd.textContent = d.weekday;
               var dn = el('span', 'display:block;font-size:1.125em;font-weight:600;line-height:1.15');
               dn.textContent = d.dayNum;
               var sub = el('span', 'display:block;font-size:0.6875em;margin-top:1px');
-              sub.textContent = d.slots.length ? d.slots.length + ' times' : (d.why || 'none');
+              sub.textContent = d.slots.length + ' times';
               b.appendChild(wd); b.appendChild(dn); b.appendChild(sub);
               b.setAttribute('style', b.getAttribute('style') + ';' + accentStyle(false));
               b.onclick = function () { pickDay(d); };
               dayRow.appendChild(b);
               b.__day = d;
-              if (d.slots.length && !any) { any = true; pickDay(d); }
+              if (!any) { any = true; pickDay(d); }
             });
 
             if (!any) {

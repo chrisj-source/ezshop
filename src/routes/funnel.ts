@@ -200,7 +200,26 @@ export async function registerFunnelPublic(app: FastifyInstance): Promise<void> 
     const list = await publicSlots(
       g.companyId, String(company?.timezone ?? 'America/Chicago'), purpose, days);
 
-    return { purpose, requested: purpose === 'drop', holdHours: settings.holdHours, days: list };
+    /**
+     * A day with nothing on it is not shown at all.
+     *
+     * The first version drew it greyed with "closed" or "full" under it, which
+     * reads to a customer as a shop that is mostly shut — six tiles, two of
+     * them usable. The desk still needs to know WHY a day is empty, so
+     * `publicSlots` keeps returning the reason and the move-times list in the
+     * queue still shows it; this is the public view only.
+     */
+    const open = list.filter(d => d.slots.length);
+
+    return {
+      purpose,
+      requested: purpose === 'drop',
+      holdHours: settings.holdHours,
+      days: open,
+      /* So the form can say something true when there is nothing at all,
+         rather than drawing an empty row. */
+      none: open.length === 0
+    };
   });
 
   /**
