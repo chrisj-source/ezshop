@@ -81,6 +81,11 @@
   var api = Shell.api, esc = Shell.esc;
   var ME = null, TYPES = null, CLIENTS = [], KIND = 'wholesale', OPEN = null;
 
+  /* ?new=<kind>&back=<path> — another screen sent us here to add an account.
+     `back` is same-origin only: a path, never a URL. */
+  var Q = new URLSearchParams(location.search);
+  var BACK = /^\/[A-Za-z0-9._\/-]*$/.test(Q.get('back') || '') ? Q.get('back') : null;
+
   var KINDS = [
     { k: 'wholesale', t: 'Wholesale' },
     { k: 'insurance', t: 'Insurance' },
@@ -108,8 +113,13 @@
   }).then(function (t) {
     if (!t) return;
     TYPES = t;
+    var want = Q.get('new');
+    if (want && KINDS.some(function (k) { return k.k === want; })) KIND = want;
     renderTabs();
-    return load();
+    return load().then(function () {
+      /* Sent here to add one — open the form straight away. */
+      if (want && !$('newBtn').hidden) $('newBtn').click();
+    });
   }).catch(function (e) { if (e.message !== 'signed out') console.error(e); });
 
   function canWrite(kind) {
@@ -243,7 +253,10 @@
       '<div class="msg" id="nMsg"></div></div>';
     box.hidden = false;
 
-    $('cancelNew').addEventListener('click', function () { box.hidden = true; });
+    $('cancelNew').addEventListener('click', function () {
+      box.hidden = true;
+      if (BACK) location.href = BACK;
+    });
     $('saveNew').addEventListener('click', function () {
       var msg = $('nMsg');
       var name = $('cName').value.trim();
@@ -261,7 +274,15 @@
       if (isI && $('cDesk')) body.adjusterDesk = $('cDesk').value.trim() || undefined;
 
       api('/api/clients', { method: 'POST', body: JSON.stringify(body) })
-        .then(function () { box.hidden = true; return load(); })
+        .then(function (r) {
+          /* Came here from a form that needs this account — hand the new id back
+             so the half-typed file picks it up instead of starting over. */
+          if (BACK) {
+            location.href = BACK + (BACK.indexOf('?') < 0 ? '?' : '&') + 'client=' + r.id;
+            return;
+          }
+          box.hidden = true; return load();
+        })
         .catch(function (e) { msg.textContent = e.message; msg.className = 'msg err'; });
     });
   });

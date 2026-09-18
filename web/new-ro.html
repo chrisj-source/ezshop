@@ -38,6 +38,8 @@
          margin-top:18px;display:none; }
   .msg.err { display:block;color:var(--bad);border:1px solid var(--bad); }
   .msg.ok { display:block;color:var(--good);border:1px solid var(--good); }
+  .hint { font:400 11.5px var(--font);color:var(--dim);line-height:1.5;margin-top:8px; }
+  .hint.warn { color:var(--acc2); }
 </style>
 </head>
 <body>
@@ -67,11 +69,23 @@
       </div>
     </div>
 
+    <div id="acctWrap" hidden>
+      <div class="sec">Billed to</div>
+      <div class="grid two">
+        <div><label for="clientId">Wholesale account</label>
+          <select id="clientId"><option value="">Pick an account…</option></select></div>
+        <div style="align-self:end;padding-bottom:9px"><a href="#" id="addAcct">Add a wholesale account &rarr;</a></div>
+      </div>
+      <div class="hint" id="acctNote">On a wholesale file the account is the customer — the name, terms and billing come off it.</div>
+    </div>
+
+    <div id="custWrap">
     <div class="sec">Customer</div>
     <div class="grid">
       <div><label for="customerName">Name</label><input id="customerName"></div>
       <div><label for="phone">Phone</label><input id="phone" type="tel"></div>
       <div><label for="email">Email</label><input id="email" type="email"></div>
+    </div>
     </div>
 
     <div class="sec">Vehicle</div>
@@ -109,11 +123,99 @@
 <script>
 (function () {
   var msg = document.getElementById('msg');
+  function $(id) { return document.getElementById(id); }
   function val(id) { var v = document.getElementById(id).value.trim(); return v || undefined; }
   function num(id) { var v = document.getElementById(id).value; return v === '' ? undefined : Number(v); }
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
+    });
+  }
+
+  var FIELDS = ['roNumber','roType','repairPath','clientId','customerName','phone','email',
+    'vin','year','make','model','color','plate','insurerName','claimNumber','dateOfLoss',
+    'amount','laborHours','targetDays'];
+  var DRAFT = 'es_newro_draft';
+  var WT = { dealer:'Dealer', hail:'Hail company', auction:'Auction', fleet:'Fleet' };
+  var ACCOUNTS = [];
+
+  function isWholesale() { return $('roType').value === 'wholesale'; }
+
+  function paintType() {
+    var w = isWholesale();
+    $('acctWrap').hidden = !w;
+    $('custWrap').hidden = w;
+    if (w && !ACCOUNTS.length) {
+      $('acctNote').className = 'hint warn';
+      $('acctNote').textContent = 'No wholesale accounts set up yet. Add the dealers and hail ' +
+        'companies you work for before billing a file to an account.';
+    }
+  }
+
+  function paintAccounts() {
+    var sel = $('clientId'), keep = sel.value;
+    sel.innerHTML = '<option value="">Pick an account…</option>' +
+      ACCOUNTS.map(function (a) {
+        var sub = [WT[a.wholesale_type] || a.wholesale_type, a.terms].filter(Boolean).join(' · ');
+        return '<option value="' + a.id + '">' + esc(a.name) + (sub ? ' · ' + esc(sub) : '') + '</option>';
+      }).join('');
+    if (keep) sel.value = keep;
+  }
+
+  fetch('/api/clients?kind=wholesale', { headers: { accept: 'application/json' } })
+    .then(function (r) { return r.ok ? r.json() : { clients: [] }; })
+    .catch(function () { return { clients: [] }; })
+    .then(function (d) {
+      ACCOUNTS = d.clients || [];
+      paintAccounts();
+      restore();
+      paintType();
+    });
+
+  $('roType').addEventListener('change', paintType);
+
+  /* Leaving to set the account up must not cost the half-typed file, so the
+     form is stashed on the way out and the new id comes back in the URL. */
+  $('addAcct').addEventListener('click', function (e) {
+    e.preventDefault();
+    stash();
+    location.href = '/clients.html?new=wholesale&back=%2Fnew-ro.html';
+  });
+
+  function stash() {
+    var d = {};
+    FIELDS.forEach(function (f) { d[f] = $(f).value; });
+    try { sessionStorage.setItem(DRAFT, JSON.stringify(d)); } catch (err) { /* private mode */ }
+  }
+
+  function restore() {
+    var raw = null;
+    try { raw = sessionStorage.getItem(DRAFT); } catch (err) { /* private mode */ }
+    if (raw) {
+      try {
+        var d = JSON.parse(raw);
+        FIELDS.forEach(function (f) { if (d[f] != null && d[f] !== '') $(f).value = d[f]; });
+      } catch (err) { /* a bad draft is not worth a broken form */ }
+      try { sessionStorage.removeItem(DRAFT); } catch (err) { /* private mode */ }
+    }
+    var picked = new URLSearchParams(location.search).get('client');
+    if (picked && /^\d+$/.test(picked)) {
+      $('roType').value = 'wholesale';
+      $('clientId').value = picked;
+      history.replaceState(null, '', '/new-ro.html');
+    }
+  }
 
   document.getElementById('form').addEventListener('submit', function (e) {
     e.preventDefault();
+
+    if (isWholesale() && !val('clientId')) {
+      msg.textContent = 'Pick the wholesale account this file is billed to.';
+      msg.className = 'msg err';
+      $('clientId').focus();
+      return;
+    }
+
     document.getElementById('save').disabled = true;
 
     var amount = num('amount');
@@ -121,9 +223,10 @@
       roNumber: val('roNumber'),
       roType: val('roType'),
       repairPath: val('repairPath'),
-      customerName: val('customerName'),
-      phone: val('phone'),
-      email: val('email'),
+      clientId: isWholesale() ? num('clientId') : undefined,
+      customerName: isWholesale() ? undefined : val('customerName'),
+      phone: isWholesale() ? undefined : val('phone'),
+      email: isWholesale() ? undefined : val('email'),
       vin: val('vin') ? val('vin').toUpperCase() : undefined,
       year: num('year'),
       make: val('make'),
@@ -146,6 +249,7 @@
         document.getElementById('save').disabled = false;
         if (!res.ok) { msg.textContent = res.j.error; msg.className = 'msg err'; return; }
         msg.textContent = 'Created.'; msg.className = 'msg ok';
+        try { sessionStorage.removeItem(DRAFT); } catch (err) { /* private mode */ }
         setTimeout(function () { location.href = '/board.html'; }, 500);
       })
       .catch(function () {

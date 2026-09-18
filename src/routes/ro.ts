@@ -321,6 +321,7 @@ export async function registerRepairOrders(app: FastifyInstance): Promise<void> 
 
     const b = req.body as {
       roNumber: string; customerName?: string; phone?: string; email?: string;
+      clientId?: number;
       vin?: string; year?: number; make?: string; model?: string; color?: string; plate?: string;
       insurerName?: string; claimNumber?: string; dateOfLoss?: string;
       repairPath?: 'pdr' | 'conventional' | 'both' | 'undecided';
@@ -329,6 +330,26 @@ export async function registerRepairOrders(app: FastifyInstance): Promise<void> 
     };
 
     if (!b.roNumber) return reply.code(400).send({ error: 'RO number is required' });
+
+    /* On a wholesale file the account IS the customer — check-in's rule, and the
+       desk now follows it. The file is billed to an existing account; it never
+       invents a retail client from a typed name. */
+    let accountId: number | null = null;
+    if (b.roType === 'wholesale') {
+      accountId = Number(b.clientId) || null;
+      if (!accountId) {
+        return reply.code(400).send({
+          error: 'Pick the wholesale account this file is billed to.', field: 'clientId'
+        });
+      }
+      const acct = await tqOne<RowDataPacket>(cid,
+        `SELECT id FROM clients WHERE id = ? AND kind = 'wholesale' AND active = 1`, [accountId]);
+      if (!acct) {
+        return reply.code(400).send({
+          error: 'That wholesale account is not available. Pick another.', field: 'clientId'
+        });
+      }
+    }
 
     const dup = await tqOne<RowDataPacket>(cid, 'SELECT id FROM repair_orders WHERE ro_number = ?', [b.roNumber]);
     if (dup) return reply.code(409).send({ error: `RO ${b.roNumber} already exists.` });
@@ -340,8 +361,8 @@ export async function registerRepairOrders(app: FastifyInstance): Promise<void> 
     if (refused) return reply.code(409).send({ error: refused, field: 'email' });
 
     const id = await withTenantTx(cid, async (c) => {
-      let clientId: number | null = null;
-      if (b.customerName) {
+      let clientId: number | null = accountId;
+      if (!clientId && b.customerName) {
         const [r] = await c.query<ResultSetHeader>(
           `INSERT INTO clients (kind, name, phone, email) VALUES ('retail', ?, ?, ?)`,
           [b.customerName, b.phone ?? null, b.email ?? null]
