@@ -17,7 +17,12 @@ import { config } from './config';
 
 export type EventKey =
   | 'status.change' | 'parts.arrived' | 'parts.late' | 'parts.return'
-  | 'supp.decision' | 'age.red' | 'assign.file' | 'sms.reply' | 'mention' | 'lead.chase';
+  | 'supp.decision' | 'age.red' | 'assign.file' | 'sms.reply' | 'mention' | 'lead.chase'
+  /* Somebody filled in the form on the shop's own website. One arriving at
+     11pm on a Saturday reaches the same people as one at midday — it is one
+     event, and it obeys the suppression list like everything else: the in-app
+     copy always, the email only if that address has not unsubscribed. */
+  | 'web.request';
 
 export interface NotifyInput {
   companyId: number;

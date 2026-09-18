@@ -214,6 +214,7 @@ CREATE TABLE repair_orders (
   total_loss_at     DATETIME      NULL COMMENT 'own flag, like void. the board draws lane 00 from it',
   total_loss_by     BIGINT UNSIGNED NULL,
   total_loss_note   VARCHAR(255)  NULL,
+  web_request_id    BIGINT UNSIGNED NULL COMMENT 'an unanswered website submission about this car; cleared when the queue answers it',
   voided_at         DATETIME      NULL COMMENT 'own flag, not a status and not a hold',
   voided_days       INT           NOT NULL DEFAULT 0 COMMENT 'days spent voided, subtracted from days in shop',
   reopen_count      INT           NOT NULL DEFAULT 0,
@@ -446,6 +447,8 @@ CREATE TABLE leads (
   zip             VARCHAR(16)   NULL,
   vehicle_text    VARCHAR(160)  NULL,
   damage_note     VARCHAR(400)  NULL,
+  campaign        VARCHAR(60)   NULL COMMENT 'the tag on the link the customer followed, from the website form',
+  source_url      VARCHAR(400)  NULL COMMENT 'the shop own page it was submitted from',
   estimate_cents  BIGINT        NULL COMMENT 'what was quoted at the counter. Required to mark estimate_written',
   estimate_written_at DATETIME  NULL,
   estimate_written_by BIGINT UNSIGNED NULL,
@@ -1197,3 +1200,176 @@ INSERT INTO shop_settings (setting_key, setting_value) VALUES
   ('mention_remind_hours', '24'),
   ('mention_overdue_hours', '48')
 ON DUPLICATE KEY UPDATE setting_value = setting_value;
+
+-- ===========================================================================
+-- Web funnels (migration 031)
+-- ===========================================================================
+--
+-- A form the shop pastes into its OWN website, feeding Leads and the
+-- scheduler. Three things it is not, each considered and rejected:
+--
+--   * Not a page we host. It renders inline into the shop's div and inherits
+--     their fonts and colours, so nothing in it may assume a width.
+--   * Not a Zapier client. Zapier bills per task; this is the shop's own site.
+--   * Not a second availability engine. A public booking passes the same
+--     `scheduleGuards` a desk booking does. What this adds is a NARROWER
+--     public window on top of the shop's real hours, never a wider one.
+--
+-- The public key that identifies a shop lives in the MASTER database
+-- (master/008), because the snippet posts a key and nothing else — there is no
+-- tenant database to look in until it resolves.
+
+CREATE TABLE funnel_settings (
+  id             TINYINT UNSIGNED NOT NULL PRIMARY KEY DEFAULT 1,
+  enabled        TINYINT(1)   NOT NULL DEFAULT 0,
+  offer_estimate TINYINT(1)   NOT NULL DEFAULT 1 COMMENT 'booked outright',
+  offer_drop     TINYINT(1)   NOT NULL DEFAULT 1 COMMENT 'requested, and held',
+  hold_hours     SMALLINT     NOT NULL DEFAULT 24,
+  notice_hours   SMALLINT     NOT NULL DEFAULT 2
+    COMMENT 'public and desk share the day limit, so without this a stranger takes the last slot at 8:55 for a 9:00',
+  accent         CHAR(7)      NOT NULL DEFAULT '#2b2622',
+  accent_ink     CHAR(7)      NOT NULL DEFAULT '#ffffff',
+  contrast_ack_at   DATETIME  NULL COMMENT 'warned the pair fails AA and used it anyway',
+  contrast_ack_by   BIGINT UNSIGNED NULL,
+  contrast_ack_note VARCHAR(190) NULL,
+  intro          VARCHAR(400) NULL,
+  reply_to       VARCHAR(190) NULL,
+  updated_at     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+INSERT INTO funnel_settings (id) VALUES (1) ON DUPLICATE KEY UPDATE id = id;
+
+-- The allowlist, and the whole security model for a public key: the key says
+-- which shop, the Origin says whether this page may speak for it. Bare host,
+-- lowercase. `www.` is never assumed — guessing which of somebody's
+-- subdomains are theirs is not ours to do.
+CREATE TABLE funnel_domains (
+  host         VARCHAR(190) NOT NULL PRIMARY KEY,
+  added_at     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  added_by     BIGINT UNSIGNED NULL,
+  last_seen_at DATETIME     NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- What the PUBLIC may book, per weekday. Narrows shop_hours and can never
+-- widen it; a row wider than the shop's own window is clamped at read time,
+-- because the hours can change after this was saved. Absent row = follows the
+-- shop exactly.
+CREATE TABLE funnel_hours (
+  dow         TINYINT UNSIGNED NOT NULL PRIMARY KEY COMMENT '0 = Sunday … 6 = Saturday',
+  blocked     TINYINT(1)   NOT NULL DEFAULT 0,
+  open_time   TIME         NULL,
+  close_time  TIME         NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Dated exceptions for the public only — the shop is open, the form is not.
+-- Deliberately not `shop_closures`: holidays are regenerated into that table
+-- each year and a marketing decision must not be swept up with them.
+CREATE TABLE funnel_blocks (
+  on_date     DATE         NOT NULL PRIMARY KEY,
+  label       VARCHAR(80)  NOT NULL DEFAULT 'No public booking',
+  created_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  created_by  BIGINT UNSIGNED NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- The shop builds its own field list. Name, phone and email can never be
+-- removed — enforced in the route, because a NOT NULL cannot say "these three
+-- rows must exist and stay enabled". A custom question is ALWAYS optional.
+CREATE TABLE funnel_fields (
+  id          BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  key_name    VARCHAR(40)  NOT NULL,
+  label       VARCHAR(120) NOT NULL,
+  kind        ENUM('builtin','text','choice','yesno') NOT NULL DEFAULT 'builtin',
+  options     VARCHAR(500) NULL COMMENT 'choice only: newline separated',
+  purpose     ENUM('both','estimate','drop') NOT NULL DEFAULT 'both',
+  enabled     TINYINT(1)   NOT NULL DEFAULT 1,
+  required    TINYINT(1)   NOT NULL DEFAULT 0,
+  sort_order  SMALLINT     NOT NULL DEFAULT 0,
+  UNIQUE KEY uq_funnel_field (key_name)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+INSERT INTO funnel_fields (key_name, label, kind, purpose, enabled, required, sort_order) VALUES
+  ('name',     'Your name',              'builtin', 'both',  1, 1, 10),
+  ('phone',    'Phone',                  'builtin', 'both',  1, 1, 20),
+  ('email',    'Email',                  'builtin', 'both',  1, 1, 30),
+  ('contact',  'Best way to reach you',  'builtin', 'both',  1, 0, 40),
+  ('vehicle',  'Year, make and model',   'builtin', 'both',  1, 0, 50),
+  ('carrier',  'Insurance company',      'builtin', 'both',  1, 0, 60),
+  ('claim',    'Claim number',           'builtin', 'both',  1, 0, 70),
+  ('what',     'What happened',          'builtin', 'both',  1, 0, 80)
+ON DUPLICATE KEY UPDATE label = VALUES(label), sort_order = VALUES(sort_order);
+
+-- The queue the desk works. A HELD request owns a real appointment row from
+-- the moment it is submitted, which is what makes the hold count against the
+-- day's limit — without that, two people hold the same Tuesday morning and a
+-- person has to tell one of them no.
+CREATE TABLE funnel_requests (
+  id             BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  purpose        ENUM('estimate','drop') NOT NULL,
+  state          ENUM('booked','held','confirmed','declined','lapsed') NOT NULL,
+  starts_at      DATETIME     NOT NULL COMMENT 'shop wall clock, like appointments.starts_at',
+  hold_until     DATETIME     NULL,
+  appointment_id BIGINT UNSIGNED NULL,
+  lead_id        BIGINT UNSIGNED NULL,
+  client_id      BIGINT UNSIGNED NULL COMMENT 'matched a past customer, and then no lead is raised',
+  ro_id          BIGINT UNSIGNED NULL COMMENT 'their car is already in the bay',
+  customer_name  VARCHAR(160) NOT NULL,
+  phone          VARCHAR(32)  NULL,
+  email          VARCHAR(190) NULL,
+  contact_pref   VARCHAR(40)  NULL,
+  vehicle_text   VARCHAR(160) NULL,
+  carrier        VARCHAR(120) NULL,
+  claim_number   VARCHAR(64)  NULL,
+  what_happened  VARCHAR(600) NULL,
+  answers        TEXT         NULL COMMENT 'custom questions, JSON [{label,value}]',
+  campaign       VARCHAR(60)  NULL,
+  page_url       VARCHAR(400) NULL,
+  origin_host    VARCHAR(190) NULL,
+  submit_ip      VARCHAR(64)  NULL,
+  is_repeat      TINYINT(1)   NOT NULL DEFAULT 0 COMMENT 'same phone inside a week — its own lead, flagged, never merged',
+  conflicted_at  DATETIME     NULL COMMENT 'the hours changed under a held slot; left for a person',
+  suppressed     TINYINT(1)   NOT NULL DEFAULT 0 COMMENT 'the address had unsubscribed: carried, not refused',
+  answered_at    DATETIME     NULL,
+  answered_by    BIGINT UNSIGNED NULL,
+  answered_name  VARCHAR(120) NULL,
+  created_at     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  KEY ix_freq_state (state, created_at),
+  KEY ix_freq_hold (state, hold_until),
+  KEY ix_freq_phone (phone, created_at),
+  CONSTRAINT fk_freq_appt FOREIGN KEY (appointment_id) REFERENCES appointments(id) ON DELETE SET NULL,
+  CONSTRAINT fk_freq_lead FOREIGN KEY (lead_id) REFERENCES leads(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- The wording is the SHOP's, per event, with merge tokens — not one house
+-- email with a shop name dropped into it.
+CREATE TABLE funnel_emails (
+  event_key   VARCHAR(40)  NOT NULL PRIMARY KEY,
+  subject     VARCHAR(190) NOT NULL,
+  body        TEXT         NOT NULL,
+  enabled     TINYINT(1)   NOT NULL DEFAULT 1,
+  updated_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+INSERT INTO funnel_emails (event_key, subject, body) VALUES
+  ('estimate_booked',
+   'Your estimate appointment with [ shop name ]',
+   'Thank you [ first name ] for reaching out to schedule an estimate appointment for [ appointment date ] at [ appointment time ]. We look forward to evaluating the damage and creating a plan to return your vehicle to pre-loss condition.'),
+  ('drop_requested',
+   'We have your drop-off request',
+   'Thank you [ first name ] for scheduling an appointment to drop off your [ vehicle year ] [ vehicle make ] [ vehicle model ]. Our office will be confirming your appointment soon. Please expect an email or phone call to confirm.'),
+  ('drop_confirmed',
+   'Your drop-off is confirmed',
+   'Your drop-off is confirmed for [ appointment date ] at [ appointment time ]. We will see you then at [ shop address ].')
+ON DUPLICATE KEY UPDATE event_key = event_key;
+
+INSERT INTO shop_settings (setting_key, setting_value) VALUES
+  ('shop_address', ''),
+  ('shop_phone', '')
+ON DUPLICATE KEY UPDATE setting_value = setting_value;
+
+-- Owner only. Answering the queue is deliberately NOT its own capability —
+-- confirming a request books a real appointment against a real lead, which is
+-- `leads` with change, and a second tick beside it would only ever be set to
+-- the same value.
+INSERT INTO role_caps (role_key, cap_key, can_see, can_change) VALUES
+  ('owner', 'web_forms', 1, 1)
+ON DUPLICATE KEY UPDATE can_see = 1, can_change = 1;

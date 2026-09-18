@@ -104,6 +104,7 @@ export const CAP_DEFS: CapDef[] = [
   { key: 'money_reports', label: 'Money reports',              section: 'Reports and setup', see: 'viewMoneyReports' },
   { key: 'pay_plans',     label: 'Sales pay plans',            section: 'Reports and setup', see: 'viewPayPlans', change: 'editPayPlans' },
   { key: 'audit',         label: 'Read the audit log',         section: 'Reports and setup', see: 'viewAudit' },
+  { key: 'web_forms',     label: 'Set up the website booking form', section: 'Reports and setup', see: 'manageWebForms', change: 'manageWebForms' },
   { key: 'admin',         label: 'Change shop settings',       section: 'Reports and setup', see: 'admin' },
   { key: 'perms',         label: 'Change roles and permissions', section: 'Reports and setup', see: 'managePermissions' }
 ];
@@ -190,6 +191,17 @@ export interface Caps {
   editCustomerContact: boolean;
   /** Read the audit log. Its own tick so a manager can have it alone. */
   viewAudit: boolean;
+  /**
+   * The website booking form: its key, the domains it may run on, the hours
+   * the public is shown, the colours and the letters.
+   *
+   * Owner only to start with, and separate from `admin` on purpose — this is
+   * the one settings screen that changes what strangers see on the shop's own
+   * website. Answering the queue is deliberately NOT this: confirming a request
+   * books a real appointment against a real lead, which is `manageLeads`, and a
+   * second tick beside it would only ever be set to the same value.
+   */
+  manageWebForms: boolean;
   admin: boolean;
   managePermissions: boolean;
 }
@@ -201,7 +213,7 @@ const CAPS_FIELDS: Array<keyof Caps> = [
   'uncloseRepairOrders', 'manageWholesaleClients', 'viewLeads', 'manageLeads', 'deleteLeads', 'winLeads', 'viewPaperwork',
   'uploadPaperwork', 'deleteDocuments', 'acceptImports', 'editAssignments', 'manageParts',
   'manageSublet', 'viewReports', 'exportReports', 'viewMoneyReports', 'viewPayPlans',
-  'editPayPlans', 'viewCustomerContact', 'editCustomerContact', 'viewAudit', 'admin', 'managePermissions'
+  'editPayPlans', 'viewCustomerContact', 'editCustomerContact', 'viewAudit', 'manageWebForms', 'admin', 'managePermissions'
 ];
 
 export function emptyCaps(): Caps {

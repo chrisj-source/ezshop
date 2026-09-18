@@ -336,9 +336,14 @@
       LEADS = d.leads;
       STAFF = d.staff;
       renderKpis(d.summary);
-      renderTabs();
-      render();
-      renderDetail();
+      /* The web queue alongside the leads, so the tab and its count are there
+         on first paint rather than appearing a second later. It is allowed to
+         fail quietly: a shop with the form switched off still has leads. */
+      return loadWeb().then(function () {
+        renderTabs();
+        render();
+        renderDetail();
+      });
     });
   }
 
@@ -387,6 +392,13 @@
       { k: 'all', t: 'All', c: c.all }
     ];
 
+    /* Requests from the shop's own website. A tab here rather than its own
+       screen: a request IS a lead that arrived with a time attached, and
+       putting it elsewhere would give the shop two inboxes. */
+    if (WEB && (WEB.waiting || TAB === 'web' || WEB.requests.length)) {
+      tabs.push({ k: 'web', t: 'Web requests', c: WEB.waiting });
+    }
+
     $('tabs').innerHTML = tabs.map(function (t) {
       return '<button class="statetab' + (t.k === TAB ? ' sel' : '') + '" data-tab="' + t.k + '">' +
         esc(t.t) + '<span class="c">' + t.c + '</span></button>';
@@ -422,6 +434,7 @@
   }
 
   function render() {
+    if (TAB === 'web') return renderWebRequests();
     var rows = filtered();
     var c = counts();
     var never = LEADS.filter(function (l) {
@@ -467,6 +480,154 @@
         QUOTING = false;
         render();
         renderDetail();
+      });
+    });
+  }
+
+  /* ------------------------------------------------- requests from the web
+
+     Confirming does not book anything new: the appointment has existed since
+     the customer submitted, which is what made the hold real and what makes it
+     count against the day's limit. Confirming lifts the provisional note and
+     tells them. Declining cancels the appointment, which is what puts the hour
+     back on the board — and leaves the lead, because "we could not take that
+     morning" is not "we do not want the work". */
+
+  var WEB = null;
+  var WEBTAB = 'waiting';
+
+  function loadWeb(then) {
+    return api('/api/web-requests?tab=' + WEBTAB)
+      .then(function (d) { WEB = d; if (then) then(); })
+      .catch(function () { WEB = { requests: [], waiting: 0, expiring: 0, canAnswer: false }; });
+  }
+
+  function renderWebRequests() {
+    if (!WEB) {
+      $('list').innerHTML = '<div style="font:400 11.5px var(--font);color:var(--dim);' +
+        'padding:16px 18px">Loading…</div>';
+      loadWeb(function () { renderTabs(); render(); });
+      return;
+    }
+
+    $('headmeta').textContent = WEB.waiting + ' waiting' +
+      (WEB.expiring ? ' · ' + WEB.expiring + ' expiring within four hours' : '');
+
+    var head = '<div style="display:flex;gap:7px;padding:10px 18px">' +
+      [['waiting', 'Waiting'], ['lapsed', 'Lapsed and declined'], ['all', 'Everything']]
+        .map(function (t) {
+          return '<button class="statetab' + (WEBTAB === t[0] ? ' sel' : '') +
+            '" data-webtab="' + t[0] + '">' + t[1] + '</button>';
+        }).join('') + '</div>';
+
+    if (!WEB.requests.length) {
+      $('list').innerHTML = head +
+        '<div style="font:400 11.5px var(--font);color:var(--dim);padding:16px 18px">' +
+        'Nothing here. Requests arrive the moment somebody submits the form on your website.</div>';
+      wireWebTabs();
+      return;
+    }
+
+    $('list').innerHTML = head + WEB.requests.map(function (r) {
+      var tone = r.state === 'held' ? 'var(--acc)'
+        : r.state === 'confirmed' || r.state === 'booked' ? 'var(--done)'
+        : 'var(--blocked)';
+      var expiring = r.state === 'held' && r.hold_minutes != null && Number(r.hold_minutes) < 240;
+
+      var hold = r.state === 'held'
+        ? (Number(r.hold_minutes) <= 0 ? 'expired'
+          : Math.floor(Number(r.hold_minutes) / 60) + 'h ' + (Number(r.hold_minutes) % 60) + 'm left')
+        : r.state === 'booked' ? 'on the schedule'
+        : r.state === 'confirmed' ? 'confirmed'
+        : r.state === 'declined' ? 'slot released' : 'lapsed';
+
+      return '<div style="display:grid;grid-template-columns:3px 1fr 160px 130px 200px;gap:12px;' +
+        'align-items:center;padding:12px 18px;border-bottom:1px solid var(--whisper)' +
+        (r.state === 'lapsed' ? ';opacity:.65' : '') + '">' +
+        '<div style="width:3px;height:36px;border-radius:1px;background:' + tone + '"></div>' +
+
+        '<div style="min-width:0">' +
+          '<div class="lname">' + esc(r.customer_name) +
+            (Number(r.is_repeat) ? ' <span class="lstate" style="color:var(--stopped);' +
+              'border:1px solid var(--stopped)">asked twice this week</span>' : '') +
+            (r.ro_number ? ' <span class="lstate" style="color:var(--stopped);' +
+              'border:1px solid var(--stopped)">car is here · RO ' + esc(r.ro_number) +
+              '</span>' : '') +
+            (r.client_id && !r.lead_id ? ' <span class="lstate" style="color:var(--move);' +
+              'border:1px solid var(--move)">returning customer</span>' : '') +
+            (Number(r.conflicted_at ? 1 : 0) ? ' <span class="lstate" style="color:var(--stopped);' +
+              'border:1px solid var(--stopped)">outside your hours now</span>' : '') +
+          '</div>' +
+          '<div class="lsub">' + esc(r.vehicle_text || 'Vehicle not given') +
+            (r.phone ? ' · ' + esc(r.phone) : '') + '</div>' +
+          (r.what_happened ? '<div class="lk-n">' + esc(r.what_happened) + '</div>' : '') +
+          (r.answers && r.answers.length
+            ? '<div class="lk-n">' + r.answers.map(function (a) {
+                return esc(a.label) + ': ' + esc(a.value);
+              }).join(' · ') + '</div>'
+            : '') +
+          (Number(r.suppressed)
+            ? '<div class="lk-n" style="color:var(--stopped)">That address has unsubscribed, so ' +
+              'nothing was emailed. They were told you would call.</div>'
+            : '') +
+        '</div>' +
+
+        '<div><div class="lcell" style="color:' + tone + '">' +
+          (r.purpose === 'drop' ? 'Drop-off requested' : 'Estimate booked') + '</div>' +
+          '<div class="lcell">' + esc(String(r.starts_at).replace('T', ' ').slice(0, 16)) +
+          '</div></div>' +
+
+        '<div><div class="lcell"' + (expiring ? ' style="color:var(--stopped)"' : '') + '>' +
+          esc(hold) + '</div>' +
+          '<div class="lk-n">' + esc(r.answered_name ? 'answered by ' + r.answered_name
+            : (r.campaign || 'no campaign tag')) + '</div></div>' +
+
+        '<div style="display:flex;gap:6px;justify-content:flex-end;flex-wrap:wrap">' +
+          (!WEB.canAnswer || r.answered_at
+            ? '<span class="lcell">' + (r.answered_at ? 'answered' : 'read only') + '</span>'
+            : r.state === 'lapsed' || r.state === 'declined'
+              ? (r.lead_id ? '<button class="ghostbtn" data-weblead="' + r.lead_id +
+                  '">Open the lead</button>' : '')
+              : '<button class="btn" data-webact="confirm" data-webid="' + r.id + '">Confirm</button>' +
+                '<button class="ghostbtn" data-webact="decline" data-webid="' + r.id +
+                  '">Decline</button>' +
+                (r.ro_number ? '<button class="ghostbtn" data-webact="note" data-webid="' + r.id +
+                  '">Just answered it</button>' : '')) +
+        '</div>' +
+      '</div>';
+    }).join('') +
+    '<div style="font:400 10.5px/1.6 var(--font);color:var(--dim);padding:12px 18px">' +
+      'Confirming books it properly and tells the customer. Declining releases the slot and leaves ' +
+      'the lead — ring them. Nothing is emailed on a decline; that is a phone call.</div>';
+
+    wireWebTabs();
+
+    Array.prototype.forEach.call($('list').querySelectorAll('[data-webact]'), function (b) {
+      b.addEventListener('click', function () {
+        if (b.dataset.webact === 'decline' &&
+          !confirm('Release the slot and leave the lead open to chase?')) return;
+        b.disabled = true;
+        api('/api/web-requests/' + b.dataset.webid + '/' + b.dataset.webact, { method: 'POST' })
+          .then(function () { return loadWeb(); })
+          .then(function () { renderTabs(); render(); })
+          .catch(function (e) { b.disabled = false; alert(e.message); });
+      });
+    });
+
+    Array.prototype.forEach.call($('list').querySelectorAll('[data-weblead]'), function (b) {
+      b.addEventListener('click', function () {
+        TAB = 'all';
+        SEL = Number(b.dataset.weblead);
+        renderTabs(); render(); renderDetail();
+      });
+    });
+  }
+
+  function wireWebTabs() {
+    Array.prototype.forEach.call($('list').querySelectorAll('[data-webtab]'), function (b) {
+      b.addEventListener('click', function () {
+        WEBTAB = b.dataset.webtab;
+        loadWeb(function () { render(); });
       });
     });
   }

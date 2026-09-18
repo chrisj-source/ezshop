@@ -91,6 +91,16 @@ function isPublicPage(url: string): boolean {
   return PUBLIC_PAGES.has(path);
 }
 
+/**
+ * The booking snippet, and only it.
+ *
+ * Deliberately an exact match rather than a prefix: a prefix is how a folder
+ * of internal scripts ends up loadable from anybody's website a year from now.
+ */
+function isEmbedScript(url: string): boolean {
+  return url.split('?')[0] === '/f.js';
+}
+
 function applyHeaders(req: FastifyRequest, reply: FastifyReply): void {
   const isPublic = isPublicPage(req.url);
   reply.header('content-security-policy', csp(isPublic));
@@ -98,8 +108,22 @@ function applyHeaders(req: FastifyRequest, reply: FastifyReply): void {
   reply.header('x-frame-options', 'DENY');
   reply.header('referrer-policy', 'strict-origin-when-cross-origin');
   reply.header('cross-origin-opener-policy', 'same-origin');
-  reply.header('cross-origin-resource-policy', 'same-origin');
   reply.header('permissions-policy', 'camera=(self), geolocation=(), microphone=()');
+
+  /**
+   * The one thing on this server that is MEANT to be loaded by another site.
+   *
+   * `f.js` is the booking snippet a shop pastes into its own website, so a
+   * same-origin resource policy would block the only job it has. Nothing else
+   * gets this: every other file here is a shop's records, and `same-origin`
+   * stays the default precisely so a mistake fails closed.
+   *
+   * The script itself is public and carries nothing — the data it fetches is
+   * gated per request by the key and the domain allowlist, not by who can
+   * download the file.
+   */
+  reply.header('cross-origin-resource-policy',
+    isEmbedScript(req.url) ? 'cross-origin' : 'same-origin');
 
   if (isPublic) {
     /* The marketing pages are meant to be found. `max-image-preview:large`
@@ -147,6 +171,19 @@ const WRITE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 function originOk(req: FastifyRequest): boolean {
   if (!WRITE_METHODS.has(req.method)) return true;
 
+  /**
+   * The web funnel is the one exception, and it is exempt because it has a
+   * STRICTER check of its own rather than a weaker one.
+   *
+   * These endpoints are posted to from the shop's own website, so a foreign
+   * Origin is not the attack here — it is the entire point. What guards them
+   * is the per-shop domain allowlist in `lib/funnel.ts`, which refuses a
+   * request whose Origin the shop has not named, and refuses one with no
+   * Origin at all. They also carry no session: `credentials: 'omit'` on the
+   * snippet's side, and nothing in those routes reads a cookie.
+   */
+  if (req.url.startsWith('/api/f/')) return true;
+
   const origin = req.headers.origin;
   if (!origin) return true;
 
@@ -169,6 +206,13 @@ const buckets = new Map<string, Window>();
 const LIMITS = {
   /** Sign-in, password reset, login codes. Per IP, on top of the per-account lockout. */
   auth: { max: 20, windowMs: 15 * 60 * 1000 },
+  /**
+   * The public booking form. Tighter than anything else here, because it is
+   * the only endpoint a stranger can reach that writes a real appointment.
+   * Generous enough for somebody filling the form in slowly and changing their
+   * mind about the day twice; nowhere near enough to fill a week.
+   */
+  funnel: { max: 60, windowMs: 10 * 60 * 1000 },
   /** Anything that writes. Generous — a busy service writer saves constantly. */
   write: { max: 240, windowMs: 60 * 1000 },
   /** Everything else, mostly reads and thumbnails. The board polls. */
@@ -177,6 +221,7 @@ const LIMITS = {
 
 function bucketFor(req: FastifyRequest): keyof typeof LIMITS {
   if (req.url.startsWith('/api/auth/')) return 'auth';
+  if (req.url.startsWith('/api/f/')) return 'funnel';
   return WRITE_METHODS.has(req.method) ? 'write' : 'read';
 }
 
@@ -218,7 +263,14 @@ export async function registerSecurity(app: FastifyInstance): Promise<void> {
     const r = hit(`${name}:${req.ip}`, max, windowMs);
     if (!r.ok) {
       reply.header('retry-after', String(r.retryAfter));
-      return reply.code(429).send({ error: 'Too many requests. Give it a minute.' });
+      /* The funnel's answer is deliberately generic. A robot reads whatever a
+         person reads, so naming the window or the limit only helps whoever is
+         pacing against it. */
+      return reply.code(429).send({
+        error: name === 'funnel'
+          ? 'Try again in a minute.'
+          : 'Too many requests. Give it a minute.'
+      });
     }
   });
 }

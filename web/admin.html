@@ -373,6 +373,7 @@
     { k: 'notify', t: 'Notification groups' },
     { k: 'people', t: 'People' },
     { k: 'vendors', t: 'Vendors' },
+    { k: 'webform', t: 'Web form' },
     { k: 'settings', t: 'Shop settings' },
     { k: 'storage', t: 'Storage' },
     /* Their own pages — too big to live in a pane here, but they belong to Admin,
@@ -445,7 +446,7 @@
     ({
       statuses: renderStatuses, lanes: renderLanes, notify: renderNotify,
       people: renderPeople, vendors: renderVendors,
-      settings: renderSettings, storage: renderStorage
+      settings: renderSettings, storage: renderStorage, webform: renderWebForm
     }[TAB])();
   }
 
@@ -2213,6 +2214,397 @@
         'database size. Photos are what grows.</div>');
     }).catch(function (e) {
       $('mid').innerHTML = '<div class="empty">' + esc(e.message) + '</div>';
+    });
+  }
+
+  /* ============================================ the website booking form
+
+     Everything here NARROWS what a stranger may book. Nothing here widens it:
+     the shop's real hours and day limits still decide, and this decides how
+     much of them the public is shown.
+
+     The person who pastes the snippet is usually not in this room — most
+     shops have an agency or a reseller running their site — so the top of the
+     screen has to produce something sendable to somebody with no login and no
+     context. */
+
+  var WF = null;
+  var DOW = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+  function renderWebForm() {
+    rail('Reference', []);
+    $('mid').innerHTML = '<div class="empty">Loading…</div>';
+
+    api('/api/web-form').then(function (d) {
+      WF = d;
+      drawWebForm();
+    }).catch(function (e) {
+      $('mid').innerHTML = '<div class="empty">' + esc(e.message) + '</div>';
+    });
+  }
+
+  function wfSave(body) {
+    return api('/api/web-form', { method: 'PATCH', body: JSON.stringify(body) })
+      .then(function () { return renderWebForm(); });
+  }
+
+  function drawWebForm() {
+    var d = WF, s = d.settings;
+    var hoursByDow = {};
+    d.publicHours.forEach(function (h) { hoursByDow[Number(h.dow)] = h; });
+    var shopByDow = {};
+    d.shopHours.forEach(function (h) { shopByDow[Number(h.dow)] = h; });
+
+    function hhmm(t) { return t ? String(t).slice(0, 5) : ''; }
+
+    $('mid').innerHTML =
+      '<div class="pad">' +
+        '<div class="dlbl">The form</div>' +
+        '<div class="sub" style="margin-top:6px;max-width:620px">' +
+          (s.enabled
+            ? 'Live. A customer on your website can book an estimate or ask to drop a car off, ' +
+              'and it lands in Leads with the time attached.'
+            : 'Switched off. Nothing on your website will draw a form until you turn this on.') +
+        '</div>' +
+        '<div style="margin-top:10px"><button class="btn" id="wfToggle">' +
+          (s.enabled ? 'Switch the form off' : 'Switch the form on') + '</button></div>' +
+      '</div>' +
+
+      '<div class="pad"><div class="dlbl">Send this to whoever runs your website</div>' +
+        '<div class="sub" style="margin-top:6px;max-width:620px">' +
+          'Most shops do not run their own site. Everything the web person needs is in this block — ' +
+          'they do not need an Easy Shop login, and nothing has to be enabled on your hosting. ' +
+          'It is a script tag, not PHP.' +
+        '</div>' +
+        '<pre id="wfSnippet" style="margin-top:9px;padding:12px 13px;background:var(--surface);' +
+          'border:1px solid var(--line);border-radius:6px;font:400 11px/1.7 ui-monospace,Menlo,monospace;' +
+          'color:var(--muted);white-space:pre-wrap;overflow-x:auto">' + esc(wfInstructions(d)) + '</pre>' +
+        '<div style="display:flex;gap:8px;margin-top:9px;flex-wrap:wrap">' +
+          '<button class="btn" id="wfCopy">Copy the instructions</button>' +
+          '<button class="ghostbtn" id="wfRotate">Rotate the key</button>' +
+        '</div>' +
+      '</div>' +
+
+      '<div class="pad"><div class="dlbl">Websites it may run on</div>' +
+        '<div class="sub" style="margin-top:6px;max-width:620px">' +
+          'The key above is readable by anyone who views your page — that is what a public key is. ' +
+          'This list is what makes it useless anywhere else, so a copied key cannot post from a ' +
+          'site you have not named here.' +
+        '</div>' +
+        '<div style="display:flex;flex-wrap:wrap;gap:7px;margin-top:9px">' +
+          (d.domains.length ? d.domains.map(function (x) {
+            return '<span class="chip">' + esc(x.host) +
+              ' <button class="linkbtn" data-wfdomx="' + esc(x.host) + '">×</button></span>';
+          }).join('')
+            : '<span class="sub" style="color:var(--stopped)">None yet — the form will refuse every ' +
+              'submission until your website is named here.</span>') +
+        '</div>' +
+        '<div style="display:flex;gap:7px;margin-top:9px;max-width:420px">' +
+          '<input class="in" id="wfDom" placeholder="bonhamcollision.com" style="flex:1">' +
+          '<button class="btn" id="wfDomAdd">Add</button>' +
+        '</div>' +
+      '</div>' +
+
+      '<div class="pad"><div class="dlbl">What it offers</div>' +
+        '<table style="margin-top:6px"><tbody>' +
+        wfRow('Estimate', 'Booked outright — the time is theirs and you see it appear.',
+          s.offerEstimate, 'offerEstimate') +
+        wfRow('Drop-off', 'A request. The slot is held while somebody here decides.',
+          s.offerDrop, 'offerDrop') +
+        '<tr><td>Hold a request for</td><td class="sub">Then the slot is released and you are told ' +
+          'it lapsed. The lead stays, to chase.</td>' +
+          '<td class="num"><input class="in" id="wfHold" value="' + s.holdHours +
+          '" style="width:64px;text-align:right"> hours</td></tr>' +
+        '<tr><td>Earliest anyone may book</td><td class="sub">Your day limit is shared with the ' +
+          'desk, so without this a stranger can take the last slot at 8:55 for a 9:00.</td>' +
+          '<td class="num"><input class="in" id="wfNotice" value="' + s.noticeHours +
+          '" style="width:64px;text-align:right"> hours ahead</td></tr>' +
+        '</tbody></table>' +
+        '<div style="margin-top:9px"><button class="btn" id="wfNums">Save</button></div>' +
+      '</div>' +
+
+      '<div class="pad"><div class="dlbl">Hours the public may book</div>' +
+        '<div class="sub" style="margin-top:6px;max-width:620px">' +
+          'Your shop hours are on the left and are not changed here. This narrows what a stranger ' +
+          'is SHOWN — you can still book anything from the scheduler. Blocking a day here does not ' +
+          'close the shop.' +
+        '</div>' +
+        '<table style="margin-top:8px"><thead><tr><th>Day</th><th>Shop hours</th>' +
+          '<th>Public may book</th><th></th></tr></thead><tbody>' +
+        DOW.map(function (name, dow) {
+          var shop = shopByDow[dow];
+          var pub = hoursByDow[dow] || {};
+          var closed = !shop || Number(shop.closed) === 1;
+          return '<tr><td>' + name + '</td>' +
+            '<td class="sub">' + (closed ? 'closed'
+              : hhmm(shop.open_time) + ' – ' + hhmm(shop.close_time)) + '</td>' +
+            '<td>' + (closed ? '<span class="sub">—</span>'
+              : '<input class="in" data-wfopen="' + dow + '" value="' + hhmm(pub.open_time) +
+                '" placeholder="' + hhmm(shop.open_time) + '" style="width:74px"> ' +
+                '<input class="in" data-wfclose="' + dow + '" value="' + hhmm(pub.close_time) +
+                '" placeholder="' + hhmm(shop.close_time) + '" style="width:74px">') + '</td>' +
+            '<td class="num">' + (closed ? ''
+              : '<label class="sub"><input type="checkbox" data-wfblock="' + dow + '"' +
+                (Number(pub.blocked) === 1 ? ' checked' : '') + '> blocked</label>') + '</td></tr>';
+        }).join('') +
+        '</tbody></table>' +
+        '<div style="margin-top:9px"><button class="btn" id="wfHours">Save the week</button></div>' +
+
+        '<div class="dlbl" style="margin-top:18px">Dated exceptions</div>' +
+        '<table style="margin-top:6px"><tbody>' +
+        d.shopClosures.map(function (c) {
+          return '<tr><td>' + esc(c.on_date) + '</td><td class="sub">' + esc(c.label) + '</td>' +
+            '<td class="num sub">' + esc(c.source === 'holiday' ? 'holiday' : 'shop closure') +
+            '</td><td></td></tr>';
+        }).join('') +
+        d.publicBlocks.map(function (b) {
+          return '<tr><td>' + esc(b.on_date) + '</td><td class="sub">' + esc(b.label) + '</td>' +
+            '<td class="num sub" style="color:var(--acc)">public only</td>' +
+            '<td class="num"><button class="linkbtn" data-wfblkx="' + esc(b.on_date) +
+            '">Remove</button></td></tr>';
+        }).join('') +
+        '</tbody></table>' +
+        '<div class="sub" style="margin-top:8px;max-width:620px">' +
+          'Closures and holidays come from the shop calendar and are shown here, not set here — ' +
+          'un-ticking a holiday is not something this screen should be able to undo. A date closed ' +
+          'to the public only is set below.' +
+        '</div>' +
+        '<div style="display:flex;gap:7px;margin-top:9px;flex-wrap:wrap">' +
+          '<input class="in" id="wfBlkDate" type="date" style="width:150px">' +
+          '<input class="in" id="wfBlkLabel" placeholder="No public booking" style="width:200px">' +
+          '<button class="btn" id="wfBlkAdd">Block that date</button>' +
+        '</div>' +
+      '</div>' +
+
+      '<div class="pad"><div class="dlbl">What the form asks</div>' +
+        '<table style="margin-top:6px"><thead><tr><th>Question</th><th>Shown on</th>' +
+          '<th class="num">On the form</th></tr></thead><tbody>' +
+        d.fields.map(function (f) {
+          var locked = ['name', 'phone', 'email'].indexOf(f.key) >= 0;
+          return '<tr><td>' + esc(f.label) +
+            (f.kind === 'builtin' ? '' : ' <span class="sub">· your question</span>') + '</td>' +
+            '<td class="sub">' + (f.purpose === 'both' ? 'both' :
+              f.purpose === 'drop' ? 'drop-offs only' : 'estimates only') + '</td>' +
+            '<td class="num">' + (locked
+              ? '<span class="sub">always</span>'
+              : '<label class="sub"><input type="checkbox" data-wffield="' + esc(f.key) + '"' +
+                (f.enabled ? ' checked' : '') + '> shown</label>') + '</td></tr>';
+        }).join('') +
+        '</tbody></table>' +
+        '<div class="sub" style="margin-top:8px;max-width:620px">' +
+          'Name, phone and email stay — without them a submission is not a lead. Your own questions ' +
+          'are always optional: a form with six required questions is a form nobody finishes.' +
+        '</div>' +
+        '<div style="margin-top:9px"><button class="btn" id="wfFields">Save</button> ' +
+          '<button class="ghostbtn" id="wfAddQ">Add a question of your own</button></div>' +
+      '</div>';
+
+    var warn = d.contrast.warnings;
+    detail('Web form',
+      '<div class="dlbl">Colours</div>' +
+      '<div class="sub" style="margin:6px 0 9px">The form takes your website’s fonts and text ' +
+      'colour on its own. These two are the button, the selected day and time, and the outline ' +
+      'somebody sees when they tab through it with a keyboard.</div>' +
+      '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">' +
+        '<label class="sub">Accent <input type="color" id="wfAccent" value="' + esc(s.accent) +
+          '" style="vertical-align:middle"></label>' +
+        '<label class="sub">Text on it <input type="color" id="wfInk" value="' + esc(s.accentInk) +
+          '" style="vertical-align:middle"></label>' +
+      '</div>' +
+      '<div class="sub" style="margin-top:8px">Button text ' + d.contrast.onButton +
+        ':1 · outline on white ' + d.contrast.onPaper + ':1</div>' +
+      (warn.length
+        ? '<div class="sub" style="margin-top:8px;color:var(--stopped)">' +
+          warn.map(esc).join('<br><br>') + '</div>'
+        : '') +
+      (s.contrastAckAt
+        ? '<div class="sub" style="margin-top:8px">These colours were accepted as they are.</div>'
+        : '') +
+      '<div style="margin-top:9px"><button class="btn" id="wfColour">Save the colours</button></div>' +
+
+      '<div class="dlbl" style="margin-top:18px">Your address, for the emails</div>' +
+      '<input class="in" id="wfAddr" value="' + esc(d.shopAddress) +
+        '" placeholder="1420 Avenue K, Plano" style="width:100%;margin-top:6px">' +
+      '<input class="in" id="wfTel" value="' + esc(d.shopPhone) +
+        '" placeholder="(972) 555-0100" style="width:100%;margin-top:6px">' +
+      '<input class="in" id="wfReply" value="' + esc(s.replyTo || '') +
+        '" placeholder="Where a reply should go" style="width:100%;margin-top:6px">' +
+      '<div style="margin-top:8px"><button class="btn" id="wfAddrSave">Save</button></div>' +
+
+      '<div class="dlbl" style="margin-top:18px">What the customer is sent</div>' +
+      '<div class="sub" style="margin:6px 0 9px">Your words, not ours. Anything in square ' +
+      'brackets is filled in when it sends. It arrives as “' + esc(ME.company.name) +
+      ' via Easy Shop” and a reply comes to you.</div>' +
+      d.letters.map(function (l) {
+        return '<div style="margin-bottom:12px">' +
+          '<div class="sub" style="font-weight:600">' + esc(wfLetterName(l.event_key)) + '</div>' +
+          '<input class="in" data-wfsub="' + esc(l.event_key) + '" value="' + esc(l.subject) +
+            '" style="width:100%;margin-top:4px">' +
+          '<textarea class="in" data-wfbody="' + esc(l.event_key) +
+            '" style="width:100%;min-height:90px;margin-top:4px">' + esc(l.body) + '</textarea>' +
+          '<button class="ghostbtn" data-wfletter="' + esc(l.event_key) +
+            '" style="margin-top:4px">Save</button></div>';
+      }).join('') +
+      '<div class="sub">Tokens: ' + d.tokens.map(function (t) {
+        return '[ ' + esc(t.token) + ' ]';
+      }).join(' · ') + '</div>');
+
+    wireWebForm();
+  }
+
+  function wfRow(name, note, on, key) {
+    return '<tr><td>' + name + '</td><td class="sub">' + note + '</td>' +
+      '<td class="num"><label class="sub"><input type="checkbox" data-wfoffer="' + key + '"' +
+      (on ? ' checked' : '') + '> offered</label></td></tr>';
+  }
+
+  function wfLetterName(k) {
+    return { estimate_booked: 'When an estimate is booked',
+      drop_requested: 'When a drop-off is requested',
+      drop_confirmed: 'When you confirm a drop-off' }[k] || k;
+  }
+
+  /* Written to be pasted into an email to somebody who has never heard of us. */
+  function wfInstructions(d) {
+    return 'Please add our booking form to the website.\n\n' +
+      'Paste these two lines where the form should appear — a page, a section, ' +
+      'or a custom-code block:\n\n' + d.snippet + '\n\n' +
+      'Notes:\n' +
+      '· It draws into the div, so it takes the page’s own fonts and colours.\n' +
+      '· Nothing needs enabling on the hosting. It is a script tag, not PHP.\n' +
+      '· It works in WordPress and HighLevel as-is; no plugin.\n' +
+      '· Change data-campaign to tell one landing page from another.\n' +
+      '· The page it runs on has to be one of: ' +
+        (d.domains.length ? d.domains.map(function (x) { return x.host; }).join(', ')
+          : '(nothing named yet — tell the shop which address to allow)') + '\n';
+  }
+
+  function wireWebForm() {
+    var on = function (id, fn) { var n = $(id); if (n) n.onclick = fn; };
+
+    on('wfToggle', function () { wfSave({ enabled: !WF.settings.enabled }); });
+
+    on('wfCopy', function () {
+      var t = wfInstructions(WF);
+      if (navigator.clipboard) navigator.clipboard.writeText(t);
+      say('Copied — paste it into an email to your web person.', 'ok');
+    });
+
+    on('wfRotate', function () {
+      if (!confirm('The old key stops working at once. Any page still using it will refuse ' +
+        'submissions until the new snippet is pasted in. Rotate it?')) return;
+      api('/api/web-form/key', { method: 'POST' }).then(renderWebForm);
+    });
+
+    on('wfDomAdd', function () {
+      var v = $('wfDom').value.trim();
+      if (!v) return;
+      api('/api/web-form/domain', { method: 'POST', body: JSON.stringify({ host: v }) })
+        .then(function (r) {
+          if (r.suggest) {
+            say('Added. Your site may also answer on ' + r.suggest +
+              ' — add that too if it does, or the form will refuse it.', 'ok');
+          }
+          renderWebForm();
+        }).catch(function (e) { say(e.message, 'bad'); });
+    });
+
+    Array.prototype.forEach.call(document.querySelectorAll('[data-wfdomx]'), function (b) {
+      b.onclick = function () {
+        api('/api/web-form/domain/' + encodeURIComponent(b.dataset.wfdomx), { method: 'DELETE' })
+          .then(renderWebForm);
+      };
+    });
+
+    on('wfNums', function () {
+      var body = { holdHours: Number($('wfHold').value), noticeHours: Number($('wfNotice').value) };
+      Array.prototype.forEach.call(document.querySelectorAll('[data-wfoffer]'), function (c) {
+        body[c.dataset.wfoffer] = c.checked;
+      });
+      wfSave(body).then(function () { say('Saved.', 'ok'); });
+    });
+
+    on('wfHours', function () {
+      var days = [];
+      for (var dow = 0; dow < 7; dow++) {
+        var o = document.querySelector('[data-wfopen="' + dow + '"]');
+        if (!o) continue;
+        var c = document.querySelector('[data-wfclose="' + dow + '"]');
+        var b = document.querySelector('[data-wfblock="' + dow + '"]');
+        days.push({ dow: dow, open: o.value, close: c.value, blocked: b && b.checked });
+      }
+      api('/api/web-form/hours', { method: 'PUT', body: JSON.stringify({ days: days }) })
+        .then(function () { say('Saved.', 'ok'); return renderWebForm(); });
+    });
+
+    on('wfBlkAdd', function () {
+      var date = $('wfBlkDate').value;
+      if (!date) return say('Pick a date.', 'bad');
+      api('/api/web-form/block', { method: 'POST',
+        body: JSON.stringify({ date: date, label: $('wfBlkLabel').value }) }).then(renderWebForm);
+    });
+
+    Array.prototype.forEach.call(document.querySelectorAll('[data-wfblkx]'), function (b) {
+      b.onclick = function () {
+        api('/api/web-form/block/' + b.dataset.wfblkx, { method: 'DELETE' }).then(renderWebForm);
+      };
+    });
+
+    on('wfFields', function () {
+      var fields = WF.fields.map(function (f) {
+        var c = document.querySelector('[data-wffield="' + f.key + '"]');
+        return { key: f.key, label: f.label, purpose: f.purpose, sortOrder: f.sortOrder,
+          enabled: c ? c.checked : true };
+      });
+      api('/api/web-form/fields', { method: 'PUT', body: JSON.stringify({ fields: fields }) })
+        .then(function () { say('Saved.', 'ok'); return renderWebForm(); });
+    });
+
+    on('wfAddQ', function () {
+      var label = prompt('What should the question say?');
+      if (!label) return;
+      var kind = confirm('OK for a yes/no question, Cancel for a short written answer.')
+        ? 'yesno' : 'text';
+      var purpose = prompt('Shown on: both, estimate, or drop?', 'both') || 'both';
+      api('/api/web-form/fields', { method: 'POST',
+        body: JSON.stringify({ label: label, kind: kind, purpose: purpose.trim() }) })
+        .then(renderWebForm).catch(function (e) { say(e.message, 'bad'); });
+    });
+
+    on('wfColour', function () {
+      var body = { accent: $('wfAccent').value, accentInk: $('wfInk').value };
+      api('/api/web-form', { method: 'PATCH', body: JSON.stringify(body) })
+        .then(renderWebForm)
+        .catch(function (e) {
+          if (!e.contrast) return say(e.message, 'bad');
+          /* Warn and allow. What breaks is named, because a warning nobody can
+             act on is decoration — and the two failures have different fixes.
+             Accepting is recorded for our own records and mentioned nowhere
+             else: not to the customer, not on the form, and not as a banner
+             here afterwards. */
+          if (!confirm(e.warnings.join('\n\n') + '\n\nUse these colours anyway?')) return;
+          body.acceptContrast = true;
+          api('/api/web-form', { method: 'PATCH', body: JSON.stringify(body) })
+            .then(renderWebForm);
+        });
+    });
+
+    on('wfAddrSave', function () {
+      wfSave({ shopAddress: $('wfAddr').value, shopPhone: $('wfTel').value,
+        replyTo: $('wfReply').value }).then(function () { say('Saved.', 'ok'); });
+    });
+
+    Array.prototype.forEach.call(document.querySelectorAll('[data-wfletter]'), function (b) {
+      b.onclick = function () {
+        var k = b.dataset.wfletter;
+        api('/api/web-form/letter/' + encodeURIComponent(k), { method: 'PUT',
+          body: JSON.stringify({
+            subject: document.querySelector('[data-wfsub="' + k + '"]').value,
+            body: document.querySelector('[data-wfbody="' + k + '"]').value
+          }) })
+          .then(function (r) { say('Saved. It will read: ' + r.preview, 'ok'); })
+          .catch(function (e) { say(e.message, 'bad'); });
+      };
     });
   }
 

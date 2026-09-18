@@ -37,10 +37,13 @@ import { registerCalendar } from './routes/gcal';
 import { registerMoney } from './routes/money';
 import { registerUnsubscribe } from './routes/unsubscribe';
 import { registerDemoRequests } from './routes/demo';
+import { registerFunnelPublic } from './routes/funnel';
+import { registerFunnelAdmin } from './routes/funnel-admin';
 import { purgeExpiredSessions } from './auth/session';
 import { startDemoReset } from './lib/demo';
 import { startMentionReminders } from './jobs/mentions';
 import { startLeadChase } from './jobs/leadchase';
+import { startFunnelHolds } from './jobs/funnel-holds';
 import { closeQueue, startWorker } from './queue';
 import { makeDerivatives } from './jobs/derivatives';
 import { prunePageCache } from './jobs/page-cache';
@@ -101,6 +104,12 @@ async function main(): Promise<void> {
   await registerUnsubscribe(app);
   /* The marketing site's demo form. Public: the sender has no account. */
   await registerDemoRequests(app);
+  /* The website booking form. Public, cross-origin, and unauthenticated by
+     necessity — it runs on the SHOP's own domain. A public key says which
+     shop; the shop's domain allowlist says whether that page may use it. */
+  await registerFunnelPublic(app);
+  /* Its settings and the desk's queue, both behind sign-in. */
+  await registerFunnelAdmin(app);
 
   app.get('/api/health', async () => {
     const [r] = await master().query('SELECT 1 AS ok');
@@ -202,6 +211,10 @@ async function main(): Promise<void> {
 
   /* Leads nobody has touched: 12 hours for a sales write-up, 48 for the rest. */
   startLeadChase();
+
+  /* Website requests holding a slot nobody answered, and holds the shop's own
+     hours no longer cover. Quarter-hourly. */
+  startFunnelHolds();
 
   /* Rendered PDF pages nobody has opened in a month. */
   const pageSweep = setInterval(() => {
