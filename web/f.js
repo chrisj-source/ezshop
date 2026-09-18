@@ -324,7 +324,9 @@
         } else if (f.key === 'contact' || f.kind === 'choice') {
           input = el('select', S.input);
           var opts = f.options && f.options.length ? f.options
-            : ['A phone call', 'A text message', 'Email'];
+            /* Text first: it is what most people want and the first option is
+               what most people leave selected. */
+            : ['A text message', 'Email', 'A phone call'];
           opts.forEach(function (o) {
             var op = document.createElement('option');
             op.value = o; op.textContent = o;
