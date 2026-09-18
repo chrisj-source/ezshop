@@ -570,6 +570,16 @@
             ? '<div class="lk-n" style="color:var(--stopped)">That address has unsubscribed, so ' +
               'nothing was emailed. They were told you would call.</div>'
             : '') +
+          /* The consent mark. Not a block — SMS is not built yet, and when it
+             is this is what it inherits. A mark and a reason is the honest
+             thing: whoever is looking at the row can pick up the phone. */
+          (r.sms_consent === null || r.sms_consent === undefined
+            ? ''
+            : Number(r.sms_consent) === 1
+              ? '<div class="lk-n" style="color:var(--done)">Agreed to be texted.</div>'
+              : '<div class="lk-n" style="color:var(--stopped)">Asked and did not agree to texts. ' +
+                'Ring them — and messages about this appointment only, nothing after the car ' +
+                'goes.</div>') +
         '</div>' +
 
         '<div><div class="lcell" style="color:' + tone + '">' +

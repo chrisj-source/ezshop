@@ -10,6 +10,7 @@ import {
   newPublicKey, publicSlots, renderLetter, LETTER_TOKENS, LetterTokens, REQUIRED_FIELDS
 } from '../lib/funnel';
 import { prettyDate, sendCustomerLetter } from './funnel';
+import { consentReady, consentText, missingFromConsent } from '../lib/consent';
 
 /**
  * The desk half of web funnels: the owner's settings, and the queue.
@@ -54,6 +55,8 @@ export async function registerFunnelAdmin(app: FastifyInstance): Promise<void> {
     const addr: Record<string, string> = {};
     for (const a of address) addr[String(a.setting_key)] = String(a.setting_value ?? '');
 
+    const consent = await consentText(cid);
+
     return {
       settings,
       /* Named, because it is the one thing on this screen that is not a
@@ -79,7 +82,12 @@ export async function registerFunnelAdmin(app: FastifyInstance): Promise<void> {
         onButton: contrastRatio(settings.accent, settings.accentInk),
         onPaper: contrastRatio(settings.accent, '#ffffff'),
         warnings: contrastWarnings(settings.accent, settings.accentInk)
-      }
+      },
+      /* The consent block, and what is wrong with it. The form cannot be
+         switched on while anything is missing, so this is not advisory. */
+      consent: consent,
+      consentMissing: consent && consent.body ? missingFromConsent(consent.body) : ['Nothing written yet.'],
+      consentReady: await consentReady(cid)
     };
   });
 
@@ -95,6 +103,24 @@ export async function registerFunnelAdmin(app: FastifyInstance): Promise<void> {
 
     const num = (v: unknown, lo: number, hi: number, d: number): number =>
       Math.min(Math.max(Math.round(Number(v ?? d)) || d, lo), hi);
+
+    /**
+     * The one place this is strict: the form does not go live until the shop
+     * has written its own consent wording and it contains what it has to.
+     *
+     * A shop that switched booking on without going near the consent tab would
+     * be collecting phone numbers against no disclosure at all — which is the
+     * gap that raised this in the first place. Switching the form OFF is never
+     * blocked, and neither is any other setting on this screen.
+     */
+    if (b.enabled && !(await consentReady(cid))) {
+      const t = await consentText(cid);
+      return reply.code(409).send({
+        error: 'The form cannot go live until your consent wording is written and saved.',
+        consent: true,
+        missing: t && t.body ? missingFromConsent(t.body) : ['Nothing written yet.']
+      });
+    }
 
     if (b.enabled !== undefined) { sets.push('enabled = ?'); vals.push(b.enabled ? 1 : 0); }
     if (b.offerEstimate !== undefined) { sets.push('offer_estimate = ?'); vals.push(b.offerEstimate ? 1 : 0); }
@@ -176,6 +202,72 @@ export async function registerFunnelAdmin(app: FastifyInstance): Promise<void> {
     }
 
     return { ok: true };
+  });
+
+  /* -------------------------------------------------------------- consent */
+
+  /**
+   * The shop's own TCPA wording. Their liability, their words, their shop name
+   * in it — which is the main reason it cannot be ours.
+   *
+   * It is checked loosely on save. "Text STOP to quit" has met the opt-out
+   * requirement; refusing it because it does not match a template would teach
+   * shops to paste words they have not read. What is checked is that each idea
+   * is present at all, because a shop that leaves out STOP has collected
+   * consent that may be worth nothing and the first anybody would know is a
+   * complaint.
+   */
+  app.put('/api/web-form/consent', async (req, reply) => {
+    const ctx = requireCompany(req, reply);
+    if (!ctx) return;
+    if (!ctx.caps.manageWebForms) return reply.code(403).send({ error: 'Not permitted' });
+
+    const cid = ctx.company!.id;
+    const b = req.body as Record<string, unknown>;
+    const body = String(b.body ?? '').trim().slice(0, 2000);
+    const label = String(b.label ?? '').trim().slice(0, 190) || 'Text me about my repair.';
+
+    if (!body) return reply.code(400).send({ error: 'Write the consent wording first.' });
+
+    const missing = missingFromConsent(body);
+    if (missing.length) {
+      return reply.code(400).send({
+        error: 'That wording is not complete enough to collect consent against.',
+        missing
+      });
+    }
+
+    const url = (v: unknown): string | null => {
+      const s = String(v ?? '').trim();
+      if (!s) return null;
+      return /^https?:\/\/\S+$/.test(s) ? s.slice(0, 400) : null;
+    };
+    const privacy = url(b.privacyUrl);
+    const terms = url(b.termsUrl);
+    if (b.privacyUrl && !privacy) {
+      return reply.code(400).send({ error: 'The privacy link has to be a full https:// address.' });
+    }
+    if (b.termsUrl && !terms) {
+      return reply.code(400).send({ error: 'The terms link has to be a full https:// address.' });
+    }
+
+    await texec(cid, `
+      UPDATE funnel_consent
+         SET label = ?, body = ?, privacy_url = ?, terms_url = ?,
+             approved_at = NOW(), approved_by = ?, approved_name = ?
+       WHERE id = 1`,
+      [label, body, privacy, terms, ctx.user.id, ctx.user.name]);
+
+    /* Who approved which words, and when. The consent rows copy the wording in
+       at submission time, so this is the shop's own trail of what it published
+       rather than the evidence itself. */
+    await texec(cid, `
+      INSERT INTO audit_log (user_id, user_name, entity, entity_id, action, detail)
+      VALUES (?, ?, 'web_form', 0, 'consent.saved', ?)`,
+      [ctx.user.id, ctx.user.name, JSON.stringify({ label, body, privacy, terms })])
+      .catch(() => undefined);
+
+    return { ok: true, ready: true };
   });
 
   /* ----------------------------------------------------------------- keys */

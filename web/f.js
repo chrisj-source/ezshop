@@ -361,6 +361,66 @@
       hp.appendChild(hpi);
       wrap.appendChild(hp);
 
+      /* ---- consent
+
+         The shop's own words, read from the server rather than written here,
+         so the text recorded against the submission is the text that was on
+         screen. Unticked by default and never required: TCPA does not let
+         consent to marketing be a condition of the sale, and the shop's own
+         disclosure says as much — a required box would make that sentence a
+         lie on their own website.
+
+         Full-strength ink, like every other label here. This is the smallest
+         text on the form and the one with legal weight, so it is the last
+         place to be clever about opacity. */
+      var consentBox = null;
+      if (cfg.consent) {
+        var cwrap = el('div',
+          'display:flex;gap:10px;align-items:flex-start;padding:11px 12px;' +
+          'border:1px solid currentColor;border-radius:6px');
+        var cid2 = 'es-consent-' + Math.random().toString(36).slice(2, 7);
+
+        consentBox = el('input', 'margin:2px 0 0;flex:none;width:18px;height:18px');
+        consentBox.type = 'checkbox';
+        consentBox.id = cid2;
+
+        var ctext = el('div', 'font-size:0.8125em;line-height:1.55;color:inherit;opacity:1');
+        var clab = el('label', 'display:block;font-weight:600;margin-bottom:3px;cursor:pointer');
+        clab.setAttribute('for', cid2);
+        clab.textContent = cfg.consent.label;
+        ctext.appendChild(clab);
+
+        var cbody = el('span', 'display:block');
+        cbody.textContent = cfg.consent.body;
+        ctext.appendChild(cbody);
+
+        if (cfg.consent.privacyUrl || cfg.consent.termsUrl) {
+          var links = el('span', 'display:block;margin-top:4px');
+          if (cfg.consent.privacyUrl) {
+            var a1 = el('a', 'color:inherit;text-decoration:underline', 'Privacy policy');
+            a1.href = cfg.consent.privacyUrl;
+            a1.target = '_blank';
+            a1.rel = 'noopener';
+            links.appendChild(a1);
+          }
+          if (cfg.consent.privacyUrl && cfg.consent.termsUrl) {
+            links.appendChild(el('span', null, ' · '));
+          }
+          if (cfg.consent.termsUrl) {
+            var a2 = el('a', 'color:inherit;text-decoration:underline', 'Terms');
+            a2.href = cfg.consent.termsUrl;
+            a2.target = '_blank';
+            a2.rel = 'noopener';
+            links.appendChild(a2);
+          }
+          ctext.appendChild(links);
+        }
+
+        cwrap.appendChild(consentBox);
+        cwrap.appendChild(ctext);
+        wrap.appendChild(cwrap);
+      }
+
       /* ---- send */
       var foot = el('div', 'display:flex;flex-wrap:wrap;gap:12px;align-items:center');
       var send = el('button', 'font-weight:600;font-size:1em;padding:11px 20px;' + accentStyle(true));
@@ -385,7 +445,11 @@
         var body = {
           k: KEY, purpose: state.purpose, date: state.date, time: state.time,
           campaign: campaign, pageUrl: location.href.slice(0, 400),
-          company_website: hpi.value, answers: {}
+          company_website: hpi.value, answers: {},
+          /* Only whether the box was ticked. The wording itself is read from
+             the database server-side — a client that posted its own disclosure
+             text could claim the customer agreed to anything. */
+          smsConsent: !!(consentBox && consentBox.checked)
         };
 
         Object.keys(inputs).forEach(function (key) {

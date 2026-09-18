@@ -10,6 +10,7 @@ import { actorFrom } from './audit';
 import { refuseEmail } from '../lib/suppression';
 import { scrubCustomer } from '../permissions';
 import { clearMentionsFor, openMentions, raiseMentions, taggablePeople } from '../lib/mentions';
+import { consentMark } from '../lib/consent';
 
 /** Anything that stops this file being closed. Empty means it can be. */
 function closeBlockers(
@@ -114,6 +115,19 @@ export async function registerRepairOrders(app: FastifyInstance): Promise<void> 
       canAddNotes: ctx.caps.addNotes,
       /* Who is still waiting on an answer here, and for how long. */
       mentions: await openMentions(cid, id),
+      /**
+       * Whether this number may be texted, and why not when it may not.
+       *
+       * A mark, deliberately not a block: SMS is not built yet, and when it is
+       * this is what it inherits. In the meantime the honest thing is to tell
+       * whoever has the file open that this number cannot be texted, and let
+       * them pick up the phone.
+       *
+       * The narrow case worth knowing about: consent from a website booking
+       * covers the repair and lapses when the car is delivered, so a delivered
+       * file shows the mark even though it did not while the work was on.
+       */
+      consent: await consentMark(cid, ro.customer_phone as string | null, id),
       /**
        * Every movement booked on this car: drop, pick up, return, out to
        * sublet. Shown in the drawer so a return can be booked from the file

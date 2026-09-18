@@ -10,6 +10,7 @@ import {
   funnelFields, funnelLetter, funnelSettings, hostOf, originAllowed,
   publicSlots, renderLetter, resolveKey, touchKey, LetterTokens
 } from '../lib/funnel';
+import { consentText, recordConsent } from '../lib/consent';
 
 /**
  * The public half of web funnels: the form on the shop's own website.
@@ -140,12 +141,30 @@ export async function registerFunnelPublic(app: FastifyInstance): Promise<void> 
       return reply.code(404).send({ error: 'This form is not taking bookings right now.' });
     }
 
+    /**
+     * The consent block. Sent to the browser so the CHECKBOX shows the shop's
+     * own words — and so the exact text on screen is the text we can record
+     * afterwards. The form refuses to run without it, which is enforced when
+     * the owner switches the form on.
+     */
+    const consent = await consentText(g.companyId);
+
     return {
       shop: shop?.name ? String(shop.name) : '',
       intro: settings.intro,
       accent: settings.accent,
       accentInk: settings.accentInk,
       holdHours: settings.holdHours,
+      consent: consent && consent.body ? {
+        label: consent.label,
+        body: consent.body,
+        privacyUrl: consent.privacyUrl,
+        termsUrl: consent.termsUrl,
+        /* Never required. TCPA does not let consent to marketing be a
+           condition of the sale, and the shop's own disclosure says so — a
+           required box would make that sentence a lie on their own website. */
+        required: false
+      } : null,
       purposes: [
         settings.offerEstimate
           ? { key: 'estimate', label: 'An estimate', sub: 'Bring it by, we look at it' } : null,
@@ -341,6 +360,17 @@ export async function registerFunnelPublic(app: FastifyInstance): Promise<void> 
     const holdHours = settings.holdHours;
     const state = purpose === 'drop' ? 'held' : 'booked';
 
+    /**
+     * Consent, as it stood on the screen they were looking at.
+     *
+     * The wording is read from the database rather than taken from the browser
+     * — a client that posts its own disclosure text could claim the customer
+     * agreed to anything. What the browser is trusted for is the one thing only
+     * it knows: whether the box was ticked.
+     */
+    const consent = await consentText(g.companyId);
+    const smsConsent = b.smsConsent === true;
+
     const written = await withTenantTx(g.companyId, async (c) => {
       const [appt] = await c.query<ResultSetHeader>(`
         INSERT INTO appointments
@@ -437,6 +467,50 @@ export async function registerFunnelPublic(app: FastifyInstance): Promise<void> 
            `${purpose === 'drop' ? 'asking to drop off' : 'asking for an estimate'} ` +
            `on ${date} at ${time}. Usually a question rather than new work.`]);
       }
+
+      /**
+       * Two consent records, and they are not the same thing.
+       *
+       * The MARKETING one is whatever they ticked — including a decline, which
+       * is written down deliberately: "we asked and they said no" is a
+       * different fact from "nobody ever asked", and only one of them means
+       * somebody should ring instead of text.
+       *
+       * The TRANSACTIONAL one is implied by the act of booking and is scoped
+       * to this appointment, expiring when the car is delivered. Recorded
+       * rather than assumed, so "why did we text this person" has an answer.
+       */
+      const consentId = await recordConsent(g.companyId, {
+        kind: 'marketing', channel: 'sms', destination: phone,
+        granted: smsConsent,
+        source: 'web_form',
+        wordingShown: consent?.body ?? null,
+        boxesTicked: smsConsent ? 'sms_marketing' : '',
+        pageUrl: pageUrl,
+        ip: req.ip,
+        userAgent: String(req.headers['user-agent'] ?? ''),
+        submission: {
+          name: name, phone: phone, email: email, vehicle: vehicle,
+          purpose: purpose, date: date, time: time,
+          carrier: carrier, claim: claim, what: what, contact: contact,
+          answers: answers, campaign: campaign
+        },
+        funnelRequestId: requestId,
+        appointmentId: apptId
+      }, c);
+
+      await recordConsent(g.companyId, {
+        kind: 'transactional', channel: 'sms', destination: phone,
+        granted: true, source: 'web_form',
+        wordingShown: 'Implied by booking an appointment on the website. ' +
+          'Covers messages about this appointment and this repair only, and lapses ' +
+          'when the vehicle is delivered.',
+        pageUrl: pageUrl, ip: req.ip,
+        funnelRequestId: requestId, appointmentId: apptId
+      }, c);
+
+      await c.query('UPDATE funnel_requests SET sms_consent = ?, consent_id = ? WHERE id = ?',
+        [smsConsent ? 1 : 0, consentId, requestId]);
 
       if (known) {
         /* No lead, so the trail goes on the request row and the appointment.

@@ -1326,6 +1326,8 @@ CREATE TABLE funnel_requests (
   origin_host    VARCHAR(190) NULL,
   submit_ip      VARCHAR(64)  NULL,
   is_repeat      TINYINT(1)   NOT NULL DEFAULT 0 COMMENT 'same phone inside a week — its own lead, flagged, never merged',
+  sms_consent    TINYINT(1)   NULL COMMENT 'NULL = asked before consent shipped; 0 = asked and declined; 1 = agreed',
+  consent_id     BIGINT UNSIGNED NULL COMMENT 'the consents row; that table is the record, this is convenience',
   conflicted_at  DATETIME     NULL COMMENT 'the hours changed under a held slot; left for a person',
   suppressed     TINYINT(1)   NOT NULL DEFAULT 0 COMMENT 'the address had unsubscribed: carried, not refused',
   answered_at    DATETIME     NULL,
@@ -1373,3 +1375,79 @@ ON DUPLICATE KEY UPDATE setting_value = setting_value;
 INSERT INTO role_caps (role_key, cap_key, can_see, can_change) VALUES
   ('owner', 'web_forms', 1, 1)
 ON DUPLICATE KEY UPDATE can_see = 1, can_change = 1;
+
+-- ===========================================================================
+-- TCPA consent (migration 032)
+-- ===========================================================================
+--
+-- Raised 17 Sep 2026, the day after the booking form shipped: the form was
+-- collecting a phone number and promising contact, and nothing recorded that
+-- the customer had agreed to any of it.
+--
+-- TWO KINDS, and conflating them is the mistake this schema exists to prevent:
+--
+--   * MARKETING consent is the ticked box. Express, written, revocable, and
+--     under TCPA it CANNOT be a condition of the sale — so the booking works
+--     whether or not it is ticked. The shop's own disclosure says as much, and
+--     a required box would make that sentence a lie on their own website.
+--
+--   * TRANSACTIONAL consent is implied by the act of booking and is
+--     deliberately narrow: messages about the car they just booked, and
+--     nothing after it is delivered. Recorded rather than assumed, so "why did
+--     we text this person" always has an answer.
+--
+-- A ROW IS NEVER DELETED OR EDITED. Revoking sets `revoked_at`. The whole
+-- value of this table is that it says what was true at a moment, and a table
+-- you can rewrite is not evidence.
+--
+-- The gate is `lib/consent.ts:mayContact`, and nowhere else — the same shape
+-- as `sendMail` being the only place the suppression list is checked.
+
+CREATE TABLE consents (
+  id             BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  kind           ENUM('marketing','transactional') NOT NULL,
+  channel        ENUM('sms','email') NOT NULL,
+  destination    VARCHAR(190) NOT NULL
+                 COMMENT 'normalised like suppressions: digits, or lowercased address. Keyed on the destination so editing a client cannot change what was consented to',
+  granted        TINYINT(1)   NOT NULL
+                 COMMENT '0 is a real record — they were asked and declined, which is not the same as never having been asked',
+  source         VARCHAR(32)  NOT NULL DEFAULT 'web_form',
+  wording_shown  TEXT         NULL
+                 COMMENT 'the load-bearing column. Copied, never referenced: the shop rewords this over the years and a reference would follow the edit',
+  boxes_ticked   VARCHAR(255) NULL,
+  page_url       VARCHAR(400) NULL,
+  submit_ip      VARCHAR(64)  NULL,
+  user_agent     VARCHAR(255) NULL,
+  submission     TEXT         NULL COMMENT 'JSON copy of what was submitted alongside, so the record stands alone after a purge',
+  funnel_request_id BIGINT UNSIGNED NULL,
+  ro_id          BIGINT UNSIGNED NULL COMMENT 'transactional scope',
+  appointment_id BIGINT UNSIGNED NULL,
+  created_at     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  revoked_at     DATETIME     NULL,
+  revoked_reason VARCHAR(64)  NULL COMMENT 'stop, unsubscribe, delivered, desk',
+  KEY ix_consent_dest (channel, destination, kind, revoked_at),
+  KEY ix_consent_req (funnel_request_id),
+  KEY ix_consent_ro (ro_id, kind)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- The shop writes the wording. Their liability, their words, their shop name in
+-- it. It ships as a DRAFT with the name blanked, and the route refuses to save
+-- it with the blank still in — a shop cannot publish a form that names nobody,
+-- and an empty box that rejects six attempts while they guess which four
+-- phrases we want is how a feature gets written off as broken.
+CREATE TABLE funnel_consent (
+  id            TINYINT UNSIGNED NOT NULL PRIMARY KEY DEFAULT 1,
+  label         VARCHAR(190) NOT NULL DEFAULT 'Text me about my repair.',
+  body          TEXT         NULL COMMENT 'NULL means nobody has written it yet',
+  privacy_url   VARCHAR(400) NULL COMMENT 'the SHOP''s own, not ours',
+  terms_url     VARCHAR(400) NULL,
+  approved_at   DATETIME     NULL COMMENT 'the form will not switch on without this',
+  approved_by   BIGINT UNSIGNED NULL,
+  approved_name VARCHAR(120) NULL,
+  updated_at    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+INSERT INTO funnel_consent (id, label, body) VALUES (1,
+  'Text me about my repair.',
+  'I agree to receive text messages from ______ at the number provided, including repair updates, estimate and appointment notifications, and occasional service messages. Consent is not a condition of purchase. Message frequency varies. Message and data rates may apply. Reply STOP to opt out or HELP for help.')
+ON DUPLICATE KEY UPDATE id = id;

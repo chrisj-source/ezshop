@@ -2270,6 +2270,46 @@
           (s.enabled ? 'Switch the form off' : 'Switch the form on') + '</button></div>' +
       '</div>' +
 
+      '<div class="pad"><div class="dlbl">Consent to be texted</div>' +
+        '<div class="sub" style="margin-top:6px;max-width:620px">' +
+          'Your words, and your liability — so the shop name in it has to be yours. The form will ' +
+          'not go live until this is written and saved. The box is shown <strong>unticked</strong> ' +
+          'and a customer can book without it: TCPA does not let consent be a condition of the ' +
+          'sale, which is exactly what the “not a condition of purchase” line in your own wording ' +
+          'promises.' +
+        '</div>' +
+        (d.consentMissing.length
+          ? '<div class="sub" style="margin-top:9px;color:var(--stopped)">Not usable yet:<br>' +
+            d.consentMissing.map(esc).join('<br>') + '</div>'
+          : '<div class="sub" style="margin-top:9px;color:var(--done)">Saved' +
+            (d.consent && d.consent.approvedName
+              ? ' by ' + esc(d.consent.approvedName) : '') + '. The form may go live.</div>') +
+        '<div style="margin-top:9px">' +
+          '<div class="dlbl">The line beside the box</div>' +
+          '<input class="in" id="wfCLabel" value="' +
+            esc((d.consent && d.consent.label) || '') + '" style="width:100%;max-width:520px">' +
+          '<div class="dlbl" style="margin-top:9px">The disclosure</div>' +
+          '<textarea class="in" id="wfCBody" style="width:100%;min-height:120px">' +
+            esc((d.consent && d.consent.body) || '') + '</textarea>' +
+          '<div class="sub" style="margin-top:6px;max-width:620px">It has to name your shop, say ' +
+            'what they will receive, say to reply <strong>STOP</strong> to opt out and ' +
+            '<strong>HELP</strong> for help, say message and data rates may apply, and say consent ' +
+            'is not a condition of purchase. Any phrasing — we check the ideas are there, not the ' +
+            'words.</div>' +
+          '<div class="dlbl" style="margin-top:9px">Your privacy policy and terms</div>' +
+          '<input class="in" id="wfCPriv" value="' +
+            esc((d.consent && d.consent.privacyUrl) || '') +
+            '" placeholder="https://…/privacy" style="width:100%;max-width:520px">' +
+          '<input class="in" id="wfCTerms" value="' +
+            esc((d.consent && d.consent.termsUrl) || '') +
+            '" placeholder="https://…/terms" style="width:100%;max-width:520px;margin-top:6px">' +
+          '<div class="sub" style="margin-top:6px;max-width:620px">Yours, not ours — the form sits ' +
+            'on your website collecting for you, so you are the one who has to have said what you ' +
+            'do with it. Easy Shop is named on the form as the processor.</div>' +
+          '<div style="margin-top:9px"><button class="btn" id="wfCSave">Save the wording</button></div>' +
+        '</div>' +
+      '</div>' +
+
       '<div class="pad"><div class="dlbl">Send this to whoever runs your website</div>' +
         '<div class="sub" style="margin-top:6px;max-width:620px">' +
           'Most shops do not run their own site. Everything the web person needs is in this block — ' +
@@ -2482,7 +2522,32 @@
   function wireWebForm() {
     var on = function (id, fn) { var n = $(id); if (n) n.onclick = fn; };
 
-    on('wfToggle', function () { wfSave({ enabled: !WF.settings.enabled }); });
+    on('wfToggle', function () {
+      api('/api/web-form', { method: 'PATCH',
+        body: JSON.stringify({ enabled: !WF.settings.enabled }) })
+        .then(renderWebForm)
+        .catch(function (e) {
+          /* The consent gate. Not overridable: a form collecting phone numbers
+             against no disclosure is the gap that raised this in the first
+             place. */
+          say(e.consent
+            ? e.error + ' ' + (e.missing || []).join(' ')
+            : e.message, 'bad');
+        });
+    });
+
+    on('wfCSave', function () {
+      api('/api/web-form/consent', { method: 'PUT', body: JSON.stringify({
+        label: $('wfCLabel').value,
+        body: $('wfCBody').value,
+        privacyUrl: $('wfCPriv').value,
+        termsUrl: $('wfCTerms').value
+      }) })
+        .then(function () { say('Saved. The form may go live.', 'ok'); return renderWebForm(); })
+        .catch(function (e) {
+          say(e.missing && e.missing.length ? e.missing.join(' ') : e.message, 'bad');
+        });
+    });
 
     on('wfCopy', function () {
       var t = wfInstructions(WF);

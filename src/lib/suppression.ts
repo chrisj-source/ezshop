@@ -3,6 +3,7 @@ import { RowDataPacket } from 'mysql2/promise';
 import { mq, mqOne } from '../db/master';
 import { texec, tqOne } from '../db/tenant';
 import { config } from '../config';
+import { revokeConsent } from './consent';
 
 /**
  * Unsubscribe, STOP, and every place they have to be obeyed.
@@ -119,6 +120,21 @@ export async function suppress(
       released_at = NULL, released_ip = NULL`,
     [channel, dest, opts.reason ?? 'unsubscribe', opts.source ?? 'link',
      opts.note ?? null, opts.ip ?? null]);
+
+  /**
+   * STOP and unsubscribe also REVOKE consent — one record, both directions.
+   *
+   * Decided 17 Sep 2026 with the TCPA work. Keeping them apart would have
+   * meant a suppression list that stops sending while the consent table still
+   * says the person agreed, and the consent table is the thing somebody would
+   * be shown if it were ever disputed. A person who has said stop has withdrawn
+   * consent; those are not two facts.
+   *
+   * The consent ROW is not deleted, only marked revoked \u2014 what was true in
+   * March is still true about March.
+   */
+  await revokeConsent(companyId, channel === 'sms' ? 'sms' : 'email', dest,
+    opts.reason === 'stop' ? 'stop' : opts.reason === 'manual' ? 'desk' : 'unsubscribe');
 }
 
 /**
