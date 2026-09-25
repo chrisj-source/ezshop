@@ -259,9 +259,10 @@
 
   /* ------------------------------------------------------- pull sheet */
   .pmodal[hidden], .pmscrim[hidden] { display:none; }
-  .pmscrim { position:fixed; inset:0; background:rgba(9,13,20,.72); z-index:60; }
+  /* Above the file (70/71) and the drawer (80/81): it opens from a file's header. */
+  .pmscrim { position:fixed; inset:0; background:rgba(9,13,20,.72); z-index:90; }
   .pmodal {
-    position:fixed; z-index:61; left:50%; top:50%; transform:translate(-50%,-50%);
+    position:fixed; z-index:91; left:50%; top:50%; transform:translate(-50%,-50%);
     width:min(680px,calc(100vw - 24px)); max-height:min(84vh,900px);
     display:flex; flex-direction:column;
     background:var(--bg); border:1px solid var(--line); border-radius:8px;
