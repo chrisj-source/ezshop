@@ -224,7 +224,7 @@
     customerName: '', phone: '', email: '', address: '', city: '', addrState: '', zip: '',
     insurerName: '', claimNumber: '', dateOfLoss: '',
     damageNote: '', amount: '',
-    _derivedRo: '', _typedRo: ''
+    _derivedRo: ''
   };
 
   /* getUserMedia needs a secure origin; only phones have a rear camera worth
@@ -279,12 +279,13 @@
     Shell.mount({ me: me, active: 'checkin' });
     if (CAN_SCAN) loadZXing().catch(function () {});
     return Promise.all([
-      api('/api/next-ro-number').catch(function () { return {}; }),
+      /* No sequential suggestion: an RO number is the last six of the VIN,
+         whatever the pay type, and it is filled in once the VIN is known. */
+      Promise.resolve({}),
       api('/api/clients?kind=wholesale').catch(function () { return { clients: [] }; })
     ]);
   }).then(function (r) {
     if (!r) return;
-    if (r[0].suggestion) { D.roNumber = r[0].suggestion; D._typedRo = r[0].suggestion; }
     ACCOUNTS = r[1].clients;
     render();
   }).catch(function (e) { if (e.message !== 'signed out') console.error(e); });
@@ -356,13 +357,8 @@
             ' aria-checked="' + (D.jobType === j.k) + '" data-job="' + j.k + '">' +
             '<div class="choicet">' + esc(j.t) + '</div><div class="choicen">' + esc(j.n) + '</div></button>';
         }).join('') + '</div>' +
-        (D.payType === 'wholesale'
-          ? '<div class="hint" style="margin-top:16px">The RO number comes off the VIN — the last six ' +
-            'characters — once the vehicle is scanned.</div>'
-          : '<div class="fields" style="margin-top:18px"><div>' +
-            '<label class="fl" for="roNumber">RO number</label>' +
-            '<input id="roNumber" value="' + esc(D.roNumber) + '" inputmode="numeric">' +
-            '</div></div>') +
+        '<div class="hint" style="margin-top:16px">The RO number comes off the VIN — the last six ' +
+        'characters — once the vehicle is scanned.</div>' +
         '</div>' + foot('Back', 'Vehicle');
     }
 
@@ -382,17 +378,19 @@
         f('year', 'Year', 'number') + f('make', 'Make') + f('model', 'Model') + f('color', 'Colour') +
         f('plate', 'Plate') + f('mileage', 'Mileage', 'number') +
         '</div>' +
+        '<div class="fields two" style="margin-top:14px">' +
+        '<div><label class="fl" for="roNumber">RO number — last six of the VIN</label>' +
+        '<input id="roNumber" value="' + esc(D.roNumber) + '" autocapitalize="characters"></div>' +
         (D.payType === 'wholesale'
-          ? '<div class="fields two" style="margin-top:14px">' +
-            '<div><label class="fl" for="roNumber">RO number — last six of the VIN</label>' +
-            '<input id="roNumber" value="' + esc(D.roNumber) + '" autocapitalize="characters"></div>' +
-            '<div><label class="fl" for="amount">Agreed amount</label>' +
+          ? '<div><label class="fl" for="amount">Agreed amount</label>' +
             '<input id="amount" value="' + esc(D.amount) + '" type="number" step="0.01" min="0" ' +
-            'inputmode="decimal" placeholder="0.00"></div>' +
-            '</div><div class="hint">RO number comes off the VIN — change it if this shop numbers ' +
-            'them differently. Wholesale work rarely has an estimate file, so the agreed price goes ' +
-            'in here.</div>'
+            'inputmode="decimal" placeholder="0.00"></div>'
           : '') +
+        '</div><div class="hint">RO number comes off the VIN — change it only if this car needs ' +
+        'a different one.' +
+        (D.payType === 'wholesale'
+          ? ' Wholesale work rarely has an estimate file, so the agreed price goes in here.'
+          : '') + '</div>' +
         '</div>' + foot('Back', D.payType === 'wholesale' ? 'Photos' : 'Customer');
     }
 
@@ -541,9 +539,8 @@
     });
   }
 
-  /** Wholesale files are numbered off the VIN: the last six characters. */
-  function applyWholesaleRo() {
-    if (D.payType !== 'wholesale') return;
+  /** Every file is numbered off the VIN: the last six characters. */
+  function applyVinRo() {
     var vin = String(D.vin || '').toUpperCase().replace(/[^A-HJ-NPR-Z0-9]/g, '');
     if (vin.length < 6) return;
     var derived = vin.slice(-6);
@@ -587,14 +584,8 @@
         collect();
         clearFail();
         D.payType = b.dataset.pay;
-        if (D.payType === 'wholesale') {
-          if (D.roNumber && D.roNumber !== D._derivedRo) D._typedRo = D.roNumber;
-          D.roNumber = '';
-          applyWholesaleRo();
-        } else {
-          D.clientId = ''; D.droppedBy = '';
-          if (!D.roNumber && D._typedRo) D.roNumber = D._typedRo;
-        }
+        if (D.payType !== 'wholesale') { D.clientId = ''; D.droppedBy = ''; }
+        applyVinRo();
         render();
       });
     });
@@ -619,12 +610,9 @@
       }
       if (name === 'job') {
         if (!D.jobType) return fail('Pick what the car is here for.');
-        if (D.payType !== 'wholesale' && !String(D.roNumber).trim()) {
-          return fail('An RO number is required.', 'roNumber');
-        }
       }
-      if (name === 'vehicle' && D.payType === 'wholesale') {
-        applyWholesaleRo();
+      if (name === 'vehicle') {
+        applyVinRo();
         if (!String(D.roNumber).trim()) {
           return fail('Scan or type the VIN — the RO number comes from it.', 'vin');
         }
@@ -639,7 +627,7 @@
     var vinEl = $('vin');
     if (vinEl) vinEl.addEventListener('input', function () {
       D.vin = vinEl.value;
-      applyWholesaleRo();
+      applyVinRo();
     });
 
     var dec = $('decode');
@@ -720,7 +708,7 @@
 
     api('/api/vin/' + vin).then(function (d) {
       D.vin = vin;
-      applyWholesaleRo();
+      applyVinRo();
       if (d.year) D.year = String(d.year);
       if (d.make) D.make = d.make;
       if (d.model) D.model = d.model;
@@ -1036,7 +1024,7 @@
     D.vin = vin;
     var el = $('vin');
     if (el) el.value = vin;
-    applyWholesaleRo();
+    applyVinRo();
     decode();
   }
 
