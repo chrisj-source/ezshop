@@ -254,7 +254,9 @@
 
   function renderReview(d) {
     var i = d.import, h = [];
-    PICKED = i.matched_ro_id || null;
+    /* Only a full-VIN hit is preselected. Anything weaker is offered; with no
+       exact hit the default is a new file. */
+    PICKED = i.match_confidence === 'exact' ? (i.matched_ro_id || null) : null;
 
     $('dTitle').textContent = (i.ro_number || i.envelope_name || 'Unnamed estimate') +
       (i.supplement_seq ? ' — supplement ' + i.supplement_seq : '');
@@ -293,19 +295,27 @@
     if (i.state === 'pending') {
       h.push('<div class="sec">Which repair order?</div>');
 
-      if (i.matched_ro_id) {
+      if (PICKED) {
         var m = d.candidates.filter(function (c) { return c.id === i.matched_ro_id; })[0];
         h.push('<div class="cand sel" data-ro="' + i.matched_ro_id + '">' +
           '<div><div class="log-b">' + esc(m ? m.ro_number : 'RO ' + i.matched_ro_id) + '</div>' +
-          '<div class="conf">Matched on ' + esc(i.match_confidence === 'exact' ? 'an exact key' : 'a likely key') +
+          '<div class="conf">Same VIN' +
           (m ? ' · ' + esc([m.vehicle, m.customer_name, m.status_label].filter(Boolean).join(' · ')) : '') +
           '</div></div><div class="state" style="color:var(--done);border:1px solid var(--done)">Chosen</div></div>');
       }
 
-      var others = d.candidates.filter(function (c) { return c.id !== i.matched_ro_id; });
+      var others = d.candidates.filter(function (c) { return c.id !== PICKED; });
+      var tail = (i.vin || '').replace(/\s+/g, '').toUpperCase().slice(-6);
+      h.push('<div class="cand' + (PICKED ? '' : ' sel') + '" data-ro="0">' +
+        '<div><div class="log-b">New file' + (tail.length === 6 ? ' · RO ' + esc(tail) : '') + '</div>' +
+        '<div class="conf">' + (tail.length === 6 ? 'Created from this estimate'
+          : 'This estimate has no VIN, so there is no RO number to give it') + '</div></div>' +
+        (PICKED ? '<button class="btn btn-ghost" style="padding:5px 10px;font-size:10.5px">Use this</button>'
+          : '<div class="state" style="color:var(--done);border:1px solid var(--done)">Chosen</div>') +
+        '</div>');
       if (others.length) {
         h.push('<div class="sub" style="margin-top:10px">' +
-          (i.matched_ro_id ? 'Or pick a different file:' : 'Open files that might be it:') + '</div>');
+          (PICKED ? 'Or pick a different file:' : 'Open files that might be it:') + '</div>');
         others.forEach(function (c) {
           h.push('<div class="cand" data-ro="' + c.id + '">' +
             '<div><div class="log-b">' + esc(c.ro_number) + '</div>' +
@@ -315,7 +325,7 @@
         });
       }
 
-      if (!i.matched_ro_id && !others.length) {
+      if (!PICKED && !others.length) {
         h.push('<div class="warnbox">Nothing on the board matches this estimate’s RO number, VIN or claim ' +
           'number. Create the file from it — the estimate fills the customer, vehicle, insurance, ' +
           'parts and labor with no typing.</div>');
@@ -339,7 +349,7 @@
 
       h.push('<div class="row" style="margin-top:18px">' +
         '<button class="btn btn-solid" id="accept">' +
-        (i.matched_ro_id ? 'Accept onto this file' : 'Create the file and accept') + '</button>' +
+        (PICKED ? 'Accept onto this file' : 'Create the file and accept') + '</button>' +
         '<button class="btn btn-ghost" id="reject">Reject</button></div>');
       h.push('<div class="msg" id="rMsg"></div>');
     } else {
@@ -383,12 +393,14 @@
   function wireReview(i) {
     Array.prototype.forEach.call(document.querySelectorAll('[data-ro]'), function (el) {
       el.addEventListener('click', function () {
-        PICKED = Number(el.dataset.ro);
+        PICKED = Number(el.dataset.ro) || null;
         Array.prototype.forEach.call(document.querySelectorAll('[data-ro]'), function (x) {
-          x.classList.toggle('sel', Number(x.dataset.ro) === PICKED);
+          x.classList.toggle('sel', (Number(x.dataset.ro) || null) === PICKED);
         });
         var btn = $('accept');
-        if (btn) btn.textContent = 'Accept onto ' + (el.querySelector('.log-b') || {}).textContent;
+        if (btn) btn.textContent = PICKED
+          ? 'Accept onto ' + (el.querySelector('.log-b') || {}).textContent
+          : 'Create the file and accept';
       });
     });
 

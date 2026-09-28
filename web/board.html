@@ -613,6 +613,10 @@
   <label class="row" style="font:400 11.5px var(--font);color:var(--muted);gap:5px">
     <input type="checkbox" id="fClosed"> Closed
   </label>
+  <label class="row" style="font:400 11.5px var(--font);color:var(--muted);gap:5px"
+    title="Picked up and not closed out yet — the paperwork still to finish">
+    <input type="checkbox" id="fAwait"> <span id="fAwaitLbl">Awaiting close-out</span>
+  </label>
   <div style="position:relative">
     <button class="btn btn-ghost" id="colBtn">Columns ▾</button>
     <div class="colpanel" id="colPanel" hidden></div>
@@ -636,6 +640,7 @@
     <div id="gridBody"></div>
     <div class="cards" id="cards"></div>
     <div class="empty" id="empty" hidden></div>
+    <div id="findMore" hidden style="padding:14px 16px;font:400 11.5px var(--font);color:var(--muted)"></div>
   </div>
   <div class="cyclewrap" id="cycleView" hidden>
     <div class="legend" id="legend"></div>
@@ -1135,6 +1140,12 @@
     return Promise.all([api('/api/board' + closed), api('/api/board/summary')])
       .then(function (r) {
         FILES = r[0].files;
+        /* The count sits on the checkbox so the backlog is visible without ticking it. */
+        var goneNow = goneSlots();
+        var nAwait = FILES.filter(function (f) {
+          return !(f.closeDate || f.closedAt) && goneNow.indexOf(f.statusSlot) >= 0;
+        }).length;
+        $('fAwaitLbl').textContent = 'Awaiting close-out' + (nAwait ? ' \u00b7 ' + nAwait : '');
         SERVER_SUMMARY = r[1];
         render();
       });
@@ -1190,7 +1201,11 @@
     var g = $('fGroup').value, st = $('fStatus').value, q = $('fSearch').value.trim().toLowerCase();
     var tech = pickedTech();
     var wantNone = $('fTech').value === 'none';
-    var done = $('fDone').checked ? completeSlots() : null;
+    /* Complete must include the picked-up cars: its own tooltip promises them.
+       completeSlots() works by board position from Vehicle Ready, and a shop
+       whose Deliver group sorts ahead of Ready lost Picked Up from it — the
+       car was then hidden by Complete AND by the picked-up rule, everywhere. */
+    var done = $('fDone').checked ? completeSlots().concat(goneSlots()) : null;
     /* A tech's printed list is a work list: a car at Vehicle Ready or gone is
        nothing for them to do, so it stays off the sheet. On screen it is still
        there — this only applies while printing. */
@@ -1212,15 +1227,33 @@
     var gone = goneSlots();
     var wantGone = $('fDone').checked || (st && gone.indexOf(st) >= 0);
 
+    /* Typing in the search box is looking for one car. The stage rules below
+       (Complete, Closed, picked-up) decide what the board shows by default;
+       they must not hide the file somebody is typing the number of. Group,
+       status and tech still apply — those are filters the person chose. */
+    var searching = !!q;
+    var awaiting = $('fAwait').checked;
+
     var out = FILES.filter(function (f) {
       if (g && f.group !== g) return false;
       if (st && f.statusSlot !== st) return false;
-      if (done && done.indexOf(f.statusSlot) < 0) return false;
-      if (hide && hide.indexOf(f.statusSlot) >= 0) return false;
-      if (!wantGone && gone.indexOf(f.statusSlot) >= 0) return false;
-      /* A closed file, however it got here. The server filters these out, but an
-         older build sends them and the board should not show them regardless. */
-      if (!asked && f.closeDate) return false;
+      var isClosed = !!(f.closeDate || f.closedAt);
+      /* Awaiting close-out: the car has gone, the file has not been closed.
+         Overrides the stage rules — it is a list of exactly those. */
+      if (awaiting) {
+        if (isClosed || gone.indexOf(f.statusSlot) < 0) return false;
+      } else if (!searching) {
+        if (done && done.indexOf(f.statusSlot) < 0) return false;
+        if (hide && hide.indexOf(f.statusSlot) >= 0) return false;
+        /* A closed-out file usually still sits at Picked Up. In the Closed view
+           that is the whole point of it, so the picked-up rule does not apply —
+           it used to, which left those files visible only with Complete AND
+           Closed both ticked. */
+        if (!wantGone && gone.indexOf(f.statusSlot) >= 0 && !(asked && isClosed)) return false;
+        /* A closed file, however it got here. The server filters these out, but an
+           older build sends them and the board should not show them regardless. */
+        if (!asked && f.closeDate) return false;
+      }
       if (drop && drop.indexOf(f.statusSlot) >= 0) return false;
       if (wantNone && !needsTech(f)) return false;
       if (tech) {
@@ -1900,7 +1933,56 @@
 
   /* ------------------------------------------------------------------ render */
 
+  /* The board only holds open files (or 90 days of closed ones), so a search
+     that finds nothing on screen asks the server about every file ever opened —
+     closed at any age and voided included. Clicking one opens its drawer. */
+  var FIND_SEQ = 0;
+  /* Runs on every search of 3+ characters, not only when the board is empty:
+     a search that matches one car on screen can still miss the one wanted.
+     Files already on screen are left out of the list. */
+  function findAnywhere(shown) {
+    var q = $('fSearch').value.trim();
+    var box = shown.length ? $('findMore') : $('empty');
+    $('findMore').hidden = true;
+    if (q.length < 3) return;
+    var seq = ++FIND_SEQ;
+    var onScreen = {};
+    shown.forEach(function (r) { onScreen[r.id] = 1; });
+    if (!shown.length) box.innerHTML = 'Nothing on the board matches \u201c' + esc(q) + '\u201d. Looking through every file\u2026';
+    setTimeout(function () {
+      if (seq !== FIND_SEQ) return;
+      api('/api/board/find?q=' + encodeURIComponent(q)).then(function (d) {
+        if (seq !== FIND_SEQ) return;
+        var f = (d.files || []).filter(function (r) { return !onScreen[r.id]; });
+        if (!f.length) {
+          if (!shown.length) box.innerHTML = 'No file anywhere matches \u201c' + esc(q) + '\u201d \u2014 open, closed or voided.';
+          return;
+        }
+        box.hidden = false;
+        var day = function (v) { return v ? String(v).slice(0, 10) : ''; };
+        box.innerHTML = '<div style="margin-bottom:10px">' + (shown.length ? 'Also matching, not on this view: ' : 'Not on this view. ') + f.length +
+          (f.length === 1 ? ' file matches' : ' files match') + ' \u201c' + esc(q) + '\u201d:</div>' +
+          '<div style="display:flex;flex-direction:column;gap:6px;max-width:560px;' + (shown.length ? '' : 'margin:0 auto;') + 'text-align:left">' +
+          f.map(function (r) {
+            var state = r.voided_at ? 'Voided ' + day(r.voided_at)
+              : (r.close_date || r.closed_at) ? 'Closed ' + day(r.close_date || r.closed_at)
+              : (r.status_label || 'Open');
+            return '<button class="btn btn-ghost" data-findro="' + r.id + '" style="display:flex;justify-content:space-between;gap:12px;text-align:left">' +
+              '<span><strong>RO ' + esc(r.ro_number) + '</strong> \u00b7 ' +
+              esc([r.vehicle, r.color, r.plate].filter(Boolean).join(' \u00b7 ') || 'no vehicle') + '</span>' +
+              '<span style="white-space:nowrap">' + esc(state) + '</span></button>';
+          }).join('') + '</div>';
+        Array.prototype.forEach.call(box.querySelectorAll('[data-findro]'), function (el) {
+          el.addEventListener('click', function () { openRo(Number(el.dataset.findro)); });
+        });
+      }).catch(function () {
+        if (seq === FIND_SEQ && !shown.length) box.innerHTML = 'Nothing matches those filters.';
+      });
+    }, 300);
+  }
+
   function render() {
+    FIND_SEQ++;
     var rows = filtered();
     /* The strip describes what is on screen, not what is in the shop — filter to
        a body tech and every number is that tech's. */
@@ -1914,9 +1996,11 @@
       syncPrintHead(0);
       $('empty').innerHTML = FILES.length ? 'Nothing matches those filters.'
         : 'No repair orders yet.<br>Use <strong>New RO</strong> or <strong>Check-in</strong>.';
+      findAnywhere([]);
       return;
     }
     $('empty').hidden = true;
+    findAnywhere(rows);
 
     syncPrintHead(rows.length);
     if (VIEW === 'table') renderTable(rows);
@@ -1970,6 +2054,7 @@
     if (t.value === 'none') bits.push('needing a tech');
     else if (t.value) bits.push('assigned to ' + t.options[t.selectedIndex].textContent);
 
+    if ($('fAwait').checked) bits.push('awaiting close-out');
     if ($('fDone').checked) bits.push('complete');
     if ($('fClosed').checked) bits.push('closed files');
     /* Say what the sheet left off, so nobody reads it as the whole picture.
@@ -4198,6 +4283,7 @@
   on('fSearch', 'input', render);
   on('fTech', 'change', render);
   on('fDone', 'change', render);
+  on('fAwait', 'change', render);
   on('fClosed', 'change', function () { load(); });
   on('fPrint', 'click', function () { window.print(); });
 

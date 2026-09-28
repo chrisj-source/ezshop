@@ -340,15 +340,28 @@ export async function registerEms(app: FastifyInstance): Promise<void> {
       let created = false;
 
       if (!roId && body.createNew) {
-        const vinTail = ((imp.vin as string | null) ?? '').slice(-6);
-        const roNumber = (imp.ro_number as string | null) || vinTail || null;
-        if (!roNumber) throw new Error('The estimate has no RO number and no VIN to build one from.');
+        /* An RO number is the last six of the VIN — never CCC's RO_ID, which is
+           the estimator's own reference and is how an import used to land on
+           somebody else's car. "Create" means create: a number already held is
+           refused by name, never quietly attached to. */
+        const vin = normVin(imp.vin as string | null);
+        if (!vin || vin.length < 6) {
+          throw new Error('The estimate has no VIN, so there is no RO number to give the file. Add the VIN in the estimating system and export again.');
+        }
+        const roNumber = vin.slice(-6);
 
         const [dup] = await c.query<RowDataPacket[]>(
-          'SELECT id FROM repair_orders WHERE ro_number = ?', [roNumber]);
+          `SELECT r.ro_number, r.closed_at, r.voided_at,
+                  CONCAT_WS(' ', v.year, v.make, v.model) AS vehicle
+           FROM repair_orders r LEFT JOIN vehicles v ON v.id = r.vehicle_id
+           WHERE r.ro_number = ?`, [roNumber]);
         if (dup.length) {
-          roId = dup[0].id as number;
-        } else {
+          const d = dup[0];
+          const what = [d.vehicle, d.voided_at ? 'voided' : d.closed_at ? 'closed' : 'open']
+            .filter(Boolean).join(', ');
+          throw new Error(`RO ${roNumber} is already taken (${what}). Pick that file above if it is this car, or open it and renumber it.`);
+        }
+        {
           let clientId: number | null = null;
           if (imp.customer_name) {
             const [r] = await c.query<ResultSetHeader>(
@@ -601,34 +614,45 @@ interface MatchKeys { roNumber: string | null; vin: string | null; claimNumber: 
 /**
  * RO number first, then VIN, then claim number — and the confidence says which,
  * so the screen can ask rather than guess.
+ *
+ * A file whose VIN disagrees with the estimate's is never a match, whatever
+ * else lines up. CCC's RO_ID and a claim number are both free text somebody
+ * typed; a VIN is the car. Only a full-VIN hit is 'exact' enough for the
+ * screen to preselect — everything else is offered, and the default with no
+ * exact hit is a new file.
  */
+const OPEN_RO = 'r.close_date IS NULL AND r.closed_at IS NULL AND r.voided_at IS NULL';
+const normVin = (v: string | null) => (v ?? '').replace(/\s+/g, '').toUpperCase() || null;
+
 async function findMatch(cid: number, k: MatchKeys): Promise<{ roId: number | null; confidence: 'exact' | 'likely' | 'none'; how: string | null }> {
-  if (k.roNumber) {
-    const hit = await tqOne<RowDataPacket & { id: number }>(cid,
-      'SELECT id FROM repair_orders WHERE ro_number = ? AND close_date IS NULL AND closed_at IS NULL AND voided_at IS NULL', [k.roNumber]);
-    if (hit) return { roId: hit.id, confidence: 'exact', how: 'RO number' };
+  const vin = normVin(k.vin);
+  /* Same car, or a file that has no VIN yet to disagree with. */
+  const sameCar = vin ? ' AND (v.vin IS NULL OR v.vin = \'\' OR UPPER(v.vin) = ?)' : '';
+  const carParam = vin ? [vin] : [];
+  const one = (where: string, params: unknown[]) =>
+    tqOne<RowDataPacket & { id: number }>(cid, `
+      SELECT r.id FROM repair_orders r LEFT JOIN vehicles v ON v.id = r.vehicle_id
+      WHERE ${OPEN_RO} AND ${where}${sameCar}
+      ORDER BY r.opened_at DESC LIMIT 1`, [...params, ...carParam]);
+
+  if (vin) {
+    const hit = await one('UPPER(v.vin) = ?', [vin]);
+    if (hit) return { roId: hit.id, confidence: 'exact', how: 'VIN' };
   }
 
-  if (k.vin) {
-    const hit = await tqOne<RowDataPacket & { id: number }>(cid, `
-      SELECT r.id FROM repair_orders r JOIN vehicles v ON v.id = r.vehicle_id
-      WHERE v.vin = ? AND r.close_date IS NULL AND r.closed_at IS NULL AND r.voided_at IS NULL
-      ORDER BY r.opened_at DESC LIMIT 1`, [k.vin]);
-    if (hit) return { roId: hit.id, confidence: 'exact', how: 'VIN' };
+  if (k.roNumber) {
+    const hit = await one('r.ro_number = ?', [k.roNumber]);
+    if (hit) return { roId: hit.id, confidence: 'likely', how: 'RO number' };
+  }
 
-    // Wholesale files are numbered off the tail of the VIN — and CCC's own
-    // RO_ID field is often the last eight, not a shop RO number at all.
-    for (const n of [8, 6]) {
-      const tail = k.vin.slice(-n);
-      const byTail = await tqOne<RowDataPacket & { id: number }>(cid,
-        'SELECT id FROM repair_orders WHERE ro_number = ? AND close_date IS NULL AND closed_at IS NULL AND voided_at IS NULL', [tail]);
-      if (byTail) return { roId: byTail.id, confidence: 'likely', how: `last ${n === 8 ? 'eight' : 'six'} of the VIN` };
-    }
+  if (vin) {
+    // A file numbered off the VIN that has no VIN on it yet.
+    const hit = await one('r.ro_number = ?', [vin.slice(-6)]);
+    if (hit) return { roId: hit.id, confidence: 'likely', how: 'last six of the VIN' };
   }
 
   if (k.claimNumber) {
-    const hit = await tqOne<RowDataPacket & { id: number }>(cid,
-      'SELECT id FROM repair_orders WHERE claim_number = ? AND close_date IS NULL AND closed_at IS NULL AND voided_at IS NULL', [k.claimNumber]);
+    const hit = await one('r.claim_number = ?', [k.claimNumber]);
     if (hit) return { roId: hit.id, confidence: 'likely', how: 'claim number' };
   }
 
@@ -653,17 +677,23 @@ async function insurerIdFor(c: PoolConnection, name: string | null): Promise<num
   return ins.insertId;
 }
 
-/** Open files that look plausible, for the human to choose from. */
+/** Open files that look plausible, for the human to choose from. Same VIN
+    guard as findMatch; no keys means no candidates, never "every open file". */
 async function candidates(cid: number, k: MatchKeys): Promise<RowDataPacket[]> {
+  const vin = normVin(k.vin);
   const where: string[] = [];
   const params: unknown[] = [];
 
-  if (k.vin) {
-    where.push('v.vin = ?', 'RIGHT(v.vin, 8) = ?');
-    params.push(k.vin, k.vin.slice(-8));
+  if (vin) {
+    where.push('UPPER(v.vin) = ?', 'r.ro_number = ?');
+    params.push(vin, vin.slice(-6));
   }
-  if (k.roNumber) { where.push('r.ro_number LIKE ?'); params.push(`%${k.roNumber}%`); }
+  if (k.roNumber) { where.push('r.ro_number = ?'); params.push(k.roNumber); }
   if (k.claimNumber) { where.push('r.claim_number = ?'); params.push(k.claimNumber); }
+  if (!where.length) return [];
+
+  const sameCar = vin ? " AND (v.vin IS NULL OR v.vin = '' OR UPPER(v.vin) = ?)" : '';
+  if (vin) params.push(vin);
 
   return tq<RowDataPacket[]>(cid, `
     SELECT r.id, r.ro_number, r.claim_number, r.opened_at, v.vin,
@@ -673,7 +703,7 @@ async function candidates(cid: number, k: MatchKeys): Promise<RowDataPacket[]> {
     LEFT JOIN vehicles v ON v.id = r.vehicle_id
     LEFT JOIN clients c ON c.id = r.client_id
     LEFT JOIN statuses s ON s.slot_id = r.status_slot
-    WHERE r.close_date IS NULL AND r.closed_at IS NULL AND r.voided_at IS NULL ${where.length ? 'AND (' + where.join(' OR ') + ')' : ''}
+    WHERE ${OPEN_RO} AND (${where.join(' OR ')})${sameCar}
     ORDER BY r.opened_at DESC
     LIMIT 25`, params);
 }

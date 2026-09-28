@@ -2045,23 +2045,27 @@
           '<div class="scell num hide-sm" title="Part lines ever ordered from them">' +
           (Number(v.parts_lines) || 0) +
           (Number(v.on_order) ? ' · ' + v.on_order + ' out' : '') + '</div>' +
+          '<div class="row" style="gap:6px">' +
           '<button class="visbtn' + (off ? '' : ' on') + '" data-vactive="' + (off ? 0 : 1) + '">' +
-          (off ? 'Retired' : 'Offered') + '</button></div>');
+          (off ? 'Retired' : 'Offered') + '</button>' +
+          '<button class="visbtn" data-vdel="' + v.id + '" data-vname="' + esc(v.name) + '">Delete</button>' +
+          '</div></div>');
       });
 
       h.push('<div class="pad" style="padding-top:16px"><div class="row">' +
         '<button class="btn btn-solid" id="saveVendors">Save vendors</button>' +
         '<span class="sub">' + live.length + ' offered' +
         (gone.length ? ' · ' + gone.length + ' retired' : '') +
-        ' · a retired vendor stays on every order that already names it</span></div></div>');
+        ' · Offered/Retired saves on the tap; Save is for names, kinds and phones</span></div></div>');
 
       $('mid').innerHTML = h.join('');
       detail('Vendors', '<div style="font:400 11.5px/1.6 var(--font);color:var(--muted);padding:12px 0">' +
         'One list for the whole shop. The parts desk picks from it when ordering, and it fills the ' +
         'suggestions when somebody types a sublet vendor onto a file. Kind is only a label \u2014 it groups ' +
         'the list, it does not restrict anything.</div>' +
-        '<div class="sub" style="margin-top:10px">Retire rather than delete. Deleting would orphan the ' +
-        'orders that name them; retiring just takes the name out of the dropdowns.</div>');
+        '<div class="sub" style="margin-top:10px">Retire takes a vendor out of the ordering dropdowns and ' +
+        'keeps it here, to switch back on. Delete takes it off this list too. Either way, parts already ' +
+        'ordered from them keep the name.</div>');
 
       $('addVendor').addEventListener('click', function () {
         var name = $('vName').value.trim();
@@ -2089,13 +2093,34 @@
         });
       });
 
+      /* Saves on the tap. It used to wait for Save vendors, and a toggle that
+         looks done but is not is how a retired vendor stayed in the dropdowns. */
       Array.prototype.forEach.call($('mid').querySelectorAll('[data-vactive]'), function (b) {
         b.addEventListener('click', function () {
           var on = b.dataset.vactive === '1';
-          b.dataset.vactive = on ? '0' : '1';
-          b.classList.toggle('on', !on);
-          b.textContent = on ? 'Retired' : 'Offered';
-          b.closest('.prow2').style.opacity = on ? '.5' : '';
+          var id = Number(b.closest('.prow2').dataset.vendor);
+          b.disabled = true;
+          api('/api/vendors/' + id, { method: 'PATCH', body: JSON.stringify({ active: !on }) })
+            .then(function () {
+              b.dataset.vactive = on ? '0' : '1';
+              b.classList.toggle('on', !on);
+              b.textContent = on ? 'Retired' : 'Offered';
+              b.closest('.prow2').style.opacity = on ? '.5' : '';
+              var was = d.vendors.filter(function (v) { return v.id === id; })[0];
+              if (was) was.active = on ? 0 : 1;
+              say(on ? 'Retired — no longer offered when ordering.' : 'Offered again.', 'ok');
+            })
+            .catch(function (e) { say(e.message, 'err'); })
+            .then(function () { b.disabled = false; });
+        });
+      });
+
+      Array.prototype.forEach.call($('mid').querySelectorAll('[data-vdel]'), function (b) {
+        b.addEventListener('click', function () {
+          if (!confirm('Delete ' + b.dataset.vname + '? Parts already ordered from them keep the name.')) return;
+          api('/api/vendors/' + b.dataset.vdel, { method: 'DELETE' })
+            .then(function () { say('Deleted.', 'ok'); renderVendors(); })
+            .catch(function (e) { say(e.message, 'err'); });
         });
       });
 
@@ -2109,12 +2134,9 @@
           var kind = row.querySelector('.v-kind').value;
           var phoneEl = row.querySelector('.v-phone');
           var phone = phoneEl ? phoneEl.value.trim() : (was.phone || '');
-          var active = row.querySelector('[data-vactive]').dataset.vactive === '1';
-
           if (name && name !== was.name) body.name = name;
           if (kind !== (was.kind || '')) body.kind = kind || null;
           if (phone !== (was.phone || '')) body.phone = phone || null;
-          if (active !== (Number(was.active) === 1)) body.active = active;
           if (Object.keys(body).length) jobs.push({ id: id, body: body });
         });
 

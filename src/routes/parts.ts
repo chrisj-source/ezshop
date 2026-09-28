@@ -76,7 +76,7 @@ export async function registerParts(app: FastifyInstance): Promise<void> {
     `, params);
 
     const vendors = await tq<RowDataPacket[]>(ctx.company!.id,
-      'SELECT id, name, kind, phone FROM vendors WHERE active = 1 ORDER BY name');
+      'SELECT id, name, kind, phone FROM vendors WHERE active = 1 AND deleted_at IS NULL ORDER BY name');
 
     const [summary] = await tq<RowDataPacket[]>(ctx.company!.id, `
       SELECT
@@ -486,7 +486,7 @@ export async function registerParts(app: FastifyInstance): Promise<void> {
                  AND p.state IN ('ordered','partial','backordered')) AS on_order,
              (SELECT MAX(p.ordered_at) FROM parts_lines p WHERE p.vendor_id = v.id) AS last_ordered
       FROM vendors v
-      ${all ? '' : 'WHERE v.active = 1'}
+      WHERE v.deleted_at IS NULL ${all ? '' : 'AND v.active = 1'}
       ORDER BY v.active DESC, v.name`);
 
     /* Sublet vendors are typed as free text on the file rather than picked, so
@@ -545,7 +545,34 @@ export async function registerParts(app: FastifyInstance): Promise<void> {
     if (!sets.length) return reply.code(400).send({ error: 'Nothing to change' });
 
     vals.push(id);
-    await texec(ctx.company!.id, `UPDATE vendors SET ${sets.join(', ')} WHERE id = ?`, vals);
+    await texec(ctx.company!.id, `UPDATE vendors SET ${sets.join(', ')} WHERE id = ? AND deleted_at IS NULL`, vals);
+    return { ok: true };
+  });
+
+  /**
+   * Delete a vendor. Gone from every list, admin included. The row is kept
+   * (deleted_at) so part lines already ordered from them still show the name —
+   * a hard delete would blank the vendor on every one of those lines. Refused
+   * while parts are still out with them: that is who has to be chased.
+   */
+  app.delete('/api/vendors/:id', async (req, reply) => {
+    const ctx = requireCompany(req, reply);
+    if (!ctx) return;
+    if (!ctx.caps.manageParts) return reply.code(403).send({ error: 'Not permitted' });
+    const id = Number((req.params as { id: string }).id);
+    const cid = ctx.company!.id;
+
+    const out = await tqOne<RowDataPacket & { n: number }>(cid,
+      `SELECT COUNT(*) AS n FROM parts_lines
+       WHERE vendor_id = ? AND state IN ('ordered','partial','backordered')`, [id]);
+    if (Number(out?.n ?? 0) > 0) {
+      return reply.code(409).send({
+        error: `${out!.n} part line${Number(out!.n) === 1 ? ' is' : 's are'} still on order with this vendor. Receive or move them first.`
+      });
+    }
+
+    await texec(cid,
+      'UPDATE vendors SET active = 0, deleted_at = NOW() WHERE id = ? AND deleted_at IS NULL', [id]);
     return { ok: true };
   });
 

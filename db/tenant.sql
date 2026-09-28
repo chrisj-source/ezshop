@@ -395,7 +395,8 @@ CREATE TABLE vendors (
   kind            VARCHAR(48)   NULL,
   phone           VARCHAR(32)   NULL,
   email           VARCHAR(190)  NULL,
-  active          TINYINT(1)    NOT NULL DEFAULT 1
+  active          TINYINT(1)    NOT NULL DEFAULT 1,
+  deleted_at      DATETIME      NULL COMMENT 'hidden everywhere; kept so old lines keep the name'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE parts_lines (

@@ -29,6 +29,43 @@ interface BoardRow extends RowDataPacket {
 export async function registerBoard(app: FastifyInstance): Promise<void> {
 
   /**
+   * Find a file anywhere — open, picked up, closed at any age, voided. The board
+   * payload only carries open files, or the last 90 days of closed ones, so the
+   * search box on its own could never reach an older car. This is what it asks
+   * when nothing on screen matches. Same technician scope as the board.
+   */
+  app.get('/api/board/find', async (req, reply) => {
+    const ctx = requireCompany(req, reply);
+    if (!ctx) return;
+    if (!requireFeature(ctx, 'board', reply)) return;
+
+    const raw = String((req.query as { q?: string }).q ?? '').trim();
+    if (raw.length < 3) return { files: [] };
+    const like = '%' + raw.replace(/[\\%_]/g, m => '\\' + m) + '%';
+
+    const params: unknown[] = [like, like, like, like];
+    let scope = '';
+    if (!ctx.caps.seesAllRepairOrders) {
+      scope = ' AND EXISTS (SELECT 1 FROM ro_assignments a WHERE a.ro_id = r.id AND a.user_id = ?)';
+      params.push(ctx.user.id);
+    }
+
+    const files = await tq<RowDataPacket[]>(ctx.company!.id, `
+      SELECT r.id, r.ro_number, r.opened_at, r.close_date, r.closed_at, r.voided_at,
+             v.vin, v.plate, v.color,
+             TRIM(CONCAT_WS(' ', v.year, v.make, v.model)) AS vehicle,
+             s.label AS status_label
+      FROM repair_orders r
+      LEFT JOIN vehicles v ON v.id = r.vehicle_id
+      LEFT JOIN statuses s ON s.slot_id = r.status_slot
+      WHERE (r.ro_number LIKE ? OR v.vin LIKE ? OR v.plate LIKE ? OR r.claim_number LIKE ?)${scope}
+      ORDER BY r.opened_at DESC
+      LIMIT 25`, params);
+
+    return { files };
+  });
+
+  /**
    * The whole board in one payload. A shop with a few hundred open files is
    * well under a megabyte; pagination lives in the client.
    */
@@ -58,10 +95,14 @@ export async function registerBoard(app: FastifyInstance): Promise<void> {
        Older and imported files can carry the books date with no pickup stamp, and
        reading only `closed_at` left those sitting on the open board. */
     const CLOSED_ANY = '(r.close_date IS NOT NULL OR r.closed_at IS NOT NULL)';
+    /* Closed ADDS the last 90 days of closed files to the open board; it used to
+       replace it, so ticking Closed took every open file (Complete included)
+       off the screen. */
+    const OPEN_ONLY = 'r.close_date IS NULL AND r.closed_at IS NULL';
     const closedClause = wantClosed
-      ? `${CLOSED_ANY} AND r.voided_at IS NULL
-         AND COALESCE(r.close_date, DATE(r.closed_at)) > DATE_SUB(CURDATE(), INTERVAL 90 DAY)`
-      : `r.close_date IS NULL AND r.closed_at IS NULL AND r.voided_at IS NULL`;
+      ? `r.voided_at IS NULL AND ((${OPEN_ONLY}) OR (${CLOSED_ANY}
+         AND COALESCE(r.close_date, DATE(r.closed_at)) > DATE_SUB(CURDATE(), INTERVAL 90 DAY)))`
+      : `${OPEN_ONLY} AND r.voided_at IS NULL`;
 
     const rows = await tq<BoardRow[]>(ctx.company!.id, `
       SELECT
@@ -104,7 +145,7 @@ export async function registerBoard(app: FastifyInstance): Promise<void> {
       ctx.company!.id,
       `SELECT a.ro_id, a.position_key, a.display_name, a.user_id FROM ro_assignments a
        JOIN repair_orders r ON r.id = a.ro_id
-       WHERE r.voided_at IS NULL AND ${wantClosed ? CLOSED_ANY : '(r.close_date IS NULL AND r.closed_at IS NULL)'}`
+       WHERE r.voided_at IS NULL${wantClosed ? '' : ' AND ' + OPEN_ONLY}`
     );
 
     const byRo = new Map<number, Record<string, string | null>>();
