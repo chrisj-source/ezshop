@@ -76,12 +76,12 @@ export async function registerCloseout(app: FastifyInstance): Promise<void> {
 
     /* What was already flagged on the floor. The sheet says so on the row, so
        the desk can see the figure came from the shop rather than from here. */
-    const flags = new Map<string, { at: string; by: string | null }>();
+    const flags = new Map<string, { at: string; by: string | null; partial: boolean }>();
     for (const r of await tq<RowDataPacket[]>(cid,
-      'SELECT position_key, flagged_at, flagged_by_name FROM ro_labour WHERE ro_id = ?', [id])) {
+      'SELECT position_key, flagged_at, flagged_by_name, partial FROM ro_labour WHERE ro_id = ?', [id])) {
       if (r.flagged_at) {
         flags.set(String(r.position_key), {
-          at: String(r.flagged_at), by: r.flagged_by_name ?? null
+          at: String(r.flagged_at), by: r.flagged_by_name ?? null, partial: !!Number(r.partial)
         });
       }
     }
@@ -126,6 +126,7 @@ export async function registerCloseout(app: FastifyInstance): Promise<void> {
         isPdr: e.positionKey === 'pdr',
         flaggedAt: flags.get(e.positionKey)?.at ?? null,
         flaggedBy: flags.get(e.positionKey)?.by ?? null,
+        flaggedPartial: flags.get(e.positionKey)?.partial ?? false,
         rateOnFile: e.userId ? (rates.get(e.userId)?.rateCents ?? 0) : 0,
         ratePctOnFile: e.userId ? (rates.get(e.userId)?.ratePct ?? 0) : 0,
         emsHours: ems[e.positionKey] ?? 0

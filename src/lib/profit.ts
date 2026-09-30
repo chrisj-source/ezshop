@@ -26,6 +26,7 @@
 import { RowDataPacket } from 'mysql2/promise';
 import { tq, tqOne, texec } from '../db/tenant';
 import { loadPlan } from './pay';
+import { sqlStamp, syncFlagLedger } from './flags';
 
 /** The trades a close-out sheet can ask about, in the order it lists them. */
 export const LABOR_TRADES = ['pdr', 'body', 'paint', 'ri', 'detail'] as const;
@@ -437,12 +438,17 @@ export async function saveCloseout(
   companyId: number,
   roId: number,
   entries: LaborEntry[],
-  actorId: number
+  actorId: number,
+  actorName: string | null = null
 ): Promise<Profit | null> {
-  const flagged = new Map<string, string>();
-  for (const r of await tq<Array<RowDataPacket & { position_key: string; flagged_at: Date | null }>>(
-    companyId, 'SELECT position_key, flagged_at FROM ro_labour WHERE ro_id = ?', [roId])) {
-    if (r.flagged_at) flagged.set(r.position_key, new Date(r.flagged_at).toISOString().slice(0, 19).replace('T', ' '));
+  const flagged = new Map<string, { at: string; by: number | null; name: string | null }>();
+  for (const r of await tq<Array<RowDataPacket & {
+    position_key: string; flagged_at: string | null; flagged_by: number | null; flagged_by_name: string | null;
+  }>>(companyId, `
+    SELECT position_key, DATE_FORMAT(flagged_at, '%Y-%m-%d %H:%i:%s') AS flagged_at,
+           flagged_by, flagged_by_name
+      FROM ro_labour WHERE ro_id = ?`, [roId])) {
+    if (r.flagged_at) flagged.set(r.position_key, { at: r.flagged_at, by: r.flagged_by, name: r.flagged_by_name });
   }
 
   /* A percentage row arrives unpriced from the sheet — PDR's share is worked
@@ -459,19 +465,41 @@ export async function saveCloseout(
     }
   }
 
+  /* The close is final, so nothing on the file is partial any more. Who flagged
+     a row on the floor is kept, rather than wiped the way it used to be. */
   await texec(companyId, 'DELETE FROM ro_labour WHERE ro_id = ?', [roId]);
   for (const e of entries) {
+    const was = flagged.get(e.positionKey);
     await texec(companyId, `
       INSERT INTO ro_labour
         (ro_id, position_key, basis, hours, rate_cents, rate_pct, pct_after_costs,
          cost_cents, user_id, display_name, entered_by,
-         flagged_at, flagged_by, flagged_by_name)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, NOW()), ?, ?)`,
+         flagged_at, flagged_by, flagged_by_name, partial)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, NOW()), ?, ?, 0)`,
       [roId, e.positionKey, e.basis, e.hours, e.rateCents, e.ratePct,
        e.pctAfterCosts ? 1 : 0, e.costCents, e.userId, e.displayName, actorId,
-       flagged.get(e.positionKey) ?? null, actorId, null]);
+       was?.at ?? null, was ? was.by : actorId, was ? was.name : actorName]);
   }
 
+  /* Pay the difference between what was flagged and what the close settled,
+     on this week. A trade already flagged at the same figure writes nothing,
+     so its money stays on the week it was flagged. */
+  await syncFlagLedger(companyId, roId, entries.map(e => ({
+    positionKey: e.positionKey, userId: e.userId, displayName: e.displayName,
+    basis: e.basis, hours: e.basis === 'flat' || e.basis === 'pct' ? 0 : e.hours,
+    rateCents: e.rateCents, costCents: e.costCents, flagged: true, partial: false
+  })), { at: sqlStamp(new Date()), explicit: false, source: 'close', actorId, actorName });
+
+  return writeProfit(companyId, roId, entries, actorId);
+}
+
+/** The settled profit, written from the labour as it stands. */
+export async function writeProfit(
+  companyId: number,
+  roId: number,
+  entries: LaborEntry[],
+  actorId: number
+): Promise<Profit | null> {
   const p = await profitFor(companyId, roId, entries);
   if (!p) return null;
 

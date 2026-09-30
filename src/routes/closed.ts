@@ -193,7 +193,7 @@ export async function registerClosed(app: FastifyInstance): Promise<void> {
        which is exactly what the close-out screen shows them. */
     let profit = null;
     if (ctx.caps.viewPayPlans) {
-      profit = await saveCloseout(cid, id, closeoutEntries(req.body), ctx.user.id)
+      profit = await saveCloseout(cid, id, closeoutEntries(req.body), ctx.user.id, ctx.user.name)
         .catch(e => { req.log.error(e); return null; });
     }
 

@@ -3866,7 +3866,8 @@
         (r.basis === 'pct' ? r.pct + '%' : r.basis === 'flat' ? esc(money(r.flatCents)) : r.hours + ' hrs') +
         '</span>' +
         '<span class="ptag2 ' + (r.flagged ? 'ok' : 'no') + '">' +
-        (r.flagged ? 'Flagged' : 'Not flagged') + '</span></div>';
+        (r.flagged ? (r.partial ? 'Partial' : 'Flagged') + (r.flagDay ? ' ' + esc(shortDay(r.flagDay)) : '')
+          : 'Not flagged') + '</span></div>';
     });
 
     h += '<span class="sub" style="text-transform:none;letter-spacing:0">' +
@@ -4125,6 +4126,36 @@
     }).catch(function (e) { alert(e.message); });
   }
 
+  /** 2026-09-23 → Sep 23. */
+  function shortDay(iso) {
+    var d = new Date(iso + 'T12:00:00');
+    return isNaN(d) ? iso : d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  }
+
+  /* The week a flag dated `day` pays on — the server's rule, drawn here so the
+     modal can say it before saving. A past day is stamped just after midnight;
+     today is stamped now, so after the cutoff on the close day it is next week. */
+  var DAYNAMES = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+  function weekFor(day) {
+    var want = Math.max(0, DAYNAMES.indexOf(String(FLAGS.closeDay || 'wednesday').toLowerCase()));
+    var d = new Date(day + 'T12:00:00');
+    while (d.getDay() !== want) d.setDate(d.getDate() + 1);
+    var end = isoOf(d);
+    if (day === FLAGS.today && end === day) {
+      var now = new Date();
+      var hm = String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0');
+      if (hm > String(FLAGS.cutoff || '16:00').padStart(5, '0')) {
+        d.setDate(d.getDate() + 7);
+        end = isoOf(d);
+      }
+    }
+    return end;
+  }
+  function isoOf(d) {
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' +
+      String(d.getDate()).padStart(2, '0');
+  }
+
   /**
    * Flagging. Each trade is entered the way it is paid — a percentage of the
    * billed figure, a flat dollar amount, or hours at that person's rate — and
@@ -4136,7 +4167,7 @@
         positionKey: r.positionKey, label: r.label, userId: r.userId,
         displayName: r.name, basis: r.basis, pct: r.pct, hours: r.hours,
         flatCents: r.flatCents, rateCents: r.rateCents, flagged: r.flagged,
-        noPlan: r.noPlan
+        partial: !!r.partial, noPlan: r.noPlan
       };
     });
 
@@ -4174,6 +4205,12 @@
             '<span class="sub mdnum" style="margin-left:auto;text-transform:none;letter-spacing:0">' +
               'pays ' + esc(money(priceRow(r))) + '</span>' +
           '</div>' +
+          '<label class="row" style="gap:6px;padding-left:28px;font:400 11.5px var(--font);color:var(--muted)">' +
+            '<input type="checkbox" data-fgpart="' + i + '"' + (r.partial ? ' checked' : '') + '>' +
+            ' Partial flag' +
+            (r.partial ? '<span style="color:var(--dim)"> — enter what is earned so far; flagging the ' +
+              'rest later pays only the difference, on that week</span>' : '') +
+          '</label>' +
         '</div>';
       }).join('');
 
@@ -4185,6 +4222,17 @@
         b.addEventListener('click', function () {
           var r = rows[Number(b.dataset.fgtick)];
           r.flagged = !r.flagged;
+          r.touched = true;
+          if (!r.flagged) r.partial = false;
+          draw();
+        });
+      });
+      Array.prototype.forEach.call($('fgRows').querySelectorAll('[data-fgpart]'), function (b) {
+        b.addEventListener('change', function () {
+          var r = rows[Number(b.dataset.fgpart)];
+          r.partial = b.checked;
+          r.touched = true;
+          if (r.partial) r.flagged = true;
           draw();
         });
       });
@@ -4192,6 +4240,7 @@
         b.addEventListener('click', function () {
           var r = rows[Number(b.dataset.fgbasis)];
           r.basis = b.dataset.b;
+          r.touched = true;
           draw();
         });
       });
@@ -4199,6 +4248,7 @@
         inp.addEventListener('change', function () {
           var r = rows[Number(inp.dataset.fgval)];
           var v = Number(inp.value) || 0;
+          r.touched = true;
           if (r.basis === 'pct') r.pct = v;
           else if (r.basis === 'flat') r.flatCents = toCents(inp.value);
           else r.hours = v;
@@ -4229,6 +4279,12 @@
         ' · ' + esc(FLAGS.paintReason) + '</div>' +
       '</div>' +
       '<div class="mdbody">' +
+        '<div class="mdgrid">' +
+          '<div class="mdf"><div class="k">Flag date</div>' +
+            '<input type="date" id="fgDate" value="' + esc(FLAGS.today) + '" max="' + esc(FLAGS.today) + '"></div>' +
+          '<div class="mdf"><div class="k">Pays on</div>' +
+            '<div id="fgWeek" style="font:400 12.5px var(--font);padding-top:6px"></div></div>' +
+        '</div>' +
         '<div id="fgRows" style="display:flex;flex-direction:column;gap:10px"></div>' +
         '<div class="mdrow"><span class="sub" style="text-transform:none;letter-spacing:0">' +
           'Percentages run off ' + esc(money(FLAGS.pctBaseCents)) + '</span>' +
@@ -4236,8 +4292,9 @@
         '</div>' +
         '<div class="sub" style="text-transform:none;letter-spacing:0">' +
           'One tech per trade, so one row per trade — a trade nobody is assigned to is not ' +
-          'listed. Ticking flags it and stamps who did it; both flagging and unflagging go ' +
-          'to the activity log, and a flag can be changed until the file closes.</div>' +
+          'listed. The flag date alone decides the pay week: ready, picked up or closed makes ' +
+          'no difference. A row already flagged keeps its own date unless its figure changes ' +
+          'or you give it a new one. Everything goes to the activity log.</div>' +
         '<div class="msg" id="mdMsg"></div>' +
       '</div>' +
       '<div class="mdfoot">' +
@@ -4248,16 +4305,41 @@
 
     draw();
 
+    function paintWeek() {
+      var day = $('fgDate').value || FLAGS.today;
+      var end = weekFor(day);
+      var paid = (FLAGS.paidEnds || []).indexOf(end) >= 0;
+      var el = $('fgWeek');
+      if (day > FLAGS.today) {
+        el.textContent = 'Not in the future';
+        el.style.color = 'var(--stopped)';
+      } else if (paid && day !== FLAGS.today) {
+        el.textContent = 'Week ending ' + shortDay(end) + ' is already paid — pick an open week';
+        el.style.color = 'var(--stopped)';
+      } else {
+        el.textContent = 'Week ending ' + shortDay(end) + (paid ? ' is paid, so the next open week' : '');
+        el.style.color = '';
+      }
+      $('fgSave').disabled = day > FLAGS.today || (paid && day !== FLAGS.today);
+    }
+    on('fgDate', 'change', paintWeek);
+    paintWeek();
     on('fgAll', 'click', function () {
-      rows.forEach(function (r) { r.flagged = true; });
+      rows.forEach(function (r) { if (!r.flagged) r.touched = true; r.flagged = true; });
       draw();
     });
     on('fgCancel', 'click', closeMdlg);
     on('fgSave', 'click', function () {
       var btn = $('fgSave');
       btn.disabled = true;
+      /* Only the date was changed: that is a re-date of what is flagged. Otherwise
+         the date goes on the rows that were changed and nothing else moves. */
+      var day = $('fgDate').value || FLAGS.today;
+      if (day !== FLAGS.today && !rows.some(function (r) { return r.touched; })) {
+        rows.forEach(function (r) { if (r.flagged) r.touched = true; });
+      }
       api('/api/ro/' + OPEN + '/flags', {
-        method: 'PUT', body: JSON.stringify({ rows: rows })
+        method: 'PUT', body: JSON.stringify({ rows: rows, flagDate: $('fgDate').value || FLAGS.today })
       }).then(function (d) {
         FLAGS.rows = d.rows;
         FLAGS.flagged = d.flagged;
@@ -4265,7 +4347,8 @@
         FLAGS.flaggedCents = d.flaggedCents;
         renderFlags();
         closeMdlg();
-        Shell.announce(d.flagged + ' of ' + d.total + ' trades flagged.');
+        Shell.announce(d.flagged + ' of ' + d.total + ' trades flagged' +
+          (d.periodEnd ? ' — pays the week ending ' + shortDay(d.periodEnd) : '') + '.');
       }).catch(function (e) {
         btn.disabled = false;
         mdsay(e.message, true);
@@ -4452,7 +4535,8 @@
               '<span class="tradechip">' + esc(e.label) + '</span>' +
               (e.flaggedAt
                 ? '<span class="ptag2 ok" title="Flagged' +
-                  (e.flaggedBy ? ' by ' + esc(e.flaggedBy) : '') + '">flagged</span>'
+                  (e.flaggedBy ? ' by ' + esc(e.flaggedBy) : '') + '">' +
+                  (e.flaggedPartial ? 'partial — closing pays the rest' : 'flagged') + '</span>'
                 : '') +
             '</div>' +
             '<div class="basisline' + (noRate ? ' none' : '') + '">' +

@@ -427,7 +427,7 @@
         '<div class="v">' + esc(st[1]) + '</div></div>';
     }).join('') + '</div>');
 
-    h.push('<div class="thead" style="' + grid + '"><div>RO</div><div>Vehicle</div><div>Closed</div>' +
+    h.push('<div class="thead" style="' + grid + '"><div>RO</div><div>Vehicle</div><div>Flagged</div>' +
       (salaried ? '<div class="num">Hours</div>'
         : '<div>Basis</div><div class="num">Hours</div><div class="num">Rate</div><div class="num">Earned</div>') +
       '</div><div class="scroll">');
@@ -441,7 +441,8 @@
       h.push('<div class="trow" style="' + grid + '">' +
         '<div class="tro">' + esc(c.roNumber) + '</div>' +
         '<div class="tcell">' + esc(c.vehicle) +
-        (c.totalLoss ? ' <span class="tl">total loss</span>' : '') + '</div>' +
+        (c.totalLoss ? ' <span class="tl">total loss</span>' : '') +
+        (c.partial ? ' <span class="tl" style="color:var(--acc2)">partial</span>' : '') + '</div>' +
         '<div class="tcell" style="color:var(--dim)">' + esc(flagDate(c)) + '</div>' +
         (salaried ? '' : '<div class="basis' + (flat ? ' flat' : '') + '">' +
           (flat ? 'Flat price' : 'Hours') + '</div>') +

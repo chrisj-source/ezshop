@@ -2,8 +2,9 @@
  * Payroll for everyone who is not on a sales plan.
  *
  * The week closes on a day and at a time the shop picks — Wednesday at four, so
- * cheques can be cut that evening. A car counts for the week if it was FLAGGED
- * before that moment — not closed. Flagging is the shop saying "this is what he
+ * cheques can be cut that evening. A car counts for the week of its FLAG DATE —
+ * not closed, not Vehicle Ready. The date can be set by hand when flagging.
+ * Since migration 035 the amounts come off `ro_flag_entries`, see `lib/flags`. Flagging is the shop saying "this is what he
  * earned on this car", and it happens while the car is still in the shop; a file
  * can sit unclosed for weeks waiting on an insurance draft, and the tech who
  * finished it in March should not be paid in May. `close_date` is the books date
@@ -101,12 +102,15 @@ export interface CarRow {
   rateCents: number;
   costCents: number;
   totalLoss: boolean;
+  /** The latest flag on this trade was a partial one: more may follow. */
+  partial: boolean;
 }
 
 /**
- * Every costed line owed to a person for files closed inside a window. One row
- * per file per trade, so a tech who did both body and R&I on a car appears
- * twice — which is right: they were costed twice.
+ * Every flagged amount owed to a person inside a window, read off the flag
+ * ledger (`lib/flags`) — so it is the flag date that decides the week, never
+ * Vehicle Ready or the close. One row per file per trade: a partial flag and
+ * its remainder in different weeks each show only their own part.
  */
 export async function linesBetween(
   companyId: number,
@@ -116,22 +120,28 @@ export async function linesBetween(
   const rows = await tq<Array<RowDataPacket & {
     user_id: number; ro_id: number; ro_number: string;
     closed_at: string | null; flagged_at: string;
-    position_key: string; basis: CarRow['basis']; hours: string; rate_cents: number;
-    cost_cents: number; year: number | null; make: string | null; model: string | null;
-    client: string | null; total_loss_at: Date | null;
+    position_key: string; basis: CarRow['basis']; hours: string; rate_cents: string;
+    cost_cents: string; partial: string; year: number | null; make: string | null;
+    model: string | null; client: string | null; total_loss_at: Date | null;
   }>>(companyId, `
-    SELECT l.user_id, l.ro_id, r.ro_number, r.closed_at, l.flagged_at, l.position_key, l.basis,
-           l.hours, l.rate_cents, l.cost_cents,
+    SELECT e.user_id, e.ro_id, r.ro_number, r.closed_at, MAX(e.flag_at) AS flagged_at,
+           e.position_key,
+           SUBSTRING_INDEX(GROUP_CONCAT(e.basis ORDER BY e.id DESC), ',', 1) AS basis,
+           SUBSTRING_INDEX(GROUP_CONCAT(e.rate_cents ORDER BY e.id DESC), ',', 1) AS rate_cents,
+           SUBSTRING_INDEX(GROUP_CONCAT(e.partial ORDER BY e.id DESC), ',', 1) AS partial,
+           SUM(e.hours) AS hours, SUM(e.cost_cents) AS cost_cents,
            v.year, v.make, v.model, c.name AS client, r.total_loss_at
-    FROM ro_labour l
-    JOIN repair_orders r ON r.id = l.ro_id
+    FROM ro_flag_entries e
+    JOIN repair_orders r ON r.id = e.ro_id
     LEFT JOIN vehicles v ON v.id = r.vehicle_id
     LEFT JOIN clients c ON c.id = r.client_id
-    WHERE l.user_id IS NOT NULL
-      AND l.flagged_at IS NOT NULL
+    WHERE e.user_id IS NOT NULL
       AND r.voided_at IS NULL
-      AND l.flagged_at > ? AND l.flagged_at <= ?
-    ORDER BY l.flagged_at DESC, r.ro_number DESC`, [fromAt, toAt]);
+      AND e.counts_at > ? AND e.counts_at <= ?
+    GROUP BY e.user_id, e.ro_id, e.position_key, r.ro_number, r.closed_at,
+             v.year, v.make, v.model, c.name, r.total_loss_at
+    HAVING SUM(e.cost_cents) <> 0 OR SUM(e.hours) <> 0
+    ORDER BY flagged_at DESC, r.ro_number DESC`, [fromAt, toAt]);
 
   const out = new Map<number, CarRow[]>();
   for (const r of rows) {
@@ -150,7 +160,8 @@ export async function linesBetween(
       hours: Number(r.hours) || 0,
       rateCents: Number(r.rate_cents) || 0,
       costCents: Number(r.cost_cents) || 0,
-      totalLoss: !!r.total_loss_at
+      totalLoss: !!r.total_loss_at,
+      partial: String(r.partial) === '1'
     };
     out.set(r.user_id, [...(out.get(r.user_id) ?? []), car]);
   }

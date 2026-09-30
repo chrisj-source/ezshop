@@ -181,7 +181,7 @@ export async function resetDemo(actorUserId: number | null): Promise<DemoResetRe
  * rather than a careful one.
  */
 const WIPE_TABLES = [
-  'ro_payments', 'ro_labour', 'ro_profit', 'ro_assignments', 'parts_lines',
+  'ro_payments', 'ro_flag_entries', 'ro_labour', 'ro_profit', 'ro_assignments', 'parts_lines',
   'sublet_lines', 'ro_notes', 'supplements', 'documents', 'ems_lines', 'ems_imports',
   'lead_events', 'leads', 'appointments', 'commission_lines', 'payroll_run_cars',
   'payroll_run_people', 'payroll_runs', 'notifications', 'notification_deliveries',
@@ -433,6 +433,14 @@ async function seedFiles(
           [roId, paint.rateCents, Math.round(6.2 * paint.rateCents),
            paint.userId, paint.name, daysAgo(8 - (i - 9) * 2)]).catch(() => undefined);
       }
+      /* Payroll reads the flag ledger, not ro_labour — mirror the rows into it. */
+      await texec(cid, `
+        INSERT INTO ro_flag_entries
+          (ro_id, position_key, user_id, display_name, basis, hours, rate_cents, cost_cents,
+           flag_at, counts_at, source, entered_by_name)
+        SELECT ro_id, position_key, user_id, display_name, basis, hours, rate_cents, cost_cents,
+               flagged_at, flagged_at, 'flag', flagged_by_name
+          FROM ro_labour WHERE ro_id = ? AND flagged_at IS NOT NULL`, [roId]).catch(() => undefined);
 
       /* Two paid in full, one still owed — so the chase list has something on
          it and the closed board shows both states. */

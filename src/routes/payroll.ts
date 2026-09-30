@@ -160,7 +160,7 @@ export async function registerPayroll(app: FastifyInstance): Promise<void> {
       cars: cars.map(c => ({
         roId: c.roId, roNumber: c.roNumber, vehicle: c.vehicle, client: c.client,
         flaggedAt: c.flaggedAt, closedAt: c.closedAt, open: c.open,
-        positionKey: c.positionKey, totalLoss: c.totalLoss,
+        positionKey: c.positionKey, totalLoss: c.totalLoss, partial: c.partial,
         basis: salaried ? null : c.basis,
         hours: c.basis === 'flat' || c.basis === 'pct' ? null : c.hours,
         rateCents: salaried ? null : (c.basis === 'flat' || c.basis === 'pct' ? null : c.rateCents),
@@ -385,7 +385,7 @@ export async function registerPayroll(app: FastifyInstance): Promise<void> {
         open: !r.closed_at,
         positionKey: r.position_key,
         basis: r.basis, hours: Number(r.hours) || 0, rateCents: Number(r.rate_cents) || 0,
-        costCents: Number(r.cost_cents) || 0, totalLoss: !!r.total_loss_at
+        costCents: Number(r.cost_cents) || 0, totalLoss: !!r.total_loss_at, partial: false
       };
       out.set(r.user_id, [...(out.get(r.user_id) ?? []), car]);
     }

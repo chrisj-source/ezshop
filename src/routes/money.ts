@@ -11,7 +11,9 @@ import {
 import {
   JOB_TYPES, JOB_LABEL, JobType, PlanBasis, flagRowsFor, fileBasis, plansFor, priceFlag
 } from '../lib/tech-pay';
-import { LABOR_TRADES, Trade, TRADE_LABEL } from '../lib/profit';
+import { LABOR_TRADES, Trade, TRADE_LABEL, laborFor, writeProfit } from '../lib/profit';
+import { PaidWeekError, paidPeriodEnds, sqlStamp, syncFlagLedger, todayIso } from '../lib/flags';
+import { payrollSettings } from '../lib/payroll';
 
 /**
  * Money that arrives, and money that goes out to the floor.
@@ -357,9 +359,13 @@ export async function registerMoney(app: FastifyInstance): Promise<void> {
     if (!ro) return reply.code(404).send({ error: 'No such repair order' });
 
     const { file, rows } = await flagRowsFor(cid, id);
+    const { closeDay, cutoff } = await payrollSettings(cid);
     return {
       roNumber: ro.ro_number,
       closed: !!ro.closed_at,
+      today: todayIso(),
+      closeDay, cutoff,
+      paidEnds: await paidPeriodEnds(cid),
       jobType: file.jobType,
       jobLabel: JOB_LABEL[file.jobType],
       hasPaint: file.hasPaint,
@@ -371,7 +377,9 @@ export async function registerMoney(app: FastifyInstance): Promise<void> {
       flagged: rows.filter(r => r.flagged).length,
       total: rows.length,
       flaggedCents: rows.filter(r => r.flagged).reduce((a, r) => a + r.amountCents, 0),
-      canFlag: ctx.caps.editLaborMoney && !ro.closed_at
+      /* Flagging is open whether or not the car is ready, and after the close
+         too — that is how old files get put right. */
+      canFlag: ctx.caps.editLaborMoney
     };
   });
 
@@ -379,6 +387,12 @@ export async function registerMoney(app: FastifyInstance): Promise<void> {
    * Save the flags. Each trade is entered the way it is paid — a percentage of
    * the billed figure, a flat dollar amount, or hours at that person's rate —
    * and the server prices it, so the browser never decides what anybody earns.
+   *
+   * `flagDate` decides the pay week — today unless somebody picks another day.
+   * Readiness and the close play no part in it. A row already flagged keeps its
+   * date on a re-save unless its figure changes or a different date is given;
+   * re-stamping every row on every save is what used to move last week's flags
+   * into this week.
    */
   app.put('/api/ro/:id/flags', async (req, reply) => {
     const ctx = requireCompany(req, reply);
@@ -389,39 +403,73 @@ export async function registerMoney(app: FastifyInstance): Promise<void> {
     const cid = ctx.company!.id;
     const ro = await roFor(cid, id);
     if (!ro) return reply.code(404).send({ error: 'No such repair order' });
-    if (ro.closed_at) {
-      return reply.code(400).send({
-        error: 'This file is closed. Reopen it to change what was flagged.'
-      });
-    }
 
     const file = await fileBasis(cid, id);
     if (!file) return reply.code(404).send({ error: 'No such repair order' });
 
-    const raw = (req.body as { rows?: unknown[] }).rows;
+    const body = req.body as { rows?: unknown[]; flagDate?: string };
+    const raw = body.rows;
     if (!Array.isArray(raw)) return reply.code(400).send({ error: 'Nothing to save.' });
 
-    const said: string[] = [];
-    let flaggedCents = 0;
+    const today = todayIso();
+    const day = /^\d{4}-\d{2}-\d{2}$/.test(String(body.flagDate ?? '')) ? String(body.flagDate) : today;
+    if (day > today) return reply.code(400).send({ error: 'A flag cannot be dated in the future.' });
+    const explicit = day !== today;
+    /* A day in the past is stamped just after midnight, so the close day itself
+       always falls in the week that closes on it. */
+    const at = explicit ? day + ' 00:00:01' : sqlStamp(new Date());
 
+    const before = new Map((await tq<RowDataPacket[]>(cid, `
+      SELECT position_key, DATE_FORMAT(flagged_at, '%Y-%m-%d %H:%i:%s') AS flagged_at,
+             flagged_by, flagged_by_name
+        FROM ro_labour WHERE ro_id = ?`, [id])).map(r => [String(r.position_key), r]));
+
+    type Row = { trade: Trade; flagged: boolean; partial: boolean; basis: PlanBasis; pct: number;
+      hours: number; flatCents: number; rateCents: number; userId: number | null;
+      displayName: string | null; amountCents: number; touched: boolean };
+    const rows: Row[] = [];
     for (const r of raw as Array<Record<string, unknown>>) {
       const trade = String(r.positionKey ?? '') as Trade;
       if (!(LABOR_TRADES as readonly string[]).includes(trade)) continue;
-
-      const flagged = r.flagged === true;
       const basis = String(r.basis ?? 'hours') as PlanBasis;
       if (!['pct', 'hours', 'flat'].includes(basis)) continue;
-
       const pct = Math.max(0, Math.min(100, Number(r.pct) || 0));
       const hours = Math.max(0, Number(r.hours) || 0);
       const flatCents = Math.max(0, Math.round(Number(r.flatCents) || 0));
       const rateCents = Math.max(0, Math.round(Number(r.rateCents) || 0));
-      const userId = r.userId == null ? null : Number(r.userId);
-      const displayName = r.displayName == null ? null : String(r.displayName).slice(0, 120);
-
       const value = basis === 'pct' ? pct : basis === 'flat' ? flatCents : hours;
-      const amountCents = priceFlag(basis, value, file, rateCents);
+      const flagged = r.flagged === true;
+      rows.push({
+        trade, flagged, partial: flagged && r.partial === true, basis, pct, hours, flatCents, rateCents,
+        userId: r.userId == null ? null : Number(r.userId),
+        displayName: r.displayName == null ? null : String(r.displayName).slice(0, 120),
+        amountCents: priceFlag(basis, value, file, rateCents),
+        touched: r.touched === true
+      });
+    }
 
+    /* The ledger first: if the date falls in a paid week it refuses, and
+       nothing on the file has moved. */
+    let sync: Awaited<ReturnType<typeof syncFlagLedger>>;
+    try {
+      sync = await syncFlagLedger(cid, id, rows.map(r => ({
+        positionKey: r.trade, userId: r.userId, displayName: r.displayName, basis: r.basis,
+        hours: r.basis === 'hours' ? r.hours : 0, rateCents: r.rateCents,
+        costCents: r.amountCents, flagged: r.flagged, partial: r.partial, touched: r.touched
+      })), { at, explicit, source: 'flag', actorId: ctx.user.id, actorName: ctx.user.name });
+    } catch (e) {
+      if (e instanceof PaidWeekError) return reply.code(409).send({ error: e.message });
+      throw e;
+    }
+
+    const said: string[] = [];
+    let flaggedCents = 0;
+
+    for (const r of rows) {
+      const { trade, basis, pct, hours, flatCents, rateCents, userId, displayName, amountCents, flagged } = r;
+      const was = before.get(trade);
+      const keep = flagged && was?.flagged_at && !sync.changed.has(trade);
+      const flaggedAt = !flagged ? null : keep ? String(was!.flagged_at) : at;
       /* The close-out sheet has always kept a **flat dollar figure in the hours
          column** — `priceEntry` reads it straight out of `hours` — so a flag has
          to write it there too. Writing the amount only to `cost_cents`, which
@@ -432,27 +480,36 @@ export async function registerMoney(app: FastifyInstance): Promise<void> {
         INSERT INTO ro_labour
           (ro_id, position_key, basis, hours, rate_cents, rate_pct, pct_after_costs,
            pct_base, cost_cents, user_id, display_name, entered_by,
-           flagged_at, flagged_by, flagged_by_name)
-        VALUES (?, ?, ?, ?, ?, ?, 0, 'after_parts', ?, ?, ?, ?, ?, ?, ?)
+           flagged_at, flagged_by, flagged_by_name, partial)
+        VALUES (?, ?, ?, ?, ?, ?, 0, 'after_parts', ?, ?, ?, ?, ?, ?, ?, ?)
         ON DUPLICATE KEY UPDATE
           basis = VALUES(basis), hours = VALUES(hours), rate_cents = VALUES(rate_cents),
           rate_pct = VALUES(rate_pct), pct_base = VALUES(pct_base),
           cost_cents = VALUES(cost_cents), user_id = VALUES(user_id),
           display_name = VALUES(display_name),
           flagged_at = VALUES(flagged_at), flagged_by = VALUES(flagged_by),
-          flagged_by_name = VALUES(flagged_by_name)`,
+          flagged_by_name = VALUES(flagged_by_name), partial = VALUES(partial)`,
         [id, trade, basis === 'flat' ? 'flat' : basis === 'pct' ? 'pct' : 'hours',
          storedHours, rateCents, pct, amountCents,
          userId, displayName, ctx.user.id,
-         flagged ? new Date() : null, flagged ? ctx.user.id : null,
-         flagged ? ctx.user.name : null]);
+         flaggedAt,
+         !flagged ? null : keep ? was!.flagged_by : ctx.user.id,
+         !flagged ? null : keep ? was!.flagged_by_name : ctx.user.name,
+         r.partial ? 1 : 0]);
 
       if (flagged) {
         flaggedCents += amountCents;
         said.push(`${TRADE_LABEL[trade]} ${displayName ?? ''} ` + (
           basis === 'pct' ? `${pct}%` : basis === 'flat' ? 'flat' : `${hours} hrs`
-        ) + ` = ${money(amountCents)}`);
+        ) + ` = ${money(amountCents)}` + (r.partial ? ' (partial)' : ''));
       }
+    }
+
+    /* A closed file's profit was settled at close; flagging after it re-settles
+       from the labour as it now stands. */
+    if (ro.closed_at) {
+      await writeProfit(cid, id, await laborFor(cid, id), ctx.user.id)
+        .catch(e => req.log.error(e));
     }
 
     const after = await flagRowsFor(cid, id);
@@ -460,8 +517,10 @@ export async function registerMoney(app: FastifyInstance): Promise<void> {
     await audit(cid, actorFrom(req), {
       entity: 'repair_order', entityId: id, roId: id, action: 'flagged', area: 'Money',
       label: `Techs flagged on RO ${ro.ro_number} — ` +
-        (said.length ? said.join('; ') : 'nothing flagged'),
-      detail: { rows: raw, flaggedCents },
+        (said.length ? said.join('; ') : 'nothing flagged') +
+        (sync.periodEnd ? ` — pays week ending ${sync.periodEnd}` : '') +
+        (explicit ? ` (dated ${day})` : ''),
+      detail: { rows: raw, flaggedCents, flagDate: day, periodEnd: sync.periodEnd },
       sensitive: true
     });
 
@@ -469,7 +528,8 @@ export async function registerMoney(app: FastifyInstance): Promise<void> {
       rows: after.rows,
       flagged: after.rows.filter(r => r.flagged).length,
       total: after.rows.length,
-      flaggedCents: after.rows.filter(r => r.flagged).reduce((a, r) => a + r.amountCents, 0)
+      flaggedCents: after.rows.filter(r => r.flagged).reduce((a, r) => a + r.amountCents, 0),
+      periodEnd: sync.periodEnd
     };
   });
 

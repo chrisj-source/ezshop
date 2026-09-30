@@ -947,10 +947,38 @@ CREATE TABLE ro_labour (
   flagged_at    DATETIME      NULL COMMENT 'set when the trade is flagged, cleared when unflagged',
   flagged_by    BIGINT UNSIGNED NULL,
   flagged_by_name VARCHAR(120) NULL,
+  partial       TINYINT(1)    NOT NULL DEFAULT 0 COMMENT 'flagged in part; the rest pays when flagged',
   PRIMARY KEY (ro_id, position_key),
   KEY ix_labour_flagged (ro_id, flagged_at),
   KEY ix_labour_user (user_id),
   CONSTRAINT fk_labour_ro FOREIGN KEY (ro_id) REFERENCES repair_orders(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Every change to a flagged figure, dated to its flag. Payroll adds these up by
+-- week, so a partial flag and its remainder pay on their own weeks, and a
+-- re-save never moves money that was already flagged (migration 035).
+CREATE TABLE ro_flag_entries (
+  id            BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  ro_id         BIGINT UNSIGNED NOT NULL,
+  position_key  VARCHAR(24)   NOT NULL,
+  user_id       BIGINT UNSIGNED NULL,
+  display_name  VARCHAR(120)  NULL,
+  basis         ENUM('hours','flat','ems','pct') NOT NULL,
+  hours         DECIMAL(7,2)  NOT NULL DEFAULT 0 COMMENT 'the change, not the total',
+  rate_cents    BIGINT        NOT NULL DEFAULT 0,
+  cost_cents    BIGINT        NOT NULL DEFAULT 0 COMMENT 'the change, not the total',
+  partial       TINYINT(1)    NOT NULL DEFAULT 0,
+  flag_at       DATETIME      NOT NULL COMMENT 'the date the person gave',
+  counts_at     DATETIME      NOT NULL COMMENT 'what payroll windows on',
+  source        VARCHAR(16)   NOT NULL DEFAULT 'flag' COMMENT 'flag, close, backfill, backfill_paid',
+  backfill_key  VARCHAR(80)   NULL,
+  entered_by    BIGINT UNSIGNED NULL,
+  entered_by_name VARCHAR(120) NULL,
+  created_at    DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_flag_backfill (backfill_key),
+  KEY ix_flag_counts (counts_at),
+  KEY ix_flag_ro (ro_id, position_key, user_id),
+  CONSTRAINT fk_flag_ro FOREIGN KEY (ro_id) REFERENCES repair_orders(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Kept rather than recomputed, so a rate change next month does not rewrite what

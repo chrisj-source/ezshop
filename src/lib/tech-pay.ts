@@ -165,6 +165,9 @@ export interface FlagRow {
   flagged: boolean;
   flaggedAt: string | null;
   flaggedBy: string | null;
+  /** The day the flag is dated to, YYYY-MM-DD. */
+  flagDay: string | null;
+  partial: boolean;
   /** Null when the person has a plan for this job type; a sentence when not. */
   noPlan: string | null;
 }
@@ -188,7 +191,8 @@ export async function flagRowsFor(companyId: number, roId: number): Promise<{
 
   const saved = await tq<RowDataPacket[]>(companyId, `
     SELECT position_key, basis, hours, rate_cents, rate_pct, cost_cents,
-           flagged_at, flagged_by_name
+           flagged_at, flagged_by_name, partial,
+           DATE_FORMAT(flagged_at, '%Y-%m-%d') AS flag_day
       FROM ro_labour WHERE ro_id = ?`, [roId]);
   const savedBy = new Map(saved.map(r => [String(r.position_key), r]));
 
@@ -247,6 +251,8 @@ export async function flagRowsFor(companyId: number, roId: number): Promise<{
       flagged: !!have?.flagged_at,
       flaggedAt: have?.flagged_at ? String(have.flagged_at) : null,
       flaggedBy: have?.flagged_by_name ?? null,
+      flagDay: have?.flag_day ?? null,
+      partial: !!Number(have?.partial ?? 0) && !!have?.flagged_at,
       noPlan: usable ? null
         : `No ${JOB_LABEL[file.jobType].toLowerCase()} plan for ${a.name ?? 'them'} — ` +
           'enter a figure here, or set a plan on their person sheet.'
