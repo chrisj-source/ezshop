@@ -508,91 +508,127 @@
 
   /* ------------------------------------------------------------ the paper */
 
-  function sheetPage(sheet) {
+  /**
+   * One builder, two copies. The office copy carries every line with what the
+   * file was approved for beside what we are paying on it; the tech's copy is
+   * the same lines with the pay only. Every print produces both.
+   */
+  function sheetPage(sheet, office) {
     var p = sheet.person, s = sheet.summary, salaried = p.payMode === 'salary';
     var per = DATA.period;
     var h = ['<div class="sheetpage">' +
       '<div class="phead"><div><div class="shop">' + esc(ME.company ? ME.company.name : 'Easy Shop') + '</div>' +
-      '<div class="shopsub">Technician pay sheet</div></div>' +
+      '<div class="shopsub">' + (office ? 'Payroll — office copy' : 'Technician pay sheet') + '</div></div>' +
       '<div class="pright"><div class="ptitle">Week ending ' + esc(dayName(per.end)) + '</div>' +
       '<div class="pmeta">Cutoff ' + esc(cap1(per.closeDay)) + ' ' + esc(ampm(per.cutoff)) +
       ' · printed ' + new Date().toLocaleString() + '</div>' +
       (per.paidAt ? '<div class="pmeta">Paid ' + new Date(per.paidAt).toLocaleDateString() + '</div>' : '') +
+      (office ? '<div class="pmeta" style="font-weight:600;color:#1b1d22">Not for the technician</div>' : '') +
       '</div></div>',
 
       '<div class="pwho"><div><div class="pk">Technician</div><div class="pv">' + esc(p.name) + '</div>' +
       '<div class="pvs">' + esc(p.positionLabel || '—') + '</div></div>' +
       '<div><div class="pk">Paid</div><div class="pv sm">' + (salaried ? 'Salary' : 'By the car') + '</div>' +
       '<div class="pvs">' + (salaried
-        ? 'Paid in full regardless of what closed this week'
-        : 'Flat price where the file set one, otherwise ' + usd(p.rateCents) + ' / hr') + '</div></div>' +
-      '<div class="pright"><div class="pk">Cars closed</div><div class="pv">' + s.cars + '</div></div>' +
+        ? 'Paid in full regardless of what was flagged this week'
+        : 'Flat price or percentage where the file set one, otherwise ' + usd(p.rateCents) + ' / hr') + '</div></div>' +
+      '<div class="pright"><div class="pk">Cars</div><div class="pv">' + s.cars + '</div></div>' +
       '<div style="text-align:right"><div class="pk">Hours ' + (salaried ? 'logged' : 'paid') + '</div>' +
       '<div class="pv">' + hrs(s.hours) + '</div></div></div>'];
 
-    h.push('<table><thead><tr><th>RO</th><th>Vehicle</th><th>Closed</th>' +
-      (salaried ? '<th class="r">Hours</th>'
-        : '<th>Basis</th><th class="r">Hours</th><th class="r">Rate</th><th class="r">Earned</th>') +
-      '</tr></thead><tbody>');
+    var approvedTotal = sheet.cars.reduce(function (n, c) { return n + (Number(c.approvalCents) || 0); }, 0);
+
+    /* Columns, in order. Office adds Approved; salaried drops the money it never had. */
+    var cols = ['RO', 'Vehicle', 'Flagged'];
+    if (!salaried) cols.push('Basis');
+    cols.push('Hours');
+    if (!salaried) cols.push('Rate');
+    if (office) cols.push('Approved');
+    if (!salaried) cols.push('Paying');
+    var right = { Hours: 1, Rate: 1, Approved: 1, Paying: 1 };
+
+    h.push('<table><thead><tr>' + cols.map(function (c) {
+      return '<th' + (right[c] ? ' class="r"' : '') + '>' + c + '</th>';
+    }).join('') + '</tr></thead><tbody>');
 
     sheet.cars.forEach(function (c) {
       var flat = c.basis === 'flat' || c.basis === 'pct';
-      h.push('<tr><td>' + esc(c.roNumber) + '</td><td>' + esc(c.vehicle) + '</td>' +
-        '<td>' + esc(flagDate(c)) + '</td>' +
-        (salaried ? '' : '<td>' + (flat ? 'Flat price' : 'Hours') + '</td>') +
-        '<td class="r">' + (c.hours === null ? '—' : hrs(c.hours)) + '</td>' +
-        (salaried ? '' :
-          '<td class="r">' + (c.rateCents === null ? '—' : usd(c.rateCents)) + '</td>' +
-          '<td class="r">' + usd(c.costCents) + '</td>') +
-        '</tr>');
+      var cell = {
+        RO: esc(c.roNumber),
+        Vehicle: esc(c.vehicle) + (c.totalLoss ? ' · total loss' : '') + (c.partial ? ' · partial' : ''),
+        Flagged: esc(flagDate(c)),
+        Basis: c.basis === 'pct' ? 'Percentage' : c.basis === 'flat' ? 'Flat price' : 'Hours',
+        Hours: c.hours === null ? '—' : hrs(c.hours),
+        Rate: c.rateCents === null ? '—' : usd(c.rateCents),
+        Approved: usd(c.approvalCents),
+        Paying: usd(c.costCents)
+      };
+      h.push('<tr>' + cols.map(function (k) {
+        return '<td' + (right[k] ? ' class="r"' : '') + '>' + cell[k] + '</td>';
+      }).join('') + '</tr>');
     });
 
+    /* Summary rows: label spans to the Hours column, then one cell per column after it. */
+    function sumRow(cls, label, vals) {
+      var at = cols.indexOf('Hours');
+      return '<tr class="' + cls + '"><td colspan="' + at + '">' + label + '</td>' +
+        cols.slice(at).map(function (k) {
+          return '<td class="r">' + (vals[k] !== undefined ? vals[k] : '') + '</td>';
+        }).join('') + '</tr>';
+    }
+
     if (salaried) {
-      h.push('<tr class="sum"><td colspan="3">' + s.cars + (s.cars === 1 ? ' car' : ' cars') +
-        ' closed</td><td class="r">' + hrs(s.hours) + '</td></tr>' +
-        '<tr class="tot"><td colspan="3">Salary this week</td>' +
-        '<td class="r">' + usd(s.totalCents) + '</td></tr>');
+      h.push(sumRow('sum', s.cars + (s.cars === 1 ? ' car' : ' cars'),
+        office ? { Hours: hrs(s.hours), Approved: usd(approvedTotal) } : { Hours: hrs(s.hours) }));
+      var lastCol = {}; lastCol[cols[cols.length - 1]] = usd(s.totalCents);
+      h.push(sumRow('tot', 'Salary this week', lastCol));
     } else {
       var hourly = sheet.cars.filter(function (c) { return c.basis === 'hours' || c.basis === 'ems'; });
       var flatCars = sheet.cars.filter(function (c) { return c.basis === 'flat' || c.basis === 'pct'; });
-      var hourlyCents = hourly.reduce(function (n, c) { return n + (c.costCents || 0); }, 0);
-      var flatCents = flatCars.reduce(function (n, c) { return n + (c.costCents || 0); }, 0);
-      h.push('<tr class="sum"><td colspan="4">Paid by the hour · ' + hourly.length +
-        (hourly.length === 1 ? ' car' : ' cars') + '</td>' +
-        '<td class="r">' + hrs(s.hours) + '</td><td></td>' +
-        '<td class="r">' + usd(hourlyCents) + '</td></tr>' +
-        '<tr class="sum2"><td colspan="4">Flat price · ' + flatCars.length +
-        (flatCars.length === 1 ? ' car' : ' cars') + '</td><td></td><td></td>' +
-        '<td class="r">' + usd(flatCents) + '</td></tr>' +
-        '<tr class="tot"><td colspan="4">Total owed this week</td><td></td><td></td>' +
-        '<td class="r">' + usd(s.totalCents) + '</td></tr>');
+      var sumOf = function (list, k) { return list.reduce(function (n, c) { return n + (Number(c[k]) || 0); }, 0); };
+      var v1 = { Hours: hrs(s.hours), Paying: usd(sumOf(hourly, 'costCents')) };
+      var v2 = { Paying: usd(sumOf(flatCars, 'costCents')) };
+      var v3 = { Paying: usd(s.totalCents) };
+      if (office) {
+        v1.Approved = usd(sumOf(hourly, 'approvalCents'));
+        v2.Approved = usd(sumOf(flatCars, 'approvalCents'));
+        v3.Approved = usd(approvedTotal);
+      }
+      h.push(sumRow('sum', 'Paid by the hour · ' + hourly.length + (hourly.length === 1 ? ' car' : ' cars'), v1));
+      h.push(sumRow('sum2', 'Flat price or percentage · ' + flatCars.length + (flatCars.length === 1 ? ' car' : ' cars'), v2));
+      h.push(sumRow('tot', 'Total this week', v3));
     }
     h.push('</tbody></table>');
 
     if (sheet.rolled.length) {
-      h.push('<div class="rollbox"><div class="pk">Closed after the cutoff — pays next week</div>' +
+      h.push('<div class="rollbox"><div class="pk">Flagged after the cutoff — pays next week</div>' +
         sheet.rolled.map(function (c) {
           return '<div class="rollline">' + esc(c.roNumber) + ' · ' + esc(c.vehicle) +
             ' · flagged ' + esc(flagDate(c)) + '</div>';
         }).join('') + '</div>');
     }
 
-    h.push('<div class="sigs">' +
-      '<div class="sig"><div class="sigline"></div><div class="siglbl">Technician signature</div></div>' +
-      '<div class="sig"><div class="sigline"></div><div class="siglbl">Shop signature</div></div>' +
-      '<div style="width:130px"><div class="sigline"></div><div class="siglbl">Date</div></div></div>');
+    if (!office) {
+      h.push('<div class="sigs">' +
+        '<div class="sig"><div class="sigline"></div><div class="siglbl">Technician signature</div></div>' +
+        '<div class="sig"><div class="sigline"></div><div class="siglbl">Shop signature</div></div>' +
+        '<div style="width:130px"><div class="sigline"></div><div class="siglbl">Date</div></div></div>');
+    }
 
     h.push('<div class="pfoot">' +
       (salaried
         ? 'No per-car figure is calculated or printed for a salaried technician — the salary is the whole of the pay.'
-        : 'Figures are the close-out cost recorded on each file. Corrections made after this sheet is issued appear as their own line on the next week.') +
+        : office
+          ? 'Approved is the approval amount on the whole file, not this trade\'s share of it. Paying is what this week pays on the line — for a partial flag, only the part flagged this week.'
+          : 'Figures are what was flagged on each file. Corrections made after this sheet is issued appear as their own line on the next week.') +
       '</div></div>');
 
     return h.join('');
   }
 
+  /* Both copies of one sheet: office first, then the one handed over. */
   function renderPrint() {
-    $('print').innerHTML = SHEET ? sheetPage(SHEET) : '';
+    $('print').innerHTML = SHEET ? sheetPage(SHEET, true) + sheetPage(SHEET, false) : '';
   }
 
   /** Every sheet, one page each, fetched fresh so nothing prints stale. */
@@ -601,9 +637,12 @@
     Promise.all(DATA.people.map(function (p) {
       return api('/api/payroll/person/' + p.userId + '?end=' + END);
     })).then(function (all) {
-      $('print').innerHTML = all.filter(function (s) {
-        return s.cars.length || s.summary.totalCents;
-      }).map(sheetPage).join('');
+      /* Two stacks: every office copy, then every tech sheet — so the pile to
+         hand out comes off the printer in one piece. */
+      var live = all.filter(function (s) { return s.cars.length || s.summary.totalCents; });
+      $('print').innerHTML =
+        live.map(function (s) { return sheetPage(s, true); }).join('') +
+        live.map(function (s) { return sheetPage(s, false); }).join('');
       say('');
       window.print();
       /* Put the single sheet back, so a later Print this sheet is not the lot. */

@@ -786,6 +786,31 @@
       var nextAppt = appts.filter(function (a) { return Shell.wall(a.starts_at) >= new Date(); })[0];
       var cfgDays = (d.followup && d.followup.days) || 3;
 
+      /* Booking is its own block, open, near the top — and on every lead, won or
+         lost included. It used to sit folded behind "Book…" inside the follow-up
+         box, and vanished altogether once a lead was settled. */
+      if (ME.caps.manageLeads && !lead.deleted_at) {
+        h.push('<div style="margin-top:14px;padding:11px;border:1px solid var(--line);border-radius:5px">' +
+          '<div class="detlbl" style="margin:0 0 8px">Add appointment</div>' +
+          '<div class="row" style="gap:7px;flex-wrap:wrap">' +
+          '<input type="date" id="bDate" class="detsel" style="flex:1;min-width:130px;width:auto" value="' +
+            esc(todayISO()) + '" aria-label="Date">' +
+          '<input type="time" id="bTime" class="detsel" style="width:auto;min-width:104px" value="09:00" step="900" aria-label="Time">' +
+          '<select class="detsel" id="bKind" style="width:auto;min-width:98px" aria-label="Kind">' +
+          [['estimate', 'Estimate'], ['drop', 'Drop off'], ['appraiser', 'Appraiser'],
+           ['pickup', 'Pick up'], ['return', 'Return']].map(function (k) {
+            return '<option value="' + k[0] + '">' + k[1] + '</option>';
+          }).join('') + '</select></div>' +
+          '<div class="row" style="gap:7px;flex-wrap:wrap;margin-top:7px">' +
+          '<select class="detsel" id="bDur" style="width:auto;min-width:90px" aria-label="Length">' +
+          [[30, '30 min'], [60, '1 hr'], [90, '1.5 hr'], [120, '2 hr']].map(function (k) {
+            return '<option value="' + k[0] + '">' + k[1] + '</option>';
+          }).join('') + '</select>' +
+          '<input id="bNote" class="detsel" style="flex:1;min-width:140px;width:auto" placeholder="Note — optional">' +
+          '<button class="btn btn-solid" id="bSave">Add to calendar</button></div>' +
+          '<div class="msg" id="bMsg" style="margin-top:7px"></div></div>');
+      }
+
       h.push('<div style="margin-top:14px;padding:11px;border:1px solid ' +
         (lead.needs_followup ? 'var(--stopped)' : 'var(--line)') + ';border-radius:5px">');
       h.push('<div style="display:flex;align-items:baseline;gap:8px">' +
@@ -809,21 +834,11 @@
           ['Called', 'Texted', 'Emailed', 'Spoke in person'].map(function (x) {
             return '<option value="' + x + '">' + x + '</option>';
           }).join('') + '</select>' +
-          '<button class="btn btn-ghost" id="fDone">Followed up</button>' +
-          '<button class="btn btn-ghost" id="fBook">Book…</button></div>');
+          '<button class="btn btn-ghost" id="fDone">Followed up</button></div>');
         h.push('<div style="font:400 10px/1.5 var(--font);color:var(--dim);margin-top:7px">' +
           'Marking it chased holds the flag for ' + cfgDays + ' day' + (cfgDays === 1 ? '' : 's') +
           '. Booking anything on the calendar holds it until the appointment passes.</div>');
 
-        h.push('<div id="bookBox" hidden style="margin-top:10px;padding-top:10px;' +
-          'border-top:1px solid var(--whisper)">' +
-          '<div class="row" style="gap:7px;flex-wrap:wrap">' +
-          '<input type="datetime-local" id="bWhen" style="flex:1;min-width:172px">' +
-          '<select class="detsel" id="bKind" style="width:auto;min-width:98px">' +
-          [['estimate', 'Estimate'], ['drop', 'Drop off'], ['appraiser', 'Appraiser']].map(function (k) {
-            return '<option value="' + k[0] + '">' + k[1] + '</option>';
-          }).join('') + '</select>' +
-          '<button class="btn btn-solid" id="bSave">Add to calendar</button></div></div>');
       }
 
       if (appts.length) {
@@ -978,43 +993,46 @@
       }).then(load).catch(function (e) { say(e.message, 'err'); });
     });
 
-    var fb = $('fBook');
-    if (fb) fb.addEventListener('click', function () {
-      var box = $('bookBox');
-      box.hidden = !box.hidden;
-      if (!box.hidden) $('bWhen').focus();
-    });
-
     var bs = $('bSave');
-    if (bs) bs.addEventListener('click', function book(override) {
-      if (!$('bWhen').value) return say('Pick a date and time.', 'err');
+    var bmsg = $('bMsg');
+    function bsay(t, k) { bmsg.textContent = t; bmsg.className = 'msg ' + k; }
+    if (bs) bs.addEventListener('click', function () { book(false); });
+    function book(override) {
+      var day = $('bDate').value, time = $('bTime').value;
+      if (!day || !time) return bsay('Pick a date and a time.', 'err');
+      bs.disabled = true;
       api('/api/leads/' + lead.id + '/appointment', {
         method: 'POST',
         body: JSON.stringify({
-          startsAt: $('bWhen').value.replace('T', ' ') + ':00',
+          startsAt: day + ' ' + time + ':00',
           kind: $('bKind').value,
+          durationMin: Number($('bDur').value) || 30,
+          note: $('bNote').value.trim() || undefined,
           override: override === true
         })
-      }).then(load).catch(function (e) {
+      }).then(function () {
+        if (Shell && Shell.announce) Shell.announce('On the calendar — ' + day + ' ' + time + '.');
+        return load();
+      }).catch(function (e) {
+        bs.disabled = false;
         var d = e.data || {};
         /* Hours, the day's limit and the person's own day all warn and allow,
-           the same as the scheduler — booking from a lead used to skip every
-           one of them. */
+           the same as the scheduler. */
         if ((d.outsideHours || d.full || d.conflict) && d.canOverride) {
-          msg.className = 'msg err';
-          msg.textContent = '';
-          msg.appendChild(document.createTextNode(e.message + ' '));
+          bmsg.className = 'msg err';
+          bmsg.textContent = '';
+          bmsg.appendChild(document.createTextNode(e.message + ' '));
           var btn = document.createElement('button');
           btn.className = 'btn btn-ghost';
           btn.style.cssText = 'padding:4px 9px;font-size:10.5px;margin-left:4px';
           btn.textContent = 'Book it anyway';
           btn.addEventListener('click', function () { book(true); });
-          msg.appendChild(btn);
+          bmsg.appendChild(btn);
         } else {
-          say(e.message, 'err');
+          bsay(e.message, 'err');
         }
       });
-    });
+    }
 
     $('dState').addEventListener('change', function () {
       api('/api/leads/' + lead.id, { method: 'PATCH', body: JSON.stringify({ state: this.value }) })

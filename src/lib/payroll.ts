@@ -104,6 +104,8 @@ export interface CarRow {
   totalLoss: boolean;
   /** The latest flag on this trade was a partial one: more may follow. */
   partial: boolean;
+  /** What the file was approved for. Office copy only — never on the tech's sheet. */
+  approvalCents: number;
 }
 
 /**
@@ -123,6 +125,7 @@ export async function linesBetween(
     position_key: string; basis: CarRow['basis']; hours: string; rate_cents: string;
     cost_cents: string; partial: string; year: number | null; make: string | null;
     model: string | null; client: string | null; total_loss_at: Date | null;
+    amount_cents: number;
   }>>(companyId, `
     SELECT e.user_id, e.ro_id, r.ro_number, r.closed_at, MAX(e.flag_at) AS flagged_at,
            e.position_key,
@@ -130,7 +133,7 @@ export async function linesBetween(
            SUBSTRING_INDEX(GROUP_CONCAT(e.rate_cents ORDER BY e.id DESC), ',', 1) AS rate_cents,
            SUBSTRING_INDEX(GROUP_CONCAT(e.partial ORDER BY e.id DESC), ',', 1) AS partial,
            SUM(e.hours) AS hours, SUM(e.cost_cents) AS cost_cents,
-           v.year, v.make, v.model, c.name AS client, r.total_loss_at
+           v.year, v.make, v.model, c.name AS client, r.total_loss_at, r.amount_cents
     FROM ro_flag_entries e
     JOIN repair_orders r ON r.id = e.ro_id
     LEFT JOIN vehicles v ON v.id = r.vehicle_id
@@ -139,7 +142,7 @@ export async function linesBetween(
       AND r.voided_at IS NULL
       AND e.counts_at > ? AND e.counts_at <= ?
     GROUP BY e.user_id, e.ro_id, e.position_key, r.ro_number, r.closed_at,
-             v.year, v.make, v.model, c.name, r.total_loss_at
+             v.year, v.make, v.model, c.name, r.total_loss_at, r.amount_cents
     HAVING SUM(e.cost_cents) <> 0 OR SUM(e.hours) <> 0
     ORDER BY flagged_at DESC, r.ro_number DESC`, [fromAt, toAt]);
 
@@ -161,7 +164,8 @@ export async function linesBetween(
       rateCents: Number(r.rate_cents) || 0,
       costCents: Number(r.cost_cents) || 0,
       totalLoss: !!r.total_loss_at,
-      partial: String(r.partial) === '1'
+      partial: String(r.partial) === '1',
+      approvalCents: Number(r.amount_cents) || 0
     };
     out.set(r.user_id, [...(out.get(r.user_id) ?? []), car]);
   }

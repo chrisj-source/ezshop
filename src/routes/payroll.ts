@@ -164,7 +164,10 @@ export async function registerPayroll(app: FastifyInstance): Promise<void> {
         basis: salaried ? null : c.basis,
         hours: c.basis === 'flat' || c.basis === 'pct' ? null : c.hours,
         rateCents: salaried ? null : (c.basis === 'flat' || c.basis === 'pct' ? null : c.rateCents),
-        costCents: salaried ? null : c.costCents
+        costCents: salaried ? null : c.costCents,
+        /* The office copy's column. The sheet is behind viewPayPlans already;
+           the tech's own print simply does not draw it. */
+        approvalCents: c.approvalCents
       })),
       rolled: rolled.map(c => ({
         roNumber: c.roNumber, vehicle: c.vehicle,
@@ -361,9 +364,10 @@ export async function registerPayroll(app: FastifyInstance): Promise<void> {
       hours: string; rate_cents: number; cost_cents: number;
       ro_number: string; closed_at: string; year: number | null; make: string | null;
       model: string | null; client: string | null; total_loss_at: Date | null;
+      amount_cents: number;
     }>>(cid, `
       SELECT pc.user_id, pc.ro_id, pc.position_key, pc.basis, pc.hours, pc.rate_cents,
-             pc.cost_cents, r.ro_number, r.closed_at, r.total_loss_at,
+             pc.cost_cents, r.ro_number, r.closed_at, r.total_loss_at, r.amount_cents,
              v.year, v.make, v.model, c.name AS client
       FROM payroll_run_cars pc
       JOIN repair_orders r ON r.id = pc.ro_id
@@ -385,7 +389,8 @@ export async function registerPayroll(app: FastifyInstance): Promise<void> {
         open: !r.closed_at,
         positionKey: r.position_key,
         basis: r.basis, hours: Number(r.hours) || 0, rateCents: Number(r.rate_cents) || 0,
-        costCents: Number(r.cost_cents) || 0, totalLoss: !!r.total_loss_at, partial: false
+        costCents: Number(r.cost_cents) || 0, totalLoss: !!r.total_loss_at, partial: false,
+        approvalCents: Number(r.amount_cents) || 0
       };
       out.set(r.user_id, [...(out.get(r.user_id) ?? []), car]);
     }

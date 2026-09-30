@@ -513,10 +513,22 @@
       if (back) {
         history.replaceState(null, '', '/parts.html');
         var want = Number(back);
-        var known = byRo().some(function (x) { return x.roId === want; });
+        /* Filters left over from the last visit must not hide the file asked for. */
+        $('fSearch').value = ''; $('fVendor').value = ''; $('fState').value = '';
+        var known = byRo().some(function (x) { return Number(x.roId) === want; });
         if (known) {
           openFile(want);
-        } else {
+          return;
+        }
+        /* Not on the desk list — usually closed. Fetch that file on its own and
+           keep it on screen while it is open. */
+        EXTRA_RO = want;
+        return load().then(function () {
+          if (byRo().some(function (x) { return Number(x.roId) === want; })) {
+            openFile(want);
+            return;
+          }
+          EXTRA_RO = null;
           /* The list is files with parts or needing them. A file with no lines
              at all is not on it, and silently landing on the list looks like
              the link is broken. Say which file, and that it has nothing on it. */
@@ -525,19 +537,30 @@
           if (Shell && Shell.announce) Shell.announce(msg);
           var bar = $('emptyNote');
           if (bar) { bar.textContent = msg; bar.hidden = false; }
-        }
+        });
       }
     });
   }).catch(function (e) { if (e.message !== 'signed out') console.error(e); });
 
+  /* A file opened by id that is not on the desk list (closed, picked up). Its
+     lines are merged in while it is open, and dropped when it closes. */
+  var EXTRA_RO = null;
+
   function load() {
     return Promise.all([
       api('/api/parts'),
-      api('/api/parts/returns').catch(function () { return { returns: [] }; })
+      api('/api/parts/returns').catch(function () { return { returns: [] }; }),
+      EXTRA_RO ? api('/api/parts?any=1&roId=' + EXTRA_RO).catch(function () { return { parts: [] }; })
+        : Promise.resolve(null)
     ]).then(function (res) {
       var d = res[0];
       RETURNS = res[1].returns || [];
       PARTS = d.parts;
+      if (res[2] && res[2].parts) {
+        var have = {};
+        PARTS.forEach(function (p) { have[p.id] = true; });
+        PARTS = PARTS.concat(res[2].parts.filter(function (p) { return !have[p.id]; }));
+      }
       VENDORS = d.vendors;
       if (d.thinMarginPct) THIN_PCT = Number(d.thinMarginPct);
       $('fVendor').innerHTML = '<option value="">Vendor: All</option>' +
@@ -878,6 +901,11 @@
   }
 
   function closeFile() {
+    if (EXTRA_RO && FILE === EXTRA_RO) {
+      EXTRA_RO = null;
+      PARTS = PARTS.filter(function (p) { return Number(p.ro_id) !== FILE; });
+      render();
+    }
     FILE = null;
     FSEL = {};
     FDEL = false;
@@ -886,7 +914,7 @@
   }
 
   function fileOf() {
-    return byRo().filter(function (x) { return x.roId === FILE; })[0] || null;
+    return byRo().filter(function (x) { return Number(x.roId) === Number(FILE); })[0] || null;
   }
 
   /** What a line costs, and the two honest ways of not knowing yet. */

@@ -47,8 +47,12 @@ export async function registerParts(app: FastifyInstance): Promise<void> {
     if (!ctx) return;
     if (!requireFeature(ctx, 'parts', reply)) return;
 
-    const q = req.query as { state?: string; roId?: string };
-    const where: string[] = ['r.closed_at IS NULL', 'r.voided_at IS NULL'];
+    const q = req.query as { state?: string; roId?: string; any?: string };
+    /* The desk list is open files only. Asked for one file by id ("Open parts
+       for this RO"), it is that file's lines whatever its state — a closed or
+       picked-up car still has parts, and saying it has none was simply wrong. */
+    const oneFile = !!q.roId && q.any === '1';
+    const where: string[] = oneFile ? ['r.voided_at IS NULL'] : ['r.closed_at IS NULL', 'r.voided_at IS NULL'];
     const params: unknown[] = [];
 
     if (q.state) { where.push('p.state = ?'); params.push(q.state); }
