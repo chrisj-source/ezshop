@@ -132,17 +132,65 @@
 
   function build(root) {
     var campaign = root.getAttribute('data-campaign') || '';
-    var state = { purpose: null, date: null, time: null, cfg: null, days: [], busy: false };
+    var state;
+    /* The key this form speaks for. In a group it changes when the customer
+       picks a location, and from then on everything is that shop's. */
+    var K = KEY;
 
     root.textContent = '';
+    var picker = el('div', S.stack);
     var wrap = el('div', S.stack);
+    root.appendChild(picker);
     root.appendChild(wrap);
 
-    var status = el('p', S.help);
-    wrap.appendChild(status);
-    status.textContent = 'Loading…';
+    api('/api/f/locations?k=' + encodeURIComponent(KEY)).then(function (r) {
+      var locs = (r && r.locations) || [];
+      if (locs.length < 2) { picker.remove(); return load(); }
+      drawPicker(locs, r.accent, r.accentInk);
+    }).catch(function () { picker.remove(); load(); });
 
-    api('/api/f/config?k=' + encodeURIComponent(KEY)).then(function (cfg) {
+    function drawPicker(locs, accent, ink) {
+      var fs = el('fieldset', 'border:0;margin:0;padding:0;min-width:0');
+      var lg = el('legend', S.label + ';padding:0', 'Which location?');
+      fs.appendChild(lg);
+      var row = el('div', 'display:flex;flex-wrap:wrap;gap:8px');
+      fs.appendChild(row);
+      picker.appendChild(fs);
+      locs.forEach(function (l) {
+        var b = el('button', '');
+        b.type = 'button';
+        b.setAttribute('aria-pressed', 'false');
+        var t = el('span', 'display:block;font-weight:600', l.name);
+        b.appendChild(t);
+        if (l.place) b.appendChild(el('span', 'display:block;font-size:.9em', l.place));
+        b.onclick = function () {
+          var bs = row.querySelectorAll('button');
+          for (var i = 0; i < bs.length; i++) {
+            var on = bs[i] === b;
+            bs[i].setAttribute('aria-pressed', on ? 'true' : 'false');
+            bs[i].setAttribute('style', btnStyle(on));
+          }
+          K = l.key;
+          load();
+        };
+        b.setAttribute('style', btnStyle(false));
+        row.appendChild(b);
+      });
+      function btnStyle(on) {
+        return 'flex:1 1 160px;min-width:0;text-align:left;padding:11px 13px;border-radius:6px;cursor:pointer;font:inherit;' +
+          (on ? 'background:' + accent + ';color:' + ink + ';border:1px solid ' + accent
+              : 'background:transparent;color:inherit;border:1px solid currentColor');
+      }
+    }
+
+    function load() {
+      state = { purpose: null, date: null, time: null, cfg: null, days: [], busy: false };
+      wrap.textContent = '';
+      var status = el('p', S.help);
+      wrap.appendChild(status);
+      status.textContent = 'Loading…';
+
+    api('/api/f/config?k=' + encodeURIComponent(K)).then(function (cfg) {
       state.cfg = cfg;
       status.remove();
       draw(cfg);
@@ -153,6 +201,7 @@
         ? 'Online booking is not available right now — please call the shop.'
         : 'This form could not load. Please call the shop and we will book you in.';
     });
+    }
 
     function accentStyle(on) {
       var c = state.cfg.accent, ink = state.cfg.accentInk;
@@ -229,7 +278,7 @@
         var loading = el('p', S.help); loading.textContent = 'Finding times…';
         dayRow.appendChild(loading);
 
-        api('/api/f/slots?k=' + encodeURIComponent(KEY) + '&purpose=' + state.purpose)
+        api('/api/f/slots?k=' + encodeURIComponent(K) + '&purpose=' + state.purpose)
           .then(function (r) {
             state.days = r.days || [];
             dayRow.textContent = '';
@@ -446,7 +495,7 @@
 
         var missing = [];
         var body = {
-          k: KEY, purpose: state.purpose, date: state.date, time: state.time,
+          k: K, purpose: state.purpose, date: state.date, time: state.time,
           campaign: campaign, pageUrl: location.href.slice(0, 400),
           company_website: hpi.value, answers: {},
           /* Only whether the box was ticked. The wording itself is read from
@@ -472,7 +521,7 @@
         send.disabled = true;
         send.textContent = 'Sending…';
 
-        api('/api/f/submit?k=' + encodeURIComponent(KEY),
+        api('/api/f/submit?k=' + encodeURIComponent(K),
           { method: 'POST', body: JSON.stringify(body) })
           .then(function (r) { done(r); })
           .catch(function (e) {
@@ -485,6 +534,7 @@
       };
 
       function done(r) {
+        if (picker.parentNode) picker.remove();
         wrap.textContent = '';
         var box = el('div', 'border:1px solid currentColor;border-radius:8px;padding:18px 19px');
         var h = el('p', 'margin:0 0 9px;font-size:1.125em;font-weight:600');

@@ -11,6 +11,7 @@ import {
   publicSlots, renderLetter, resolveKey, touchKey, LetterTokens
 } from '../lib/funnel';
 import { consentText, recordConsent } from '../lib/consent';
+import { groupOf, shopsInGroup } from '../lib/locations';
 
 /**
  * The public half of web funnels: the form on the shop's own website.
@@ -82,7 +83,16 @@ async function gate(
   const resolved = await resolveKey(key);
   if (!resolved) { void refuse(reply); return null; }
 
-  if (!(await originAllowed(resolved.companyId, origin))) {
+  /* A location's form may also be spoken for by the parent's website: the
+     group form lives on the parent's site, so the group's allowlist is the
+     parent's. Never the other way round — a location's domains do not
+     authorise the parent or a sibling. */
+  let allowed = await originAllowed(resolved.companyId, origin);
+  if (!allowed) {
+    const grp = await groupOf(resolved.companyId);
+    if (grp && grp.parentId !== resolved.companyId) allowed = await originAllowed(grp.parentId, origin);
+  }
+  if (!allowed) {
     req.log.warn({ key, origin }, 'web funnel: origin not on the allowlist');
     void refuse(reply);
     return null;
@@ -165,6 +175,32 @@ export async function registerFunnelPublic(app: FastifyInstance): Promise<void> 
    * What the form draws itself from: which purposes are offered, which fields
    * to show, and the shop's colours.
    */
+  /**
+   * The shops a customer may pick from, location first. Only shops whose form
+   * is switched on and that hold a live key — a location with its form off is
+   * simply not offered. One shop, or none in a group, returns an empty list and
+   * the snippet draws the ordinary form.
+   */
+  app.get('/api/f/locations', async (req, reply) => {
+    const g = await gate(req, reply);
+    if (!g) return;
+    const grp = await groupOf(g.companyId);
+    if (!grp) return { locations: [] };
+    const out: Array<{ key: string; name: string; place: string; current: boolean }> = [];
+    for (const s of await shopsInGroup(grp.id)) {
+      if (s.status === 'suspended') continue;
+      const k = await mqOne<RowDataPacket & { public_key: string }>(
+        'SELECT public_key FROM funnel_keys WHERE company_id = ? AND revoked_at IS NULL ORDER BY created_at DESC LIMIT 1',
+        [s.id]);
+      if (!k) continue;
+      if (!(await funnelSettings(Number(s.id)).catch(() => null))?.enabled) continue;
+      out.push({ key: k.public_key, name: String(s.name),
+        place: [s.city, s.state].filter(Boolean).join(', '), current: Number(s.id) === g.companyId });
+    }
+    const own = await funnelSettings(g.companyId);
+    return { locations: out.length > 1 ? out : [], accent: own.accent, accentInk: own.accentInk };
+  });
+
   app.get('/api/f/config', async (req, reply) => {
     const g = await gate(req, reply);
     if (!g) return;
