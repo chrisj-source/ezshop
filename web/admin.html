@@ -374,6 +374,7 @@
     { k: 'people', t: 'People' },
     { k: 'vendors', t: 'Vendors' },
     { k: 'webform', t: 'Web form' },
+    { k: 'texts', t: 'Text updates' },
     { k: 'settings', t: 'Shop settings' },
     { k: 'storage', t: 'Storage' },
     /* Their own pages — too big to live in a pane here, but they belong to Admin,
@@ -446,7 +447,8 @@
     ({
       statuses: renderStatuses, lanes: renderLanes, notify: renderNotify,
       people: renderPeople, vendors: renderVendors,
-      settings: renderSettings, storage: renderStorage, webform: renderWebForm
+      settings: renderSettings, storage: renderStorage, webform: renderWebForm,
+      texts: renderTexts
     }[TAB])();
   }
 
@@ -1189,7 +1191,10 @@
             (s.id
               ? esc([roleNames({ roles: s.roles }), tradeNames({ positionKeys: s.trades })]
                   .filter(Boolean).join(' · ') || 'no roles yet')
-              : 'They appear in the list as soon as you save') + '</div>' +
+              : (PEOPLE && PEOPLE.seats && PEOPLE.seats.used >= PEOPLE.seats.paid
+                  ? '<span style="color:var(--warn,#e0b25c)">All ' + PEOPLE.seats.paid +
+                    ' seats are in use. You can still add them \u2014 the shop goes over its seats until more are added.</span>'
+                  : 'They appear in the list as soon as you save')) + '</div>' +
         '</div>' +
         '<button class="ghostbtn" id="shX" aria-label="Close">×</button>' +
       '</div>' +
@@ -1411,7 +1416,7 @@
         var extra = (r.loginCode || r.code) ? ' Sign-in code: ' + (r.loginCode || r.code)
           : r.tempPassword ? ' Temporary password: ' + r.tempPassword +
             ' — they must change it at first sign-in.' : '';
-        say('Added.' + extra, 'ok');
+        say('Added.' + extra + (r.seatWarning ? ' ' + r.seatWarning : ''), 'ok');
       });
     } else {
       var was = PEOPLE.people.filter(function (x) { return x.id === s.id; })[0] || {};
@@ -1708,15 +1713,22 @@
       { k: 'caps', t: 'Day limits' },
       { k: 'leads', t: 'Lead follow-up' },
       { k: 'sales', t: 'Sales write-ups' },
-      { k: 'cal', t: 'Google Calendar' }
+      { k: 'cal', t: 'Google Calendar' },
+      { k: 'tax', t: 'Sales tax' },
+      { k: 'locations', t: 'Locations' }
     ]);
     var s = CFG.settings;
+    setTimeout(function () {
+      if (!RAIL || RAIL === 'tax') drawTax();
+      if (!RAIL || RAIL === 'locations') drawLocations();
+    }, 0);
 
     // The rail picks which card is on screen, the same way it filters statuses
     // and lanes. Nothing selected shows them all.
     function shows(k) { return !RAIL || RAIL === k; }
 
     $('mid').innerHTML = '<div class="pad">' +
+      '<div id="taxCard"></div><div id="locCard"></div>' +
       (shows('tech') ? '<div class="card2" style="margin:0 0 14px">' +
       '<div class="card2row" style="grid-template-columns:1fr auto">' +
       '<div><div style="font:500 12.5px var(--font)">Technicians see only their own files</div>' +
@@ -2151,6 +2163,193 @@
     }).catch(function (e) {
       $('mid').innerHTML = '<div class="empty">' + esc(e.message) + '</div>';
     });
+  }
+
+  /* ============================================== tax and locations */
+
+  var TAX_LABEL = { parts: 'Parts', materials: 'Paint and materials', labor: 'Labor', sublet: 'Sublet' };
+
+  function drawTax() {
+    var el = $('taxCard'); if (!el) return;
+    api('/api/admin/tax').then(function (d) {
+      var r = d.rule;
+      el.innerHTML = '<div class="card2" style="margin:0 0 14px"><div class="card2row" style="grid-template-columns:1fr">' +
+        '<div class="dlbl" style="margin:0 0 4px">Sales tax</div>' +
+        '<div class="sub" style="margin-bottom:10px;max-width:600px">The rate, and what it is charged on. States differ: Texas taxes parts and paint ' +
+          'materials but not labor; Arkansas and Kansas tax the whole repair. Used wherever tax comes off a file, such as sales pay.' +
+          (r.preset ? ' <span style="color:var(--acc2)">Not saved yet \u2014 showing the ' + esc(r.state || 'default') + ' preset.</span>' : '') + '</div>' +
+        '<div class="row" style="gap:16px;align-items:center;flex-wrap:wrap">' +
+          '<label style="display:flex;gap:6px;align-items:center"><input id="taxRate" type="number" step="0.001" min="0" max="20" value="' + r.rate + '" style="width:90px"> %</label>' +
+          d.parts.map(function (p) {
+            return '<label style="display:flex;gap:6px;align-items:center;cursor:pointer"><input type="checkbox" data-tax="' + p + '"' +
+              (r.applies.indexOf(p) >= 0 ? ' checked' : '') + '>' + esc(TAX_LABEL[p] || p) + '</label>';
+          }).join('') +
+          '<button class="btn" id="taxSave" style="margin-left:auto">Save</button>' +
+        '</div></div></div>';
+      $('taxSave').addEventListener('click', function () {
+        var applies = Array.prototype.filter.call(el.querySelectorAll('[data-tax]'), function (c) { return c.checked; })
+          .map(function (c) { return c.dataset.tax; });
+        api('/api/admin/tax', { method: 'PUT', body: JSON.stringify({ rate: Number($('taxRate').value), applies: applies }) })
+          .then(function () { say('Sales tax saved.', 'ok'); drawTax(); }).catch(function (e) { say(e.message); });
+      });
+    }).catch(function () { el.innerHTML = ''; });
+  }
+
+  function drawLocations() {
+    var el = $('locCard'); if (!el) return;
+    api('/api/locations').then(function (d) {
+      if (!d.group) { el.innerHTML = ''; return; }
+      var h = ['<div class="card2" style="margin:0 0 14px"><div class="card2row" style="grid-template-columns:1fr">' +
+        '<div class="dlbl" style="margin:0 0 4px">Locations</div>' +
+        '<div class="sub" style="margin-bottom:10px;max-width:600px">' +
+          (d.isParent ? 'This is the parent shop. Each location is its own shop with its own files, people and settings.'
+            : 'This shop is a location of ' + esc((d.shops.filter(function (s) { return s.isParent; })[0] || {}).name || 'another shop') + '.') +
+        '</div>'];
+      if (d.bill) {
+        h.push('<table style="margin-bottom:12px"><thead><tr><th>Shop</th><th>Plan</th><th class="num">Seats</th><th class="num">Monthly</th></tr></thead><tbody>' +
+          d.bill.shops.map(function (s) {
+            return '<tr><td>' + esc(s.name) + '</td><td>' + esc(s.plan) + (s.blocks ? ' + ' + s.blocks + ' seat block' + (s.blocks === 1 ? '' : 's') : '') + '</td>' +
+              '<td class="num"' + (s.seatsUsed > s.seats ? ' style="color:var(--stopped)"' : '') + '>' + s.seatsUsed + ' of ' + s.seats + '</td>' +
+              '<td class="num">$' + (s.monthlyCents / 100).toFixed(2) + '</td></tr>';
+          }).join('') +
+          '<tr><td colspan="3" style="font-weight:500">Total</td><td class="num" style="font-weight:500">$' + (d.bill.totalCents / 100).toFixed(2) + '</td></tr>' +
+          '</tbody></table>' +
+          '<div class="sub" style="margin-bottom:8px">Read only. To change a plan or seats, contact Easy Shop.</div>');
+        h.push('<div class="dlbl" style="margin:12px 0 4px">Reports for every location</div>' +
+          '<div class="sub" style="margin-bottom:8px;max-width:600px">Ticked people can pick any location on the Reports screen. ' +
+            'It covers reports only, and takes no seat at the location. Each location\u2019s audit log records the read.</div>' +
+          '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:4px 16px" id="grantList">' +
+          d.grants.map(function (p) {
+            return '<label style="display:flex;gap:8px;align-items:center;cursor:pointer;padding:4px 0"><input type="checkbox" data-grant="' + p.id + '"' +
+              (p.granted ? ' checked' : '') + '>' + esc(p.name) + '</label>';
+          }).join('') + '</div>');
+      }
+      var others = d.shops.filter(function (s) { return s.id !== ME.company.id; });
+      if (others.length) {
+        h.push('<div class="dlbl" style="margin:14px 0 4px">Add people from another location</div>' +
+          '<div class="row" style="gap:8px;align-items:center;margin-bottom:8px"><select id="bringFrom">' +
+          others.map(function (s) { return '<option value="' + s.id + '">' + esc(s.name) + '</option>'; }).join('') +
+          '</select><button class="btn btn-ghost" id="bringLoad">Show people</button></div><div id="bringList"></div>');
+      }
+      h.push('</div></div>');
+      el.innerHTML = h.join('');
+
+      var gl = $('grantList');
+      if (gl) gl.addEventListener('change', function (e) {
+        var c = e.target; if (!c.dataset.grant) return;
+        api('/api/locations/grants', { method: 'PUT', body: JSON.stringify({ userId: Number(c.dataset.grant), on: c.checked }) })
+          .then(function () { say('Saved.', 'ok'); }).catch(function (er) { c.checked = !c.checked; say(er.message); });
+      });
+      var bl = $('bringLoad');
+      if (bl) bl.addEventListener('click', function () {
+        var from = Number($('bringFrom').value);
+        api('/api/locations/people?from=' + from).then(function (p) {
+          if (!p.people.length) { $('bringList').innerHTML = '<div class="sub">Everybody there is already here.</div>'; return; }
+          $('bringList').innerHTML = '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:4px 16px">' +
+            p.people.map(function (x) {
+              return '<label style="display:flex;gap:8px;align-items:center;cursor:pointer;padding:4px 0"><input type="checkbox" data-bring="' + x.id + '">' +
+                esc(x.name) + ' <span class="sub" style="text-transform:none;letter-spacing:0">' + esc(String(x.role).replace(/_/g, ' ')) + '</span></label>';
+            }).join('') + '</div>' +
+            '<div class="sub" style="margin:6px 0">They keep one sign-in, get the same roles and pay setup here, and take a seat at this shop.</div>' +
+            '<button class="btn" id="bringGo">Add the ticked people</button>';
+          $('bringGo').addEventListener('click', function () {
+            var ids = Array.prototype.filter.call($('bringList').querySelectorAll('[data-bring]'), function (c) { return c.checked; })
+              .map(function (c) { return Number(c.dataset.bring); });
+            if (!ids.length) return;
+            api('/api/locations/bring', { method: 'POST', body: JSON.stringify({ fromId: from, userIds: ids }) })
+              .then(function (r) { say('Added ' + r.added + '.' + (r.seatWarning ? ' ' + r.seatWarning : ''), 'ok'); return reloadPeople(); })
+              .then(drawLocations).catch(function (e) { say(e.message); });
+          });
+        }).catch(function (e) { say(e.message); });
+      });
+    }).catch(function () { el.innerHTML = ''; });
+  }
+
+  /* ================================================= text updates */
+
+  var REPLY_WHO = [
+    { k: 'file_owner', t: 'File owner', n: 'the estimator on the file, or whoever opened it' },
+    { k: 'front_office', t: 'Front office' }, { k: 'production_manager', t: 'Production manager' },
+    { k: 'owner', t: 'Owner' }, { k: 'estimator', t: 'Estimator' }, { k: 'parts_manager', t: 'Parts manager' },
+    { k: 'accounting', t: 'Accounting' }, { k: 'salesperson', t: 'Salesperson' }, { k: 'technician', t: 'Technician' }
+  ];
+
+  function renderTexts() {
+    rail('Text updates', []);
+    $('mid').innerHTML = '<div class="empty">Loading\u2026</div>';
+    api('/api/admin/sms-templates').then(function (d) {
+      var on = {};
+      d.routing.forEach(function (r) { on[r.target] = r.enabled; });
+      /* Roles the shop has added itself are listed too. */
+      var who = REPLY_WHO.slice();
+      (ROLES || []).forEach(function (r) {
+        var k = r.key || r.role_key;
+        if (k && !who.some(function (w) { return w.k === k; })) who.push({ k: k, t: r.label || k });
+      });
+
+      $('mid').innerHTML = '<div class="pad" style="max-width:980px">' +
+        (d.on ? '' : '<div class="hint" style="margin-bottom:12px">Text messaging is not switched on for this shop yet, so nothing below sends. ' +
+          'The wording can be set up now.</div>') +
+        '<div class="dlbl">Status updates</div>' +
+        '<div class="sub" style="text-transform:none;letter-spacing:0;margin:4px 0 10px">Sent to the vehicle owner when the file reaches the status, once per file. ' +
+          'Only to numbers with consent on record, never to a number that replied STOP. The STOP line is added to every text. ' +
+          'Fill-ins: ' + d.tokens.map(esc).join(' ') + '</div>' +
+        '<table><thead><tr><th style="width:52px">Send</th><th style="width:210px">When the file reaches</th><th>Message</th><th class="num" style="width:80px">Length</th></tr></thead><tbody>' +
+        d.templates.map(function (t) {
+          return '<tr data-key="' + esc(t.trigger_key) + '">' +
+            '<td><input type="checkbox" data-on' + (t.enabled ? ' checked' : '') + ' aria-label="Send ' + esc(t.label) + '"></td>' +
+            '<td><div style="font:500 12.5px var(--font)">' + esc(t.label) + '</div>' +
+              (t.note ? '<div class="sub" style="text-transform:none;letter-spacing:0">' + esc(t.note) + '</div>' : '') + '</td>' +
+            '<td><textarea data-body rows="2" style="width:100%">' + esc(t.body) + '</textarea>' +
+              '<div class="sub" data-say style="text-transform:none;letter-spacing:0"></div></td>' +
+            '<td class="num" data-len style="color:' + (t.length > 160 ? 'var(--stopped)' : 'var(--dim)') + '">' +
+              t.length + (t.length > 160 ? ' \u00b7 2 texts' : '') + '</td></tr>';
+        }).join('') + '</tbody></table>' +
+        '<div class="sub" style="text-transform:none;letter-spacing:0;margin-top:8px">Length is the whole text with the STOP line, filled from a typical file. ' +
+          'Over 160 characters a text goes as two messages and Twilio charges for both. A long name or vehicle can still push one over.</div>' +
+
+        '<div class="dlbl" style="margin-top:26px">When a customer texts back</div>' +
+        '<div class="sub" style="text-transform:none;letter-spacing:0;margin:4px 0 10px">The reply lands on the file under Customer communication, and these people are told in the app. ' +
+          'Whether it also comes by email is each person\u2019s own setting. Somebody with two of these roles is told once. ' +
+          'A reply from a number that matches no open file goes to Front office.</div>' +
+        '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:6px 16px" id="rWho">' +
+        who.map(function (w) {
+          return '<label style="display:flex;gap:8px;align-items:flex-start;cursor:pointer;padding:5px 0">' +
+            '<input type="checkbox" data-who="' + esc(w.k) + '"' + (on[w.k] ? ' checked' : '') + ' style="margin-top:2px">' +
+            '<span><span style="font:400 12.5px var(--font)">' + esc(w.t) + '</span>' +
+            (w.n ? '<span class="sub" style="display:block;text-transform:none;letter-spacing:0">' + esc(w.n) + '</span>' : '') +
+            '</span></label>';
+        }).join('') + '</div></div>';
+
+      Array.prototype.forEach.call($('mid').querySelectorAll('tr[data-key]'), function (tr) {
+        var key = tr.dataset.key, ta = tr.querySelector('[data-body]'), sayEl = tr.querySelector('[data-say]');
+        function put(body) {
+          return api('/api/admin/sms-templates/' + encodeURIComponent(key), { method: 'PUT', body: JSON.stringify(body) })
+            .then(function () { sayEl.textContent = 'Saved.'; sayEl.style.color = 'var(--done)'; return reloadLen(); })
+            .catch(function (e) { sayEl.textContent = e.message; sayEl.style.color = 'var(--stopped)'; });
+        }
+        tr.querySelector('[data-on]').addEventListener('change', function () { put({ enabled: this.checked }); });
+        var was = ta.value;
+        ta.addEventListener('blur', function () { if (ta.value.trim() !== was.trim()) { was = ta.value; put({ body: ta.value }); } });
+      });
+      function reloadLen() {
+        return api('/api/admin/sms-templates').then(function (n) {
+          n.templates.forEach(function (t) {
+            var td = $('mid').querySelector('tr[data-key="' + t.trigger_key + '"] [data-len]');
+            if (!td) return;
+            td.textContent = t.length + (t.length > 160 ? ' \u00b7 2 texts' : '');
+            td.style.color = t.length > 160 ? 'var(--stopped)' : 'var(--dim)';
+          });
+        });
+      }
+      $('rWho').addEventListener('change', function () {
+        var routing = Array.prototype.map.call($('rWho').querySelectorAll('[data-who]'), function (c) {
+          return { target: c.dataset.who, enabled: c.checked };
+        });
+        api('/api/admin/sms-reply-routing', { method: 'PUT', body: JSON.stringify({ routing: routing }) })
+          .then(function () { say('Saved.', 'ok'); }).catch(function (e) { say(e.message); });
+      });
+    }).catch(function (e) { $('mid').innerHTML = '<div class="empty">' + esc(e.message) + '</div>'; });
   }
 
   /* ====================================================== storage */

@@ -32,7 +32,10 @@ export type ConsentKind = 'marketing' | 'transactional';
 /** The stored form. Two spellings of one destination must not be two records. */
 export function normalise(channel: Channel, destination: string): string {
   const d = String(destination ?? '').trim();
-  return channel === 'email' ? d.toLowerCase() : d.replace(/\D/g, '');
+  if (channel === 'email') return d.toLowerCase();
+  /* Ten digits for a US number — the same rule as suppression.ts. */
+  const n = d.replace(/\D/g, '');
+  return n.length === 11 && n.startsWith('1') ? n.slice(1) : n;
 }
 
 /* ------------------------------------------------------------- the wording */

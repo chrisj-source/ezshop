@@ -36,6 +36,8 @@ import { registerPayroll } from './routes/payroll';
 import { registerCalendar } from './routes/gcal';
 import { registerMoney } from './routes/money';
 import { registerUnsubscribe } from './routes/unsubscribe';
+import { registerSms } from './routes/sms';
+import { registerLocations } from './routes/locations';
 import { registerDemoRequests } from './routes/demo';
 import { registerFunnelPublic } from './routes/funnel';
 import { registerFunnelAdmin } from './routes/funnel-admin';
@@ -110,6 +112,11 @@ async function main(): Promise<void> {
   await registerFunnelPublic(app);
   /* Its settings and the desk's queue, both behind sign-in. */
   await registerFunnelAdmin(app);
+  /* Each shop's Twilio account (platform admin), and Twilio's two webhooks —
+     public, authorised by the signature against that shop's own token. */
+  await registerSms(app);
+  /* Locations: a parent shop and the shops under it, plus per-shop tax. */
+  await registerLocations(app);
 
   app.get('/api/health', async () => {
     const [r] = await master().query('SELECT 1 AS ok');
@@ -196,6 +203,11 @@ async function main(): Promise<void> {
    *
    * A subsystem that is off has to say so at boot.
    */
+  if (!config.credentialsKey) {
+    app.log.error(
+      'TEXTING IS OFF — CREDENTIALS_KEY is not set, so no shop\'s Twilio token can be ' +
+      'stored or read. Add it to /srv/easyshop/.env and restart.');
+  }
   if (!config.mail.apiKey) {
     app.log.error(
       'MAIL IS OFF — RESEND_API_KEY is not set in the environment. ' +

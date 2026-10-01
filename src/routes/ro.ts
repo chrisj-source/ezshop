@@ -11,6 +11,7 @@ import { refuseEmail } from '../lib/suppression';
 import { scrubCustomer } from '../permissions';
 import { clearMentionsFor, openMentions, raiseMentions, taggablePeople } from '../lib/mentions';
 import { consentMark } from '../lib/consent';
+import { statusText } from '../lib/sms-status';
 
 /** Anything that stops this file being closed. Empty means it can be. */
 function closeBlockers(
@@ -270,6 +271,13 @@ export async function registerRepairOrders(app: FastifyInstance): Promise<void> 
         body: `${ro?.vehicle || 'A file'} moved from “${current.label ?? 'unset'}” to “${target.label}”.`,
         actorUserId: ctx.user.id,
         dedupeKey: `status:${id}:${target.slot_id}:${Date.now()}`
+      }).catch(e => req.log.error(e));
+
+      /* The customer's text, if this move has one. Not awaited: Twilio being
+         slow must never hold up a status change. */
+      void statusText(cid, id, {
+        toSlot: target.slot_id, fromLane: current.lane ?? null, toLane: target.lane_key ?? null,
+        userId: ctx.user.id, userName: ctx.user.name
       }).catch(e => req.log.error(e));
 
       /* The pay stamps. Slot ids are canonical — automations bind here, not to
@@ -1238,7 +1246,7 @@ export async function registerRepairOrders(app: FastifyInstance): Promise<void> 
 }
 
 /** A technician may only open a file they are on, when the shop says so. */
-async function mayTouch(ctx: Ctx, roId: number): Promise<boolean> {
+export async function mayTouch(ctx: Ctx, roId: number): Promise<boolean> {
   if (ctx.caps.seesAllRepairOrders) return true;
   const hit = await tqOne<RowDataPacket>(ctx.company!.id,
     `SELECT 1 AS x FROM ro_assignments WHERE ro_id = ? AND user_id = ?`, [roId, ctx.user.id]);

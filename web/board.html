@@ -3073,6 +3073,12 @@
       R.push('<div class="sec">Labor</div>');
       R.push('<div id="flagSec"><div class="sub">Loading…</div></div>');
     }
+    /* Texts to and from the customer. The thread carries the number, so it is
+       the customer-contact capability that shows it. */
+    if (ME.caps.viewCustomerContact) {
+      R.push('<div class="sec">Customer communication</div>');
+      R.push('<div id="smsSec"><div class="sub">Loading…</div></div>');
+    }
 
     if (LAST.length) {
       R.push('<div style="margin-top:22px;padding-top:4px;border-top:1px solid var(--whisper)"></div>');
@@ -3742,6 +3748,124 @@
         if (el) el.innerHTML = '<div class="sub">' + esc(e.message) + '</div>';
       });
     }
+    if (ME.caps.viewCustomerContact) loadSms(id);
+  }
+
+  /* ============================================ customer communication */
+
+  var SMS_KIND = {
+    arrived: 'Vehicle Arrived', est_sent: 'Estimate Sent', supp_needed: 'Supplement Needed',
+    approved: 'Approved', parts_ordered: 'Parts Ordered', parts_backordered: 'Parts Backordered',
+    lane_pdr: 'PDR', lane_body: 'Body', lane_paint: 'Paint', lane_reassembly: 'Reassembly',
+    sublet: 'At Sublet', lane_buff: 'Buff', detail: 'Final Detail', final_qc: 'Final QC',
+    payment: 'Payment verification', contacted: 'Customer Contacted', ready: 'Vehicle Ready', picked: 'Picked Up'
+  };
+
+  function loadSms(id) {
+    api('/api/ro/' + id + '/sms').then(function (d) {
+      if (OPEN !== id) return;
+      renderSms(id, d);
+    }).catch(function (e) {
+      var el = $('smsSec');
+      if (el) el.innerHTML = '<div class="sub">' + esc(e.message) + '</div>';
+    });
+  }
+
+  function smsWhen(v) {
+    var d = new Date(v);
+    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + ' ' +
+      d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+  }
+
+  function renderSms(id, d) {
+    var el = $('smsSec');
+    if (!el || !d.visible) { if (el) el.innerHTML = ''; return; }
+    var h = [];
+    h.push('<div class="row" style="gap:8px;align-items:baseline;margin:0 0 10px">' +
+      '<span class="sub" style="text-transform:none;letter-spacing:0">' + esc(d.phone || 'No phone number') + '</span>' +
+      (d.stopped ? '<span style="font:400 11px var(--font);color:var(--stopped);margin-left:auto">Replied STOP</span>'
+        : d.allowed ? '<span style="font:400 11px var(--font);color:var(--done);margin-left:auto">Consent on file</span>'
+        : '<span style="font:400 11px var(--font);color:var(--blocked);margin-left:auto">No consent on file</span>') +
+      '</div>');
+
+    if (!d.messages.length) h.push('<div class="sub" style="margin-bottom:10px">No texts on this file yet.</div>');
+    h.push('<div style="display:flex;flex-direction:column;gap:9px;max-height:380px;overflow:auto;margin-bottom:10px" id="smsList">');
+    d.messages.forEach(function (m) {
+      var inbound = m.direction === 'in';
+      var bad = m.state === 'refused' || m.state === 'failed';
+      var who = inbound ? 'Customer'
+        : m.trigger_key ? 'Automatic · ' + (SMS_KIND[m.trigger_key] || m.trigger_key)
+        : m.purpose === 'test' ? 'Test' : (m.sent_by_name || 'Shop');
+      var state = inbound ? (m.read_at ? '' : ' · new')
+        : bad ? ' · not sent: ' + (m.reason || m.state)
+        : ' · ' + m.state;
+      h.push('<div style="display:flex;flex-direction:column;align-items:' + (inbound ? 'flex-start' : 'flex-end') + '">' +
+        '<div style="max-width:82%;padding:7px 10px;border-radius:8px;font:400 12px/1.5 var(--font);white-space:pre-wrap;' +
+          (inbound ? 'background:var(--surf);border:1px solid var(--line)'
+            : bad ? 'border:1px dashed var(--stopped);color:var(--muted)'
+            : 'background:color-mix(in oklab, var(--acc) 12%, transparent);border:1px solid color-mix(in oklab, var(--acc) 40%, transparent)') +
+          '">' + esc(m.body) + '</div>' +
+        '<div style="font:400 10px var(--font);margin-top:3px;color:' +
+          (bad ? 'var(--stopped)' : inbound && !m.read_at ? 'var(--acc2)' : 'var(--dim)') + '">' +
+          esc(who + ' · ' + smsWhen(m.created_at) + state) + '</div></div>');
+    });
+    h.push('</div>');
+
+    if (!d.on) {
+      h.push('<div class="sub" style="text-transform:none;letter-spacing:0">Text messaging is not switched on for this shop.</div>');
+    } else if (d.stopped) {
+      h.push('<div style="border:1px dashed var(--line);border-radius:6px;padding:9px 11px;font:400 11.5px/1.5 var(--font);color:var(--muted)">' +
+        'This number replied STOP and cannot be texted. Call instead. Texting starts again only if the customer texts START from their own phone.</div>');
+    } else if (!d.allowed) {
+      h.push('<div style="border:1px dashed var(--line);border-radius:6px;padding:9px 11px;font:400 11.5px/1.5 var(--font);color:var(--muted)">' +
+        esc(d.reason || 'No consent on record for this number.') +
+        (d.canConfirm && ME.caps.editCustomerContact
+          ? '<div style="margin-top:9px"><label style="display:flex;gap:8px;align-items:flex-start;cursor:pointer">' +
+              '<input type="checkbox" id="smsConsent" style="margin-top:2px">' +
+              '<span><span style="color:var(--text)">Text message updates</span> — turning this on states that the customer consented to receive text messages.' +
+              '<span style="display:block;color:var(--dim);margin-top:4px">' + esc(d.consentWording) + '</span></span></label></div>'
+          : '') + '</div>');
+    } else {
+      h.push('<textarea id="smsBody" aria-label="Text to the customer" rows="2" placeholder="Write to the customer…" style="width:100%"></textarea>' +
+        '<div class="row" style="gap:9px;align-items:center;margin-top:7px">' +
+        '<span class="sub" style="text-transform:none;letter-spacing:0;flex:1;min-width:140px">' +
+          (d.sender ? 'Sent from ' + esc(d.sender) + '. ' : '') + 'The STOP line is added automatically.</span>' +
+        '<span class="sub" id="smsLen" style="text-transform:none;letter-spacing:0">0 / 160</span>' +
+        '<button class="btn" id="smsSend">Send</button></div>' +
+        '<div class="sub" id="smsMsg" style="text-transform:none;letter-spacing:0;margin-top:6px"></div>');
+    }
+    el.innerHTML = h.join('');
+    var list = $('smsList'); if (list) list.scrollTop = list.scrollHeight;
+
+    var box = $('smsBody');
+    if (box) {
+      var STOP = 23; /* "\nReply STOP to opt out." */
+      box.addEventListener('input', function () {
+        var n = box.value.trim().length + STOP;
+        $('smsLen').textContent = n + ' / 160' + (n > 160 ? ' · 2 texts' : '');
+        $('smsLen').style.color = n > 160 ? 'var(--stopped)' : '';
+      });
+      $('smsSend').addEventListener('click', function () {
+        var btn = this, text = box.value.trim();
+        if (!text) return;
+        btn.disabled = true;
+        api('/api/ro/' + id + '/sms', { method: 'POST', body: JSON.stringify({ body: text }) })
+          .then(function () { loadSms(id); })
+          .catch(function (e) {
+            btn.disabled = false;
+            $('smsMsg').textContent = e.message; $('smsMsg').style.color = 'var(--stopped)';
+            loadSms(id);
+          });
+      });
+    }
+    var cb = $('smsConsent');
+    if (cb) cb.addEventListener('change', function () {
+      if (!cb.checked) return;
+      cb.disabled = true;
+      api('/api/ro/' + id + '/sms/consent', { method: 'POST' })
+        .then(function () { loadSms(id); })
+        .catch(function (e) { cb.disabled = false; cb.checked = false; alert(e.message); });
+    });
   }
 
   /** The close block says what is still owed, so the button is never a surprise. */

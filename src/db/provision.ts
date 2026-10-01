@@ -9,6 +9,7 @@ import { defaultRoutesFor } from '../lib/status-routes';
 import { hashPassword } from '../auth/password';
 import { DERIVED_REF, dropTenantLogin, grantTenantLogin } from '../lib/tenant-credentials';
 import { runTolerant } from './alter';
+import { plan as billingPlan, seatsOf } from '../lib/billing';
 
 const TENANT_SQL = path.join(__dirname, '..', '..', 'db', 'tenant.sql');
 
@@ -20,7 +21,9 @@ export interface ProvisionInput {
   timezone?: string;
   shopType: ShopType;
   planCode?: string;
+  /** Ignored — kept so older callers compile. Seats come from the plan. */
   seats?: number;
+  extraSeatBlocks?: number;
   ownerName: string;
   ownerEmail: string;
   ownerPassword?: string;
@@ -56,17 +59,23 @@ export async function provisionCompany(input: ProvisionInput): Promise<Provision
 
   const schema = await fs.readFile(TENANT_SQL, 'utf8');
 
+  /* Seats are derived from the plan and its extra blocks, never typed. */
+  const planCode = input.planCode ?? 'trial';
+  const planRow = await billingPlan(planCode);
+  if (!planRow || !planRow.is_active) throw new Error(`Unknown plan "${planCode}".`);
+  const blocks = Math.max(0, Math.floor(input.extraSeatBlocks ?? 0));
+
   let companyId = 0;
   const admin = await adminConnection();
 
   try {
     const res = await mexec(
-      `INSERT INTO companies (slug, name, city, state, timezone, shop_type, plan_code, status, seats, owner_email)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO companies (slug, name, city, state, timezone, shop_type, plan_code, status, seats, extra_seat_blocks, owner_email)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [slug, input.name, input.city ?? null, input.state ?? null, input.timezone ?? 'America/Chicago',
-       input.shopType, input.planCode ?? 'trial',
-       (input.planCode ?? 'trial') === 'trial' ? 'trial' : 'active',
-       input.seats ?? 5, input.ownerEmail]
+       input.shopType, planCode,
+       planCode === 'trial' ? 'trial' : 'active',
+       seatsOf(planRow, blocks), blocks, input.ownerEmail]
     );
     companyId = res.insertId;
 

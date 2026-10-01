@@ -2,6 +2,7 @@ import { FastifyInstance } from 'fastify';
 import { RowDataPacket } from 'mysql2/promise';
 import { texec, tq } from '../db/tenant';
 import { mq } from '../db/master';
+import { seatUse } from '../lib/billing';
 import { requireCompany } from '../middleware/context';
 import { primaryRole, Role, ROLE_LABEL, sortRoles } from '../permissions';
 import { holidaysFor } from '../lib/holidays';
@@ -403,7 +404,9 @@ export async function registerShopConfig(app: FastifyInstance): Promise<void> {
     ).catch(() => []);
 
     const byId = new Map(profiles.map(p => [p.user_id as number, p]));
+    const seats = ctx.caps.admin ? await seatUse(ctx.company!.id) : undefined;
     return {
+      seats,
       people: members.map(m => {
         const id = m.id as number;
         const held = heldRoles.filter(r => r.user_id === id).map(r => r.role_key);

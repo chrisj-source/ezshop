@@ -86,7 +86,7 @@
 
 <script>
 (function () {
-  var COS = [], SEL = null;
+  var COS = [], SEL = null, PLANS = [];
   function $(id) { return document.getElementById(id); }
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
     return { '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]; }); }
@@ -142,6 +142,7 @@
   }).then(function (d) {
     if (!d) return;
     COS = d.companies;
+    PLANS = d.plans || [];
     renderList();
     if (COS.length) select(COS[0].id);
     else $('pane').innerHTML = '<div class="empty">No companies yet.</div>';
@@ -208,7 +209,11 @@
           '<select id="nsType" style="width:100%;padding:7px 9px;font:400 12.5px var(--font);color:var(--text);background:var(--surf);border:1px solid var(--line);border-radius:4px">' +
           '<option value="both">Collision and PDR</option><option value="collision">Collision</option>' +
           '<option value="pdr">PDR and hail</option><option value="detail">Detail only</option></select></label>' +
-        field('nsSeats', 'Seats', 'type="number" value="10"') +
+        '<label style="display:block;margin-bottom:10px">' +
+          '<span style="display:block;font:400 10.5px var(--font);color:var(--dim);margin-bottom:4px">Plan</span>' +
+          '<select id="nsPlan" style="width:100%;padding:7px 9px;font:400 12.5px var(--font);color:var(--text);background:var(--surf);border:1px solid var(--line);border-radius:4px">' +
+          planOptions('shop') + '</select></label>' +
+        field('nsBlocks', 'Extra seats, in blocks of 5', 'type="number" min="0" step="1" value="0"') +
         field('nsOwner', 'Owner name') +
         field('nsEmail', 'Owner email', 'type="email"') +
       '</div>' +
@@ -228,7 +233,8 @@
           city: $('nsCity').value.trim(),
           state: $('nsState').value.trim().toUpperCase(),
           shopType: $('nsType').value,
-          seats: Number($('nsSeats').value) || 10,
+          planCode: $('nsPlan').value,
+          extraSeatBlocks: Math.max(0, Math.floor(Number($('nsBlocks').value) || 0)),
           ownerName: $('nsOwner').value.trim(),
           ownerEmail: $('nsEmail').value.trim()
         })
@@ -404,9 +410,23 @@
     h.push('<div class="msg" id="pmsg"></div>');
 
     h.push('<div class="sec">Account</div>');
+    var used = d.users.filter(function (u) { return u.status === 'active'; }).length;
+    var blk = d.seatBlock || { size: 5, cents: 4999 };
     h.push('<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;padding:0 18px">' +
-      kv('Plan', c.plan_code) + kv('Shop type', c.shop_type) + kv('Seats', c.seats) +
-      kv('Users', d.users.length) + '</div>');
+      '<label><div style="font:600 8.5px var(--font);letter-spacing:.12em;text-transform:uppercase;color:var(--acc2)">Plan</div>' +
+        '<select id="acPlan" style="margin-top:5px;width:100%;padding:5px 7px;font:400 12.5px var(--font);color:var(--text);background:var(--surf);border:1px solid var(--line);border-radius:4px">' +
+        planOptions(c.plan_code, d.plans) + '</select></label>' +
+      '<label><div style="font:600 8.5px var(--font);letter-spacing:.12em;text-transform:uppercase;color:var(--acc2)">Extra seat blocks</div>' +
+        '<input id="acBlocks" type="number" min="0" step="1" value="' + Number(c.extra_seat_blocks || 0) + '" ' +
+        'style="margin-top:5px;width:100%;padding:5px 7px;font:400 12.5px var(--font);color:var(--text);background:var(--surf);border:1px solid var(--line);border-radius:4px"></label>' +
+      kv('Seats', used + ' of ' + c.seats + ' used') +
+      kv('Monthly', '$' + (Number(c.monthly_cents || 0) / 100).toFixed(2)) + '</div>' +
+      '<div style="display:flex;gap:10px;align-items:center;padding:10px 18px 0">' +
+        '<button class="btn" id="acSave" style="border:1px solid var(--acc);color:var(--acc);padding:5px 11px">Save plan</button>' +
+        '<div style="font:400 11px var(--font);color:var(--dim)">Each block adds ' + blk.size + ' seats at $' +
+          (blk.cents / 100).toFixed(2) + ' a month. ' + esc(c.shop_type) + ' shop.' +
+          (used > c.seats ? ' <span style="color:var(--stopped)">Over its seats by ' + (used - c.seats) + '.</span>' : '') +
+        '</div></div>');
 
     var onCount = d.features.filter(function (f) { return f.is_core || (f.is_available && f.enabled); }).length;
     h.push('<div class="sec">Features <span style="color:var(--dim);font-weight:400;text-transform:none;letter-spacing:0">' +
@@ -427,6 +447,9 @@
     });
     h.push('</div>');
 
+    h.push(smsSection(d.sms || {}));
+    h.push('<div class="sec">Locations</div><div id="locSec" style="padding:0 18px"><div class="sb">Loading\u2026</div></div>');
+
     h.push('<div class="sec">People</div><div style="padding:0 18px">');
     d.users.forEach(function (u) {
       h.push('<div style="padding:8px 0;border-top:1px solid var(--whisper)">' +
@@ -436,6 +459,23 @@
     h.push('</div>');
 
     $('pane').innerHTML = h.join('');
+
+    wireSms(c, d.sms || {});
+    loadLocations(c);
+
+    $('acSave').addEventListener('click', function () {
+      var btn = this;
+      btn.disabled = true;
+      api('/api/platform/companies/' + c.id, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          planCode: $('acPlan').value,
+          extraSeatBlocks: Math.max(0, Math.floor(Number($('acBlocks').value) || 0))
+        })
+      }).then(function () {
+        return api('/api/platform/companies').then(function (d2) { COS = d2.companies; select(c.id); });
+      }).catch(function (e) { btn.disabled = false; showErr(e); });
+    });
 
     $('enter').addEventListener('click', function () {
       api('/api/platform/companies/' + c.id + '/enter', { method: 'POST' })
@@ -459,6 +499,156 @@
         }).then(function () { select(c.id); }).catch(showErr);
       });
     });
+  }
+
+  var INP = 'width:100%;padding:6px 8px;font:400 12.5px var(--font);color:var(--text);background:var(--surf);border:1px solid var(--line);border-radius:4px';
+  var LBL = 'display:block;font:400 10.5px var(--font);color:var(--dim);margin-bottom:4px';
+  var SENDERS = null;
+
+  function smsSection(s) {
+    var state = !s.configured ? 'Not set up'
+      : s.verifiedAt ? 'Verified' + (s.accountName ? ' \u2014 ' + s.accountName : '')
+      : (s.lastError || 'Saved, not verified');
+    var tone = s.verifiedAt ? 'var(--done)' : s.configured ? 'var(--stopped)' : 'var(--dim)';
+    var senderOpts = '';
+    if (SENDERS && SENDERS.co === SEL) {
+      senderOpts = '<option value="">Choose a sender\u2026</option>' +
+        (SENDERS.services.length ? '<optgroup label="Messaging Services (10DLC campaign)">' + SENDERS.services.map(function (o) {
+          return '<option value="service|' + esc(o.value) + '"' + (s.sender === o.value ? ' selected' : '') + '>' + esc(o.label) + ' \u00b7 ' + esc(o.value) + '</option>';
+        }).join('') + '</optgroup>' : '') +
+        (SENDERS.numbers.length ? '<optgroup label="Phone numbers">' + SENDERS.numbers.map(function (o) {
+          return '<option value="number|' + esc(o.value) + '"' + (s.sender === o.value ? ' selected' : '') + '>' + esc(o.label) + '</option>';
+        }).join('') + '</optgroup>' : '');
+    }
+    return '<div class="sec">Text messaging</div>' +
+      '<div style="padding:0 18px;max-width:640px">' +
+      (s.keyMissing ? '<div class="msg err" style="display:block;margin-bottom:10px">CREDENTIALS_KEY is not set on the server, so no Twilio token can be stored. Add it to .env and restart.</div>' : '') +
+      '<div style="font:400 11.5px var(--font);margin-bottom:10px"><span style="color:' + tone + '">\u25cf</span> ' + esc(state) + '</div>' +
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:0 12px">' +
+        '<label style="display:block;margin-bottom:10px"><span style="' + LBL + '">Account SID</span>' +
+          '<input id="smSid" autocomplete="off" spellcheck="false" placeholder="AC\u2026" value="' + esc(s.accountSid || '') + '" style="' + INP + '"></label>' +
+        '<label style="display:block;margin-bottom:10px"><span style="' + LBL + '">Auth Token' +
+          (s.tokenLast4 ? ' \u2014 saved, ends ' + esc(s.tokenLast4) + '. Leave blank to keep it.' : '') + '</span>' +
+          '<input id="smTok" type="password" autocomplete="new-password" spellcheck="false" style="' + INP + '"></label>' +
+      '</div>' +
+      (senderOpts
+        ? '<label style="display:block;margin-bottom:10px"><span style="' + LBL + '">Send from</span><select id="smSender" style="' + INP + '">' + senderOpts + '</select></label>'
+        : (s.sender ? '<div style="font:400 11.5px var(--font);color:var(--dim);margin-bottom:10px">Sends from ' + esc(s.sender) + '</div>' : '')) +
+      '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">' +
+        '<button class="btn" id="smSave" style="border:1px solid var(--acc);color:var(--acc);padding:5px 11px">Save and verify</button>' +
+        (s.configured ? '<button class="btn" id="smVerify" style="border:1px solid var(--line);color:var(--muted);padding:5px 11px">' + (senderOpts ? 'Check again' : 'Choose a sender') + '</button>' : '') +
+        (s.configured ? '<button class="btn" id="smRemove" style="border:1px solid var(--stopped);color:var(--stopped);padding:5px 11px">Remove</button>' : '') +
+      '</div>' +
+      (s.verifiedAt
+        ? '<div style="display:flex;gap:8px;align-items:center;margin-top:12px">' +
+            '<input id="smTo" type="tel" placeholder="Your mobile" style="' + INP + ';max-width:180px">' +
+            '<button class="btn" id="smTest" style="border:1px solid var(--line);color:var(--muted);padding:5px 11px">Send a test</button></div>'
+        : '') +
+      (s.configured
+        ? '<div style="font:400 11px/1.6 var(--font);color:var(--dim);margin-top:12px">In Twilio, set the sender\u2019s incoming-message webhook (HTTP POST) to<br>' +
+            '<code style="color:var(--text);user-select:all">' + esc(s.inboundUrl) + '</code><br>' +
+            'That is how STOP reaches this shop\u2019s list. Then switch <strong style="color:var(--text)">SMS customer updates</strong> on under Features.</div>'
+        : '<div style="font:400 11px/1.6 var(--font);color:var(--dim);margin-top:10px">The shop\u2019s own Twilio account, from the Twilio console. The token is encrypted and never shown again.</div>') +
+      '</div>';
+  }
+
+  function wireSms(c, s) {
+    function after(r) {
+      if (r && r.verify && r.verify.numbers) {
+        SENDERS = { co: c.id, numbers: r.verify.numbers, services: r.verify.services };
+      }
+      return select(c.id);
+    }
+    var save = $('smSave');
+    if (save) save.addEventListener('click', function () {
+      var body = { accountSid: $('smSid').value.trim() };
+      var tok = $('smTok').value.trim();
+      if (tok) body.authToken = tok;
+      var pick = $('smSender') && $('smSender').value;
+      if (pick) { body.senderKind = pick.split('|')[0]; body.sender = pick.split('|')[1]; }
+      save.disabled = true;
+      api('/api/platform/companies/' + c.id + '/sms', { method: 'PUT', body: JSON.stringify(body) })
+        .then(after).catch(function (e) { save.disabled = false; showErr(e); });
+    });
+    var ver = $('smVerify');
+    if (ver) ver.addEventListener('click', function () {
+      ver.disabled = true;
+      api('/api/platform/companies/' + c.id + '/sms/verify', { method: 'POST' })
+        .then(after).catch(function (e) { ver.disabled = false; showErr(e); });
+    });
+    var rm = $('smRemove');
+    if (rm) rm.addEventListener('click', function () {
+      if (!confirm('Remove ' + c.name + '\u2019s Twilio account? Texting is switched off with it.')) return;
+      api('/api/platform/companies/' + c.id + '/sms', { method: 'DELETE' })
+        .then(function () { SENDERS = null; return select(c.id); }).catch(showErr);
+    });
+    var t = $('smTest');
+    if (t) t.addEventListener('click', function () {
+      t.disabled = true;
+      api('/api/platform/companies/' + c.id + '/sms/test', { method: 'POST', body: JSON.stringify({ to: $('smTo').value }) })
+        .then(function () { t.disabled = false; var m = $('pmsg'); m.textContent = 'Test sent.'; m.className = 'msg ok'; })
+        .catch(function (e) { t.disabled = false; showErr(e); });
+    });
+  }
+
+  function loadLocations(c) {
+    api('/api/platform/companies/' + c.id + '/group').then(function (g) {
+      var el = $('locSec'); if (!el || SEL !== c.id) return;
+      var h = [];
+      if (g.isLocation) {
+        var parent = g.shops.filter(function (s) { return Number(s.is_parent); })[0];
+        el.innerHTML = '<div style="font:400 12px var(--font);color:var(--muted)">A location of ' + esc(parent ? parent.name : 'another shop') + '.</div>';
+        return;
+      }
+      var locs = g.shops.filter(function (s) { return !Number(s.is_parent); });
+      if (locs.length) {
+        h.push('<div style="margin-bottom:10px">' + locs.map(function (s) {
+          return '<div style="font:400 12px var(--font);padding:4px 0">' + esc(s.name) +
+            ' <span class="sb" style="display:inline">\u00b7 ' + esc([s.city, s.plan_code, s.seats_used + ' of ' + s.seats + ' seats'].filter(Boolean).join(' \u00b7 ')) + '</span></div>';
+        }).join('') + '</div>');
+      }
+      h.push('<div style="max-width:620px"><div style="font:400 11.5px/1.6 var(--font);color:var(--dim);margin-bottom:10px">' +
+        'A new location is its own shop on the Additional location plan. It starts with copies of this shop\u2019s roles and permissions, ' +
+        'notification routing, labor and tax settings. The owner carries across. Tick anybody else who works at both.</div>' +
+        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:0 12px">' +
+          field('lcName', 'Location name') + field('lcSlug', 'Slug \u2014 lowercase, becomes the database name') +
+          field('lcCity', 'City') + field('lcState', 'State', 'maxlength="2"') +
+          field('lcBlocks', 'Extra seats, in blocks of 5', 'type="number" min="0" step="1" value="0"') +
+        '</div>' +
+        '<div style="font:400 10.5px var(--font);color:var(--dim);margin:4px 0 6px">People to bring across</div>' +
+        '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:2px 12px;margin-bottom:10px">' +
+        g.people.filter(function (p) { return p.role !== 'owner'; }).map(function (p) {
+          return '<label style="display:flex;gap:7px;align-items:center;font:400 12px var(--font);padding:3px 0;cursor:pointer">' +
+            '<input type="checkbox" data-lcp="' + p.id + '">' + esc(p.name) + '</label>';
+        }).join('') + '</div>' +
+        '<button class="btn" id="lcGo" style="border:1px solid var(--acc);color:var(--acc);padding:6px 12px">Create the location</button></div>');
+      el.innerHTML = h.join('');
+      $('lcGo').addEventListener('click', function () {
+        var btn = this; btn.disabled = true;
+        var ids = Array.prototype.filter.call(el.querySelectorAll('[data-lcp]'), function (x) { return x.checked; })
+          .map(function (x) { return Number(x.dataset.lcp); });
+        api('/api/platform/companies/' + c.id + '/locations', { method: 'POST', body: JSON.stringify({
+          name: $('lcName').value.trim(), slug: $('lcSlug').value.trim().toLowerCase(),
+          city: $('lcCity').value.trim(), state: $('lcState').value.trim().toUpperCase(),
+          extraSeatBlocks: Math.max(0, Math.floor(Number($('lcBlocks').value) || 0)), bringUserIds: ids
+        }) }).then(function (r) {
+          var m = $('pmsg'); m.textContent = 'Location created. ' + r.brought + ' people brought across; ' + r.owner + ' is its owner.'; m.className = 'msg ok';
+          return api('/api/platform/companies').then(function (d2) { COS = d2.companies; select(c.id); });
+        }).catch(function (e) { btn.disabled = false; showErr(e); });
+      });
+    }).catch(function () { var el = $('locSec'); if (el) el.innerHTML = ''; });
+  }
+
+  function planOptions(current, list) {
+    var plans = (list && list.length ? list : PLANS).slice();
+    if (current && !plans.some(function (p) { return p.code === current; })) {
+      plans.push({ code: current, label: current + ' (retired)', monthly_cents: 0, seat_limit: null });
+    }
+    return plans.map(function (p) {
+      return '<option value="' + esc(p.code) + '"' + (p.code === current ? ' selected' : '') + '>' +
+        esc(p.label) + ' \u2014 $' + (Number(p.monthly_cents) / 100).toFixed(2) +
+        (p.seat_limit != null ? ', ' + p.seat_limit + ' seats' : '') + '</option>';
+    }).join('');
   }
 
   function kv(k, v) {

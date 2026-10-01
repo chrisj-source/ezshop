@@ -60,6 +60,7 @@
 </div>
 
 <div class="filters">
+  <select id="fShop" aria-label="Location" hidden></select>
   <select id="fWindow"></select>
   <input type="date" id="fFrom" hidden>
   <input type="date" id="fTo" hidden>
@@ -119,6 +120,15 @@
       return '<option value="' + w.key + '"' + (w.key === WINDOW ? ' selected' : '') + '>' +
         esc(w.label) + '</option>';
     }).join('');
+    /* Locations: only shown when this person may read more than one shop. */
+    if (m.shops && m.shops.length) {
+      $('fShop').innerHTML = m.shops.map(function (s) {
+        return '<option value="' + s.id + '"' + (s.own ? ' selected' : '') + '>' +
+          esc(s.name + (s.own ? ' (this shop)' : '')) + '</option>';
+      }).join('');
+      $('fShop').hidden = false;
+      $('fShop').addEventListener('change', load);
+    }
     renderTabs();
     load();
   }).catch(function (e) { if (e.message !== 'signed out') console.error(e); });
@@ -141,6 +151,7 @@
 
   function qs() {
     var s = 'window=' + WINDOW;
+    if (!$('fShop').hidden) s += '&shop=' + encodeURIComponent($('fShop').value);
     if (WINDOW === 'custom') s += '&from=' + ($('fFrom').value || '') + '&to=' + ($('fTo').value || '');
     return s;
   }

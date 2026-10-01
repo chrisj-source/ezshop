@@ -11,6 +11,8 @@ import { mailHealth } from '../lib/mail';
 import { revokeAllForCompany, switchSessionCompany } from '../auth/session';
 import { forgetTenant } from '../db/tenant';
 import { ShopType } from '../db/status-template';
+import { activePlans, monthlyCentsOf, plan as billingPlan, setBilling, SEAT_BLOCK, SEAT_BLOCK_CENTS } from '../lib/billing';
+import { smsReady, smsSummary } from '../lib/sms';
 
 export async function registerPlatform(app: FastifyInstance): Promise<void> {
 
@@ -171,7 +173,7 @@ export async function registerPlatform(app: FastifyInstance): Promise<void> {
 
     const rows = await mq<Array<RowDataPacket>>(
       `SELECT c.id, c.slug, c.name, c.city, c.state, c.shop_type, c.plan_code, c.status,
-              c.seats, c.owner_email, c.created_at, c.provisioned_at,
+              c.seats, c.extra_seat_blocks, c.owner_email, c.created_at, c.provisioned_at,
               cd.db_name, cd.schema_version,
               (SELECT COUNT(*) FROM memberships m WHERE m.company_id = c.id AND m.status = 'active') AS user_count
        FROM companies c
@@ -180,8 +182,13 @@ export async function registerPlatform(app: FastifyInstance): Promise<void> {
        ORDER BY c.name`
     );
 
-    const plans = await mq<RowDataPacket[]>('SELECT * FROM plans WHERE is_active = 1 ORDER BY sort_order');
-    return { companies: rows, plans };
+    const plans = await activePlans();
+    const byCode = new Map(plans.map(p => [p.code, p]));
+    for (const r of rows) {
+      r.monthly_cents = monthlyCentsOf(byCode.get(r.plan_code as string) ?? await billingPlan(r.plan_code as string),
+        Number(r.extra_seat_blocks ?? 0));
+    }
+    return { companies: rows, plans, seatBlock: { size: SEAT_BLOCK, cents: SEAT_BLOCK_CENTS } };
   });
 
   app.get('/api/platform/companies/:id', async (req, reply) => {
@@ -211,7 +218,11 @@ export async function registerPlatform(app: FastifyInstance): Promise<void> {
        WHERE m.company_id = ? ORDER BY m.role, u.name`, [id]
     );
 
-    return { company, features, users };
+    company.monthly_cents = monthlyCentsOf(await billingPlan(company.plan_code as string),
+      Number(company.extra_seat_blocks ?? 0));
+    return { company, features, users, plans: await activePlans(),
+      sms: await smsSummary(id),
+      seatBlock: { size: SEAT_BLOCK, cents: SEAT_BLOCK_CENTS } };
   });
 
   app.post('/api/platform/companies', async (req, reply) => {
@@ -220,7 +231,7 @@ export async function registerPlatform(app: FastifyInstance): Promise<void> {
 
     const b = req.body as {
       name: string; slug: string; city?: string; state?: string; timezone?: string;
-      shopType: ShopType; planCode?: string; seats?: number;
+      shopType: ShopType; planCode?: string; seats?: number; extraSeatBlocks?: number;
       ownerName: string; ownerEmail: string; ownerPassword?: string;
     };
 
@@ -270,15 +281,37 @@ export async function registerPlatform(app: FastifyInstance): Promise<void> {
 
     const allowed: Record<string, string> = {
       name: 'name', city: 'city', state: 'state', timezone: 'timezone',
-      planCode: 'plan_code', seats: 'seats', ownerEmail: 'owner_email', shopType: 'shop_type'
+      ownerEmail: 'owner_email', shopType: 'shop_type'
     };
+
+    /* Plan and seat blocks go through billing, which derives `seats`. A typed
+       seat count is not accepted — it would drift from what is charged. */
+    if (b.planCode !== undefined || b.extraSeatBlocks !== undefined) {
+      const cur = await mqOne<RowDataPacket & { plan_code: string; extra_seat_blocks: number }>(
+        'SELECT plan_code, extra_seat_blocks FROM companies WHERE id = ?', [id]);
+      if (!cur) return reply.code(404).send({ error: 'No such company' });
+      const code = String(b.planCode ?? cur.plan_code);
+      const p = await billingPlan(code);
+      if (!p || (!p.is_active && code !== cur.plan_code)) return reply.code(400).send({ error: 'Unknown plan.' });
+      const blocks = b.extraSeatBlocks !== undefined ? Number(b.extraSeatBlocks) : Number(cur.extra_seat_blocks);
+      if (!Number.isInteger(blocks) || blocks < 0 || blocks > 200) {
+        return reply.code(400).send({ error: 'Extra seat blocks must be a whole number, 0 or more.' });
+      }
+      await setBilling(id, code, blocks);
+      /* Leaving a trial makes the shop active; the status button still rules suspension. */
+      if (code !== 'trial') await mexec("UPDATE companies SET status = 'active' WHERE id = ? AND status = 'trial'", [id]);
+      await audit(ctx.user.id, id, 'company.billing', { from: cur, to: { plan_code: code, extra_seat_blocks: blocks } });
+    }
 
     const sets: string[] = [];
     const vals: unknown[] = [];
     for (const [k, col] of Object.entries(allowed)) {
       if (b[k] !== undefined) { sets.push(`${col} = ?`); vals.push(b[k]); }
     }
-    if (!sets.length) return reply.code(400).send({ error: 'Nothing to change' });
+    if (!sets.length) {
+      if (b.planCode !== undefined || b.extraSeatBlocks !== undefined) return { ok: true };
+      return reply.code(400).send({ error: 'Nothing to change' });
+    }
 
     vals.push(id);
     await mexec(`UPDATE companies SET ${sets.join(', ')} WHERE id = ?`, vals);
@@ -324,6 +357,9 @@ export async function registerPlatform(app: FastifyInstance): Promise<void> {
     if (!f) return reply.code(404).send({ error: 'No such feature' });
     if (f.is_core) return reply.code(400).send({ error: 'That feature is core to the product.' });
     if (!f.is_available) return reply.code(400).send({ error: 'That feature is not available yet.' });
+    if (key === 'sms' && enabled && !(await smsReady(id))) {
+      return reply.code(400).send({ error: 'Save and verify this shop\'s Twilio account, with a sender chosen, before switching texting on.' });
+    }
 
     await mexec(
       `INSERT INTO company_features (company_id, feature_key, enabled, updated_by)

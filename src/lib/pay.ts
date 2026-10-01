@@ -14,6 +14,7 @@
  */
 
 import { PoolConnection, RowDataPacket, ResultSetHeader } from 'mysql2/promise';
+import { partsSaleCents, taxOn, taxRule } from './tax';
 import { tq, tqOne, texec, withTenantTx } from '../db/tenant';
 
 export type TriggerKey = 'arrived' | 'approval' | 'car_gone' | 'file_closed';
@@ -84,10 +85,15 @@ export async function payPeriodEnd(companyId: number): Promise<string> {
   return (row?.setting_value ?? 'tuesday').toLowerCase();
 }
 
-async function taxRate(companyId: number): Promise<number> {
-  const row = await tqOne<RowDataPacket & { setting_value: string }>(companyId,
-    "SELECT setting_value FROM shop_settings WHERE setting_key = 'sales_tax_rate'").catch(() => null);
-  return Number(row?.setting_value ?? 0);
+/** The file's tax under the shop's rule — rate and what it applies to (lib/tax.ts). */
+async function fileTax(companyId: number, file: FileRow): Promise<number> {
+  const rule = await taxRule(companyId);
+  return taxOn(rule, {
+    approval: Number(file.amount_cents) || 0,
+    parts: await partsSaleCents(companyId, file.id, Number(file.parts_cost_cents) || 0),
+    materials: Number(file.materials_cost_cents) || 0,
+    sublet: Number(file.sublet_cost_cents) || 0
+  });
 }
 
 export async function loadPlan(companyId: number, userId: number): Promise<Plan | null> {
@@ -141,13 +147,13 @@ async function fileFor(companyId: number, roId: number): Promise<FileRow | null>
 export interface Deduction { key: string; label: string; cents: number }
 
 /** What comes out, line by line, so the screen can show the arithmetic. */
-export function deductionsOf(file: FileRow, plan: Plan, rate: number): Deduction[] {
+export function deductionsOf(file: FileRow, plan: Plan, taxCents: number): Deduction[] {
   if (plan.mode === 'flat') return [];
   const out: Deduction[] = [];
   for (const d of DEDUCTIONS) {
     if (!plan.deductions.includes(d.key)) continue;
     const cents = d.key === 'tax'
-      ? Math.round(file.amount_cents * (rate / 100))
+      ? taxCents
       : Number((file as unknown as Record<string, number>)[d.column!] ?? 0);
     if (cents > 0) out.push({ key: d.key, label: d.label, cents });
   }
@@ -189,8 +195,7 @@ export async function targetLines(companyId: number, roId: number): Promise<{
     companyId, 'SELECT trigger_key, fired_at FROM ro_triggers WHERE ro_id = ?', [roId]);
   const at = new Map<TriggerKey, Date>(stamps.map(s => [s.trigger_key, new Date(s.fired_at)]));
 
-  const rate = await taxRate(companyId);
-  const deductions = deductionsOf(file, plan, rate);
+  const deductions = deductionsOf(file, plan, await fileTax(companyId, file));
   const outSum = deductions.reduce((a, d) => a + d.cents, 0);
   const base = plan.mode === 'flat' ? file.amount_cents : file.amount_cents - outSum;
 

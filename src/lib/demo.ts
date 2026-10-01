@@ -58,7 +58,7 @@ export async function ensureDemo(actorUserId: number | null): Promise<DemoRow> {
     timezone: 'America/Chicago',
     shopType: 'both',
     planCode: 'trial',
-    seats: 20,
+    extraSeatBlocks: 3,
     ownerName: 'Bob Barnes',
     ownerEmail: 'bob@bobsbodybarn.demo',
     ownerPassword: randomPassword(),

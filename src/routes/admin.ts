@@ -7,6 +7,7 @@ import { hashPassword } from '../auth/password';
 import { sendResetLink } from '../auth/routes';
 import { Role, ROLE_LABEL, sortRoles } from '../permissions';
 import crypto from 'node:crypto';
+import { seatUse, seatWarning } from '../lib/billing';
 
 const ROLES: Role[] = ['owner', 'accounting', 'estimator', 'production_manager',
   'parts_manager', 'front_office', 'salesperson', 'technician'];
@@ -148,7 +149,10 @@ export async function registerAdmin(app: FastifyInstance): Promise<void> {
     );
     await setTrades(ctx.company!.id, userId, trades);
 
-    return { ok: true, userId, code, tempPassword, roles: wanted, positionKeys: trades };
+    /* Out of seats warns, never refuses — the person is already added. */
+    const seatNote = seatWarning(await seatUse(ctx.company!.id));
+
+    return { ok: true, userId, code, tempPassword, roles: wanted, positionKeys: trades, seatWarning: seatNote };
   });
 
   app.patch('/api/admin/people/:userId', async (req, reply) => {

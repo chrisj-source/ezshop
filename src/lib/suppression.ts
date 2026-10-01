@@ -33,7 +33,10 @@ export type Channel = 'email' | 'sms';
 export function normalise(channel: Channel, destination: string): string {
   const d = String(destination ?? '').trim();
   if (channel === 'email') return d.toLowerCase();
-  return d.replace(/[^\d]/g, '');
+  /* Ten digits for a US number, however it was written: Twilio sends +1…, a
+     desk types (972) …. One number must be one row in every table. */
+  const n = d.replace(/[^\d]/g, '');
+  return n.length === 11 && n.startsWith('1') ? n.slice(1) : n;
 }
 
 export interface SuppressionState {

@@ -6,6 +6,26 @@ import { requireCompany, requireFeature } from '../middleware/context';
 import { scrubMoney } from '../permissions';
 import { auditRead } from '../lib/audit';
 import { actorFrom } from './audit';
+import { auditOutsideRead, mayReadReports, groupOf, shopsInGroup } from '../lib/locations';
+
+/**
+ * Which shop a report reads. Its own, unless `?shop=` names another location in
+ * the group and this person holds the parent's combined-reports grant. A read
+ * from outside is written into the log of the shop that was read.
+ */
+async function reportShop(ctx: { user: { id: number; name: string }; company?: { id: number } | null },
+  req: { query: unknown; url: string }, reply: { code: (n: number) => { send: (b: unknown) => unknown } }): Promise<number | null> {
+  const own = ctx.company!.id;
+  const want = Number((req.query as { shop?: string })?.shop ?? 0);
+  if (!want || want === own) return own;
+  if (!(await mayReadReports(ctx.user.id, own, want))) {
+    reply.code(403).send({ error: 'You do not have reports for that location.' });
+    return null;
+  }
+  const name = (req.url.split('?')[0].split('/').pop() || 'report');
+  void auditOutsideRead(want, ctx.user, name);
+  return want;
+}
 
 /**
  * Reports.
@@ -82,7 +102,8 @@ export async function registerReports(app: FastifyInstance): Promise<void> {
         { key: 'clients', label: 'By client', money: true, note: 'Volume and value per wholesale account.' },
         { key: 'voids', label: 'Voided', money: false, note: 'What was voided, why, and what came back.' }
       ],
-      caps: ctx.caps
+      caps: ctx.caps,
+      shops: await readableShops(ctx.user.id, ctx.company!.id)
     };
   });
 
@@ -91,13 +112,15 @@ export async function registerReports(app: FastifyInstance): Promise<void> {
   app.get('/api/reports/production', async (req, reply) => {
     const ctx = requireCompany(req, reply);
     if (!ctx) return;
+    const cid = await reportShop(ctx, req, reply);
+    if (!cid) return;
     if (!requireFeature(ctx, 'reports', reply)) return;
     if (!ctx.caps.viewReports) return reply.code(403).send({ error: 'Not permitted' });
 
     const r = resolveWindow(req.query as never);
     const s = scope(r);
 
-    const byLane = await tq<RowDataPacket[]>(ctx.company!.id, `
+    const byLane = await tq<RowDataPacket[]>(cid, `
       SELECT COALESCE(l.label, 'Not in a lane') AS lane,
              COUNT(*) AS files,
              SUM(r.on_hold = 1) AS on_hold,
@@ -111,7 +134,7 @@ export async function registerReports(app: FastifyInstance): Promise<void> {
       GROUP BY COALESCE(l.label, 'Not in a lane'), l.sort_order
       ORDER BY l.sort_order`, s.params);
 
-    const blocked = await tq<RowDataPacket[]>(ctx.company!.id, `
+    const blocked = await tq<RowDataPacket[]>(cid, `
       SELECT r.id, r.ro_number, st.label AS status_label,
              GREATEST(DATEDIFF(NOW(), r.opened_at) - r.voided_days, 0) AS days_in_shop,
              TIMESTAMPDIFF(HOUR, r.status_since, NOW()) AS hours_in_status,
@@ -130,7 +153,7 @@ export async function registerReports(app: FastifyInstance): Promise<void> {
       ORDER BY hours_in_status DESC
       LIMIT 40`);
 
-    const [totals] = await tq<RowDataPacket[]>(ctx.company!.id, `
+    const [totals] = await tq<RowDataPacket[]>(cid, `
       SELECT COUNT(*) AS files,
              SUM(r.close_date IS NULL AND r.closed_at IS NULL) AS open_files,
              SUM(r.delivered_at IS NOT NULL) AS delivered,
@@ -156,6 +179,8 @@ export async function registerReports(app: FastifyInstance): Promise<void> {
   app.get('/api/reports/cycle', async (req, reply) => {
     const ctx = requireCompany(req, reply);
     if (!ctx) return;
+    const cid = await reportShop(ctx, req, reply);
+    if (!cid) return;
     if (!ctx.caps.viewReports) return reply.code(403).send({ error: 'Not permitted' });
 
     const r = resolveWindow(req.query as never);
@@ -163,7 +188,7 @@ export async function registerReports(app: FastifyInstance): Promise<void> {
 
     // Keys to cycle: total days in shop, and touch time = hours in statuses
     // flagged as counting toward cycle. The gap between them is the wait.
-    const files = await tq<RowDataPacket[]>(ctx.company!.id, `
+    const files = await tq<RowDataPacket[]>(cid, `
       SELECT r.id, r.ro_number, r.opened_at, r.delivered_at, r.approved_at,
              GREATEST(DATEDIFF(COALESCE(r.delivered_at, NOW()), r.opened_at) - r.voided_days, 0) AS days_in_shop,
              DATEDIFF(COALESCE(r.delivered_at, NOW()), COALESCE(r.approved_at, r.opened_at)) AS days_since_approval,
@@ -178,7 +203,7 @@ export async function registerReports(app: FastifyInstance): Promise<void> {
       ORDER BY days_in_shop DESC
       LIMIT 300`, s.params);
 
-    const byStatus = await tq<RowDataPacket[]>(ctx.company!.id, `
+    const byStatus = await tq<RowDataPacket[]>(cid, `
       SELECT st.label AS status_label, st.counts_toward_cycle,
              COUNT(*) AS visits,
              AVG(TIMESTAMPDIFF(HOUR, h.created_at, COALESCE(nxt.created_at, NOW()))) AS avg_hours,
@@ -195,7 +220,7 @@ export async function registerReports(app: FastifyInstance): Promise<void> {
       ORDER BY avg_hours DESC
       LIMIT 40`, s.params);
 
-    const byPath = await tq<RowDataPacket[]>(ctx.company!.id, `
+    const byPath = await tq<RowDataPacket[]>(cid, `
       SELECT r.repair_path,
              COUNT(*) AS files,
              AVG(GREATEST(DATEDIFF(COALESCE(r.delivered_at, NOW()), r.opened_at) - r.voided_days, 0)) AS avg_days,
@@ -225,12 +250,14 @@ export async function registerReports(app: FastifyInstance): Promise<void> {
   app.get('/api/reports/technician', async (req, reply) => {
     const ctx = requireCompany(req, reply);
     if (!ctx) return;
+    const cid = await reportShop(ctx, req, reply);
+    if (!cid) return;
     if (!ctx.caps.viewReports) return reply.code(403).send({ error: 'Not permitted' });
 
     const r = resolveWindow(req.query as never);
     const s = scope(r);
 
-    const rows = await tq<RowDataPacket[]>(ctx.company!.id, `
+    const rows = await tq<RowDataPacket[]>(cid, `
       SELECT a.user_id, a.position_key,
              COALESCE(sf.display_name, a.display_name, 'Unassigned') AS name,
              p.label AS position_label,
@@ -247,7 +274,7 @@ export async function registerReports(app: FastifyInstance): Promise<void> {
       GROUP BY a.user_id, a.position_key, name, p.label, sf.efficiency, p.sort_order
       ORDER BY p.sort_order, flagged_hours DESC`, s.params);
 
-    const rework = await tq<RowDataPacket[]>(ctx.company!.id, `
+    const rework = await tq<RowDataPacket[]>(cid, `
       SELECT COALESCE(sf.display_name, h.user_name, 'unknown') AS name,
              COUNT(*) AS rework_moves
       FROM ro_status_history h
@@ -275,9 +302,11 @@ export async function registerReports(app: FastifyInstance): Promise<void> {
   app.get('/api/reports/status', async (req, reply) => {
     const ctx = requireCompany(req, reply);
     if (!ctx) return;
+    const cid = await reportShop(ctx, req, reply);
+    if (!cid) return;
     if (!ctx.caps.viewReports) return reply.code(403).send({ error: 'Not permitted' });
 
-    const rows = await tq<RowDataPacket[]>(ctx.company!.id, `
+    const rows = await tq<RowDataPacket[]>(cid, `
       SELECT st.slot_id, st.label, st.owner_role, g.label AS group_label,
              st.age_yellow_hours, st.age_red_hours,
              COUNT(r.id) AS files,
@@ -292,7 +321,7 @@ export async function registerReports(app: FastifyInstance): Promise<void> {
       HAVING files > 0
       ORDER BY g.sort_order, st.sort_order`);
 
-    const byOwner = await tq<RowDataPacket[]>(ctx.company!.id, `
+    const byOwner = await tq<RowDataPacket[]>(cid, `
       SELECT st.owner_role, COUNT(r.id) AS files,
              SUM(TIMESTAMPDIFF(HOUR, r.status_since, NOW()) >= COALESCE(st.age_red_hours, 999999)) AS over_red
       FROM statuses st
@@ -307,16 +336,18 @@ export async function registerReports(app: FastifyInstance): Promise<void> {
   app.get('/api/reports/revenue', async (req, reply) => {
     const ctx = requireCompany(req, reply);
     if (!ctx) return;
+    const cid = await reportShop(ctx, req, reply);
+    if (!cid) return;
     if (!ctx.caps.viewMoneyReports) return reply.code(403).send({ error: 'Not permitted' });
 
     const r = resolveWindow(req.query as never);
     const s = scope(r);
 
-    void auditRead(ctx.company!.id, actorFrom(req), {
+    void auditRead(cid, actorFrom(req), {
       entity: 'report_revenue', label: `Revenue report opened — ${r.from} to ${r.to}`
     });
 
-    const [tot] = await tq<RowDataPacket[]>(ctx.company!.id, `
+    const [tot] = await tq<RowDataPacket[]>(cid, `
       SELECT COUNT(*) AS files,
              COALESCE(SUM(r.amount_cents), 0) AS gross_cents,
              COALESCE(SUM(r.parts_cost_cents), 0) AS parts_cents,
@@ -326,14 +357,14 @@ export async function registerReports(app: FastifyInstance): Promise<void> {
              AVG(r.amount_cents) AS avg_ticket
       FROM repair_orders r WHERE ${s.sql}`, s.params);
 
-    const byType = await tq<RowDataPacket[]>(ctx.company!.id, `
+    const byType = await tq<RowDataPacket[]>(cid, `
       SELECT r.ro_type, COUNT(*) AS files,
              COALESCE(SUM(r.amount_cents), 0) AS gross_cents,
              AVG(r.amount_cents) AS avg_ticket
       FROM repair_orders r WHERE ${s.sql}
       GROUP BY r.ro_type ORDER BY gross_cents DESC`, s.params);
 
-    const byMonth = await tq<RowDataPacket[]>(ctx.company!.id, `
+    const byMonth = await tq<RowDataPacket[]>(cid, `
       SELECT DATE_FORMAT(r.opened_at, '%Y-%m') AS month,
              COUNT(*) AS files,
              COALESCE(SUM(r.amount_cents), 0) AS gross_cents,
@@ -342,7 +373,7 @@ export async function registerReports(app: FastifyInstance): Promise<void> {
       WHERE r.voided_at IS NULL AND r.opened_at > DATE_SUB(CURDATE(), INTERVAL 12 MONTH)
       GROUP BY month ORDER BY month`);
 
-    const supplements = await tq<RowDataPacket[]>(ctx.company!.id, `
+    const supplements = await tq<RowDataPacket[]>(cid, `
       SELECT COUNT(*) AS n,
              COALESCE(SUM(sp.requested_cents), 0) AS requested_cents,
              COALESCE(SUM(sp.approved_cents), 0) AS approved_cents,
@@ -354,7 +385,7 @@ export async function registerReports(app: FastifyInstance): Promise<void> {
     const cost = Number(tot.parts_cents ?? 0) + Number(tot.sublet_cents ?? 0);
 
     // Parts margin from real vendor cost, not inferred from the estimate.
-    const [pm] = await tq<RowDataPacket[]>(ctx.company!.id, `
+    const [pm] = await tq<RowDataPacket[]>(cid, `
       SELECT COALESCE(SUM(p.price_cents * p.qty), 0) AS list_cents,
              COALESCE(SUM(p.cost_cents * p.qty), 0) AS cost_cents
       FROM parts_lines p JOIN repair_orders r ON r.id = p.ro_id
@@ -392,12 +423,14 @@ export async function registerReports(app: FastifyInstance): Promise<void> {
   app.get('/api/reports/salesperson', async (req, reply) => {
     const ctx = requireCompany(req, reply);
     if (!ctx) return;
+    const cid = await reportShop(ctx, req, reply);
+    if (!cid) return;
     if (!ctx.caps.viewMoneyReports) return reply.code(403).send({ error: 'Not permitted' });
 
     const r = resolveWindow(req.query as never);
     const s = scope(r);
 
-    const rows = await tq<RowDataPacket[]>(ctx.company!.id, `
+    const rows = await tq<RowDataPacket[]>(cid, `
       SELECT COALESCE(sf.display_name, a.display_name, 'Unassigned') AS name,
              sf.commission_rate,
              COUNT(DISTINCT r.id) AS files,
@@ -412,7 +445,7 @@ export async function registerReports(app: FastifyInstance): Promise<void> {
       GROUP BY name, sf.commission_rate
       ORDER BY gross_cents DESC`, s.params);
 
-    const leads = await tq<RowDataPacket[]>(ctx.company!.id, `
+    const leads = await tq<RowDataPacket[]>(cid, `
       SELECT l.owner_user_id, COALESCE(sf.display_name, 'Unassigned') AS name,
              COUNT(*) AS leads,
              SUM(l.state = 'won') AS won,
@@ -429,11 +462,13 @@ export async function registerReports(app: FastifyInstance): Promise<void> {
   app.get('/api/reports/approval', async (req, reply) => {
     const ctx = requireCompany(req, reply);
     if (!ctx) return;
+    const cid = await reportShop(ctx, req, reply);
+    if (!cid) return;
     if (!ctx.caps.viewMoneyReports) return reply.code(403).send({ error: 'Not permitted' });
 
     const r = resolveWindow(req.query as never);
 
-    const rows = await tq<RowDataPacket[]>(ctx.company!.id, `
+    const rows = await tq<RowDataPacket[]>(cid, `
       SELECT DATE(r.approved_at) AS day,
              COUNT(*) AS files,
              COALESCE(SUM(r.amount_cents), 0) AS gross_cents,
@@ -443,7 +478,7 @@ export async function registerReports(app: FastifyInstance): Promise<void> {
         AND r.approved_at >= ? AND r.approved_at < DATE_ADD(?, INTERVAL 1 DAY)
       GROUP BY DATE(r.approved_at) ORDER BY day DESC`, [r.from, r.to]);
 
-    const waiting = await tq<RowDataPacket[]>(ctx.company!.id, `
+    const waiting = await tq<RowDataPacket[]>(cid, `
       SELECT r.id, r.ro_number, r.amount_cents, st.label AS status_label,
              GREATEST(DATEDIFF(NOW(), r.opened_at) - r.voided_days, 0) AS days_in_shop,
              ins.name AS insurer_name,
@@ -461,12 +496,14 @@ export async function registerReports(app: FastifyInstance): Promise<void> {
   app.get('/api/reports/clients', async (req, reply) => {
     const ctx = requireCompany(req, reply);
     if (!ctx) return;
+    const cid = await reportShop(ctx, req, reply);
+    if (!cid) return;
     if (!ctx.caps.viewMoneyReports) return reply.code(403).send({ error: 'Not permitted' });
 
     const r = resolveWindow(req.query as never);
     const s = scope(r);
 
-    const rows = await tq<RowDataPacket[]>(ctx.company!.id, `
+    const rows = await tq<RowDataPacket[]>(cid, `
       SELECT c.id, c.name, c.kind, c.wholesale_type, c.terms,
              COUNT(r.id) AS files,
              COALESCE(SUM(r.amount_cents), 0) AS gross_cents,
@@ -485,11 +522,13 @@ export async function registerReports(app: FastifyInstance): Promise<void> {
   app.get('/api/reports/leads', async (req, reply) => {
     const ctx = requireCompany(req, reply);
     if (!ctx) return;
+    const cid = await reportShop(ctx, req, reply);
+    if (!cid) return;
     if (!ctx.caps.viewReports) return reply.code(403).send({ error: 'Not permitted' });
 
     const r = resolveWindow(req.query as never);
 
-    const bySource = await tq<RowDataPacket[]>(ctx.company!.id, `
+    const bySource = await tq<RowDataPacket[]>(cid, `
       SELECT source, COUNT(*) AS leads,
              SUM(state = 'won') AS won, SUM(state = 'lost') AS lost,
              AVG(TIMESTAMPDIFF(HOUR, received_at, first_reply_at)) AS avg_reply_hours
@@ -498,7 +537,7 @@ export async function registerReports(app: FastifyInstance): Promise<void> {
         AND received_at >= ? AND received_at < DATE_ADD(?, INTERVAL 1 DAY)
       GROUP BY source ORDER BY leads DESC`, [r.from, r.to]);
 
-    const lost = await tq<RowDataPacket[]>(ctx.company!.id, `
+    const lost = await tq<RowDataPacket[]>(cid, `
       SELECT COALESCE(lost_reason, 'Not recorded') AS reason, COUNT(*) AS n
       FROM leads
       WHERE deleted_at IS NULL AND state = 'lost'
@@ -517,11 +556,13 @@ export async function registerReports(app: FastifyInstance): Promise<void> {
   app.get('/api/reports/voids', async (req, reply) => {
     const ctx = requireCompany(req, reply);
     if (!ctx) return;
+    const cid = await reportShop(ctx, req, reply);
+    if (!cid) return;
     if (!ctx.caps.viewReports) return reply.code(403).send({ error: 'Not permitted' });
 
     const r = resolveWindow(req.query as never);
 
-    const rows = await tq<RowDataPacket[]>(ctx.company!.id, `
+    const rows = await tq<RowDataPacket[]>(cid, `
       SELECT v.id, v.ro_id, v.ro_number, v.reason, v.note, v.amount_cents,
              v.parts_cancelled, v.parts_flagged,
              v.voided_at, v.voided_by_name,
@@ -540,7 +581,7 @@ export async function registerReports(app: FastifyInstance): Promise<void> {
       WHERE v.voided_at >= ? AND v.voided_at < DATE_ADD(?, INTERVAL 1 DAY)
       ORDER BY v.voided_at DESC`, [r.from, r.to]);
 
-    const byReason = await tq<RowDataPacket[]>(ctx.company!.id, `
+    const byReason = await tq<RowDataPacket[]>(cid, `
       SELECT reason, COUNT(*) AS n,
              SUM(reopened_at IS NOT NULL) AS reopened,
              COALESCE(SUM(amount_cents), 0) AS amount_cents
@@ -564,4 +605,18 @@ export async function registerReports(app: FastifyInstance): Promise<void> {
       }
     };
   });
+}
+
+/** Shops in the group whose reports this person may pick. Just their own when there is no grant. */
+async function readableShops(userId: number, own: number): Promise<Array<{ id: number; name: string; own: boolean }>> {
+  const g = await groupOf(own);
+  if (!g) return [];
+  const shops = await shopsInGroup(g.id);
+  const out: Array<{ id: number; name: string; own: boolean }> = [];
+  for (const s of shops) {
+    if (Number(s.id) === own || await mayReadReports(userId, own, Number(s.id))) {
+      out.push({ id: Number(s.id), name: String(s.name), own: Number(s.id) === own });
+    }
+  }
+  return out.length > 1 ? out : [];
 }

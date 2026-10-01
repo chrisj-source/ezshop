@@ -44,6 +44,13 @@ export const config = {
    * it. A shop whose secret_ref says DERIVED fails loudly without it.
    */
   tenantMasterSecret: process.env.TENANT_MASTER_SECRET ?? '',
+  /**
+   * The encryption key for credentials a shop hands us — today, each shop's
+   * Twilio Auth Token (lib/secretbox.ts). 32 random bytes, base64url. Unlike
+   * TENANT_MASTER_SECRET this one IS an encryption key: lose it and every
+   * stored token has to be pasted in again. Keep a copy in a password manager.
+   */
+  credentialsKey: process.env.CREDENTIALS_KEY ?? '',
   sessionDays: Number(process.env.SESSION_DAYS ?? 14),
   /**
    * Signed out after this many days of no requests, whatever the absolute

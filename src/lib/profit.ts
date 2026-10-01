@@ -26,6 +26,7 @@
 import { RowDataPacket } from 'mysql2/promise';
 import { tq, tqOne, texec } from '../db/tenant';
 import { loadPlan } from './pay';
+import { partsSaleCents, taxOn, taxRule } from './tax';
 import { sqlStamp, syncFlagLedger } from './flags';
 
 /** The trades a close-out sheet can ask about, in the order it lists them. */
@@ -280,13 +281,16 @@ export async function profitFor(
         salesPay = Math.round(approval * (plan.rate_pct / 100));
         salesNote = `${sales.name} — ${plan.rate_pct}% of approval`;
       } else {
-        const taxPct = await setting(companyId, 'sales_tax_rate', 0);
+        const taxCents = taxOn(await taxRule(companyId), {
+          approval, materials, sublet: Number(f.sublet_cost_cents) || 0,
+          parts: await partsSaleCents(companyId, roId, Number(f.parts_cost_cents) || 0)
+        });
         let base = approval;
         for (const d of plan.deductions) {
           if (d === 'parts') base -= Number(f.parts_cost_cents) || 0;
           else if (d === 'sublet') base -= Number(f.sublet_cost_cents) || 0;
           else if (d === 'rental') base -= rental;
-          else if (d === 'tax') base -= Math.round(approval * (taxPct / 100));
+          else if (d === 'tax') base -= taxCents;
           else if (d === 'materials') base -= materials;
           else if (d === 'towing') base -= Number(f.towing_cost_cents) || 0;
           else if (d === 'discount') base -= given;

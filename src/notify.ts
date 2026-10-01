@@ -50,6 +50,9 @@ export interface NotifyInput {
    * can take back.
    */
   appOnly?: boolean;
+  /** Only the directUserIds — the shop's groups are not consulted. For events
+      with their own routing (a customer's text: Admin › Text updates). */
+  onlyDirect?: boolean;
 }
 
 interface GroupRow extends RowDataPacket {
@@ -78,6 +81,7 @@ interface PositionRow extends RowDataPacket {
 export async function notify(input: NotifyInput): Promise<number> {
   const cid = input.companyId;
   const recipients = new Set<number>(input.directUserIds ?? []);
+  if (input.onlyDirect) return deliver(input, recipients);
 
   /* A status change is routed by the shop's own grid (Admin › Notifications),
      which supersedes the groups below for this one event. The grid is allowed
