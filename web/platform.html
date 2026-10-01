@@ -591,13 +591,40 @@
     });
   }
 
+  function personTick(key, p, on) {
+    return '<label style="display:flex;gap:7px;align-items:center;font:400 12px var(--font);padding:3px 0;cursor:pointer">' +
+      '<input type="checkbox" data-' + key + '="' + p.id + '"' + (on ? ' checked' : '') + '>' + esc(p.name) +
+      (p.role === 'owner' ? ' <span style="font:500 9px var(--font);letter-spacing:.08em;text-transform:uppercase;color:var(--acc2)">owner</span>' : '') +
+      '</label>';
+  }
+
   function loadLocations(c) {
     api('/api/platform/companies/' + c.id + '/group').then(function (g) {
       var el = $('locSec'); if (!el || SEL !== c.id) return;
       var h = [];
       if (g.isLocation) {
         var parent = g.shops.filter(function (s) { return Number(s.is_parent); })[0];
-        el.innerHTML = '<div style="font:400 12px var(--font);color:var(--muted)">A location of ' + esc(parent ? parent.name : 'another shop') + '.</div>';
+        var pp = g.parentPeople || [];
+        el.innerHTML = '<div style="font:400 12px var(--font);color:var(--muted);margin-bottom:10px">A location of ' + esc(parent ? parent.name : 'another shop') + '.</div>' +
+          (pp.length
+            ? '<div style="font:400 10.5px var(--font);color:var(--dim);margin-bottom:6px">Add people from ' + esc(parent ? parent.name : 'the parent') +
+                ' \u2014 same sign-in, same roles and pay setup, a seat each here</div>' +
+              '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:2px 12px;margin-bottom:10px">' +
+              pp.map(function (x) { return personTick('lbp', x, x.role === 'owner'); }).join('') + '</div>' +
+              '<button class="btn" id="lbGo" style="border:1px solid var(--acc);color:var(--acc);padding:6px 12px">Add the ticked people</button>'
+            : '<div class="sb">Everybody at the parent is already here.</div>');
+        var go = $('lbGo');
+        if (go) go.addEventListener('click', function () {
+          var ids = Array.prototype.filter.call(el.querySelectorAll('[data-lbp]'), function (x) { return x.checked; })
+            .map(function (x) { return Number(x.dataset.lbp); });
+          if (!ids.length) return;
+          go.disabled = true;
+          api('/api/platform/companies/' + c.id + '/bring', { method: 'POST', body: JSON.stringify({ userIds: ids }) })
+            .then(function (r) {
+              var m = $('pmsg'); m.textContent = 'Added ' + r.added + '.' + (r.seatWarning ? ' ' + r.seatWarning : ''); m.className = 'msg ok';
+              return select(c.id);
+            }).catch(function (e) { go.disabled = false; showErr(e); });
+        });
         return;
       }
       var locs = g.shops.filter(function (s) { return !Number(s.is_parent); });
@@ -609,7 +636,7 @@
       }
       h.push('<div style="max-width:620px"><div style="font:400 11.5px/1.6 var(--font);color:var(--dim);margin-bottom:10px">' +
         'A new location is its own shop on the Additional location plan. It starts with copies of this shop\u2019s roles and permissions, ' +
-        'notification routing, labor and tax settings. The owner carries across. Tick anybody else who works at both.</div>' +
+        'notification routing, labor and tax settings. Owners are ticked; tick anybody else who works at both. People can also be added after it is created.</div>' +
         '<div style="display:grid;grid-template-columns:1fr 1fr;gap:0 12px">' +
           field('lcName', 'Location name') + field('lcSlug', 'Slug \u2014 lowercase, becomes the database name') +
           field('lcCity', 'City') + field('lcState', 'State', 'maxlength="2"') +
@@ -617,9 +644,9 @@
         '</div>' +
         '<div style="font:400 10.5px var(--font);color:var(--dim);margin:4px 0 6px">People to bring across</div>' +
         '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:2px 12px;margin-bottom:10px">' +
-        g.people.filter(function (p) { return p.role !== 'owner'; }).map(function (p) {
-          return '<label style="display:flex;gap:7px;align-items:center;font:400 12px var(--font);padding:3px 0;cursor:pointer">' +
-            '<input type="checkbox" data-lcp="' + p.id + '">' + esc(p.name) + '</label>';
+        /* Owners first and ticked: an owner of the parent is nearly always an owner here. */
+        g.people.slice().sort(function (a, b) { return (b.role === 'owner') - (a.role === 'owner'); }).map(function (p) {
+          return personTick('lcp', p, p.role === 'owner');
         }).join('') + '</div>' +
         '<button class="btn" id="lcGo" style="border:1px solid var(--acc);color:var(--acc);padding:6px 12px">Create the location</button></div>');
       el.innerHTML = h.join('');

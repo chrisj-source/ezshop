@@ -26,11 +26,33 @@ export async function registerLocations(app: FastifyInstance): Promise<void> {
     if (!ctx) return;
     const id = Number((req.params as { id: string }).id);
     const g = await groupOf(id);
-    return {
-      group: g, shops: g ? await shopsInGroup(g.id) : [],
-      isLocation: !!g && g.parentId !== id,
-      people: await people(id)
-    };
+    const isLocation = !!g && g.parentId !== id;
+    const here = await people(id);
+    /* At a location: the parent's people who are not here yet, owners included,
+       so anybody missed at creation can be pulled over afterwards. */
+    let parentPeople: RowDataPacket[] = [];
+    if (isLocation) {
+      const ids = new Set(here.map(p => Number(p.id)));
+      parentPeople = (await people(g!.parentId)).filter(p => !ids.has(Number(p.id)));
+    }
+    return { group: g, shops: g ? await shopsInGroup(g.id) : [], isLocation, people: here, parentPeople };
+  });
+
+  /** Pull people from the parent into this location after it was created. */
+  app.post('/api/platform/companies/:id/bring', async (req, reply) => {
+    const ctx = requirePlatformOwner(req, reply);
+    if (!ctx) return;
+    const id = Number((req.params as { id: string }).id);
+    const g = await groupOf(id);
+    if (!g || g.parentId === id) return reply.code(400).send({ error: 'This shop is not a location.' });
+    const { userIds } = req.body as { userIds?: number[] };
+    try {
+      const n = await bringPeople(g.parentId, id, (userIds ?? []).map(Number));
+      await paudit(ctx.user.id, id, 'location.people_added', { from: g.parentId, userIds });
+      return { ok: true, added: n, seatWarning: seatWarning(await seatUse(id)) };
+    } catch (e) {
+      return reply.code(400).send({ error: (e as Error).message });
+    }
   });
 
   /** A new location under this shop: provisioned, joined to the group, set up from the parent. */
