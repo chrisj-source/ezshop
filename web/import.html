@@ -73,7 +73,8 @@
       <div class="dropt">Drop a CCC, Mitchell or Audatex export here</div>
       <div class="dropn">
         Select the whole set — every file that shares the estimate's name
-        (<code>a9062516.env</code>, <code>.veh</code>, <code>.lin</code> and the rest).<br>
+        (<code>a9062516.env</code>, <code>.veh</code>, <code>.lin</code> and the rest).
+        Several vehicles can go at once; each name becomes its own import.<br>
         Nothing touches a repair order until you accept it below.
       </div>
       <input type="file" id="fileInput" multiple hidden>
@@ -195,6 +196,14 @@
     if (e.dataTransfer && e.dataTransfer.files.length) upload(e.dataTransfer.files);
   });
 
+  function failList(rs) {
+    var bad = (rs || []).filter(function (r) { return !r.ok; });
+    if (!bad.length || (rs || []).length < 2) return '';
+    return '<br>' + bad.map(function (r) {
+      return 'Could not read ' + esc(r.base) + ': ' + esc(r.error);
+    }).join('<br>');
+  }
+
   function upload(files) {
     if (!files || !files.length) return;
     var msg = $('msg');
@@ -211,12 +220,23 @@
       .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
       .then(function (res) {
         drop.innerHTML = was;
+        var j = res.j;
         if (!res.ok) {
-          msg.textContent = res.j.error;
+          msg.innerHTML = esc(j.error) + failList(j.results);
           msg.className = 'msg err';
           return load();
         }
-        return load().then(function () { openImport(res.j.importId); });
+        /* One estimate opens straight into review, as before. Several are
+           listed below as pending, one row each, with a line saying so. */
+        if (j.importId && j.count === 1) {
+          return load().then(function () { openImport(j.importId); });
+        }
+        var bad = (j.results || []).filter(function (r) { return !r.ok; });
+        msg.innerHTML = j.imported + ' estimate' + (j.imported === 1 ? '' : 's') + ' read, each waiting below for review.' +
+          (j.stray && j.stray.length ? ' ' + j.stray.length + ' file' + (j.stray.length === 1 ? '' : 's') + ' of an unknown kind ignored.' : '') +
+          failList(bad);
+        msg.className = bad.length ? 'msg err' : 'msg ok';
+        return load();
       })
       .catch(function () {
         drop.innerHTML = was;

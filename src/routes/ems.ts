@@ -2,7 +2,7 @@ import { FastifyInstance } from 'fastify';
 import { PoolConnection, RowDataPacket, ResultSetHeader } from 'mysql2/promise';
 import { tq, texec, tqOne, withTenantTx } from '../db/tenant';
 import { requireCompany, requireFeature } from '../middleware/context';
-import { parseEms, EmsEstimate, partTypeToEnum } from '../lib/ems';
+import { parseEms, EmsEstimate, partTypeToEnum, splitSets } from '../lib/ems';
 import { emsExtAllowed, extensionOf, storagePrefix, writeBuffer } from '../lib/storage';
 import { notify } from '../notify';
 import { auditIn, Area } from '../lib/audit';
@@ -116,7 +116,7 @@ async function applyFields(
  */
 export async function registerEms(app: FastifyInstance): Promise<void> {
 
-  /** Upload one estimate's file set. Multipart, any number of files. */
+  /** Upload one or more estimates' file sets. Multipart, any number of files; split by base name. */
   app.post('/api/ems/upload', async (req, reply) => {
     const ctx = requireCompany(req, reply);
     if (!ctx) return;
@@ -135,108 +135,140 @@ export async function registerEms(app: FastifyInstance): Promise<void> {
 
     if (!files.length) return reply.code(400).send({ error: 'No files received' });
 
-    let est: EmsEstimate;
-    try {
-      est = parseEms(files);
-    } catch (e) {
-      const res = await texec(cid, `
-        INSERT INTO ems_imports (source, state, parse_error, envelope_name, line_count)
-        VALUES ('upload', 'failed', ?, ?, 0)`,
-        [(e as Error).message.slice(0, 500), files[0]?.filename.slice(0, 190) ?? null]
-      );
-      return reply.code(400).send({ error: (e as Error).message, importId: res.insertId });
-    }
-
-    // Keep the raw set so a bad parse can be re-run after a fix. One folder per
-    // import: the row stores the folder, not a list of twenty file keys.
-    /* An estimate set is a bag of whatever the writer produced, so the list is
-       wider than the document one — but it is still a list. These files are
-       parsed and never served back to a browser; the allowlist is here to stop
-       the storage directory becoming somewhere arbitrary files can be put. */
-    const prefix = storagePrefix(cid, 'ems');
-    for (let i = 0; i < files.length; i++) {
-      const ext = extensionOf(files[i].filename);
+    /* Checked across the whole drop before anything is stored, so a bad file
+       cannot leave half the sets imported. */
+    for (const f of files) {
+      const ext = extensionOf(f.filename);
       if (!emsExtAllowed(ext)) {
-        return reply.code(415).send({
-          error: `Cannot accept a .${ext} file in an estimate set.`
-        });
+        return reply.code(415).send({ error: `Cannot accept a .${ext} file in an estimate set.` });
       }
-      const name = String(i + 1).padStart(2, '0') + '.' + ext;
-      await writeBuffer(prefix + '/' + name, files[i].buffer);
     }
 
-    const match = await findMatch(cid, est);
+    /* One import per estimate set. Several vehicles dropped together are
+       several imports, never one merged parse (lib/ems.ts splitSets). */
+    const { sets, stray } = splitSets(files);
+    if (!sets.length) return reply.code(400).send({ error: 'No EMS files found in that upload.' });
 
-    // EMS fields are wider than our columns (CCC's RO_ID is 40 chars, the model
-    // description 50) — clip rather than let a long value throw.
-    const clip = (v: string | null, n: number): string | null =>
-      v === null || v === undefined ? null : v.slice(0, n);
+    const importSet = async (base: string, files: Array<{ filename: string; buffer: Buffer }>) => {
+      let est: EmsEstimate;
+      try {
+        est = parseEms(files);
+      } catch (e) {
+        const res = await texec(cid, `
+          INSERT INTO ems_imports (source, state, parse_error, envelope_name, line_count)
+          VALUES ('upload', 'failed', ?, ?, 0)`,
+          [(e as Error).message.slice(0, 500), files[0]?.filename.slice(0, 190) ?? null]
+        );
+        return { ok: false as const, base, error: (e as Error).message, importId: res.insertId };
+      }
 
-    // Everything the estimate said about the claim is kept, not just the claim
-    // number: without these the carrier had to be typed in again by hand after
-    // every import.
-    const res = await texec(cid, `
-      INSERT INTO ems_imports
-        (source, estimating_system, envelope_name, ro_number, claim_number,
-         insurer_name, policy_number, deductible_cents, deductible_waived,
-         date_of_loss, adjuster, estimator, vin,
-         customer_name, customer_phone, customer_phone2, customer_email,
-         customer_addr, customer_city, customer_state, customer_zip,
-         insurer_phone, adjuster_phone, adjuster_email,
-         vehicle_text, vehicle_color, plate, plate_state, mileage,
-         supplement_seq, total_cents, line_count,
-         matched_ro_id, match_confidence, state, storage_key)
-      VALUES ('upload', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-              ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
-      [clip(est.estimatingSystem, 32), clip(est.envelopeName, 190), clip(est.roNumber, 32),
-       clip(est.claimNumber, 64),
-       clip(est.insurer, 190), clip(est.policyNumber, 64),
-       est.deductibleCents, est.deductibleWaived ? 1 : 0,
-       est.dateOfLoss, clip(est.adjuster, 120), clip(est.estimator, 120),
-       clip(est.vin, 24), clip(est.customerName, 160),
-       clip(est.customerPhone, 32), clip(est.customerPhone2, 32),
-       clip(est.customerEmail, 190), clip(est.customerAddress, 190),
-       clip(est.customerCity, 96), clip(est.customerState, 8), clip(est.customerZip, 16),
-       clip(est.insurerPhone, 32), clip(est.adjusterPhone, 32), clip(est.adjusterEmail, 190),
-       clip([est.year, est.make, est.model].filter(Boolean).join(' ') || null, 160),
-       clip(est.color, 48), clip(est.plate, 16), clip(est.plateState, 8), est.mileage,
-       est.supplementSeq, est.grossCents ?? est.netCents, est.lines.length,
-       match.roId, match.confidence, prefix]
-    );
-    const importId = res.insertId;
+      // Keep the raw set so a bad parse can be re-run after a fix. One folder per
+      // import: the row stores the folder, not a list of twenty file keys.
+      /* An estimate set is a bag of whatever the writer produced, so the list is
+         wider than the document one — but it is still a list. These files are
+         parsed and never served back to a browser; the allowlist is here to stop
+         the storage directory becoming somewhere arbitrary files can be put. */
+      const prefix = storagePrefix(cid, 'ems');
+      for (let i = 0; i < files.length; i++) {
+        const ext = extensionOf(files[i].filename);
+        const name = String(i + 1).padStart(2, '0') + '.' + ext;
+        await writeBuffer(prefix + '/' + name, files[i].buffer);
+      }
 
-    if (est.lines.length) {
-      const rows = est.lines.map(l => [
-        importId, l.lineNo, clip(l.operation, 32), clip(l.description, 255),
-        clip(l.partNumber, 64), clip(l.partType, 24),
-        Math.max(1, Math.round(l.qty)), l.priceCents, l.laborHours, clip(l.laborType, 24), 1
-      ]);
-      await texec(cid, `
-        INSERT INTO ems_import_lines
-          (import_id, line_no, operation, description, part_number, part_type,
-           qty, price_cents, labor_hours, labor_type, is_new)
-        VALUES ?`, [rows]
+      const match = await findMatch(cid, est);
+
+      // EMS fields are wider than our columns (CCC's RO_ID is 40 chars, the model
+      // description 50) — clip rather than let a long value throw.
+      const clip = (v: string | null, n: number): string | null =>
+        v === null || v === undefined ? null : v.slice(0, n);
+
+      // Everything the estimate said about the claim is kept, not just the claim
+      // number: without these the carrier had to be typed in again by hand after
+      // every import.
+      const res = await texec(cid, `
+        INSERT INTO ems_imports
+          (source, estimating_system, envelope_name, ro_number, claim_number,
+           insurer_name, policy_number, deductible_cents, deductible_waived,
+           date_of_loss, adjuster, estimator, vin,
+           customer_name, customer_phone, customer_phone2, customer_email,
+           customer_addr, customer_city, customer_state, customer_zip,
+           insurer_phone, adjuster_phone, adjuster_email,
+           vehicle_text, vehicle_color, plate, plate_state, mileage,
+           supplement_seq, total_cents, line_count,
+           matched_ro_id, match_confidence, state, storage_key)
+        VALUES ('upload', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
+        [clip(est.estimatingSystem, 32), clip(est.envelopeName, 190), clip(est.roNumber, 32),
+         clip(est.claimNumber, 64),
+         clip(est.insurer, 190), clip(est.policyNumber, 64),
+         est.deductibleCents, est.deductibleWaived ? 1 : 0,
+         est.dateOfLoss, clip(est.adjuster, 120), clip(est.estimator, 120),
+         clip(est.vin, 24), clip(est.customerName, 160),
+         clip(est.customerPhone, 32), clip(est.customerPhone2, 32),
+         clip(est.customerEmail, 190), clip(est.customerAddress, 190),
+         clip(est.customerCity, 96), clip(est.customerState, 8), clip(est.customerZip, 16),
+         clip(est.insurerPhone, 32), clip(est.adjusterPhone, 32), clip(est.adjusterEmail, 190),
+         clip([est.year, est.make, est.model].filter(Boolean).join(' ') || null, 160),
+         clip(est.color, 48), clip(est.plate, 16), clip(est.plateState, 8), est.mileage,
+         est.supplementSeq, est.grossCents ?? est.netCents, est.lines.length,
+         match.roId, match.confidence, prefix]
       );
+      const importId = res.insertId;
+
+      if (est.lines.length) {
+        const rows = est.lines.map(l => [
+          importId, l.lineNo, clip(l.operation, 32), clip(l.description, 255),
+          clip(l.partNumber, 64), clip(l.partType, 24),
+          Math.max(1, Math.round(l.qty)), l.priceCents, l.laborHours, clip(l.laborType, 24), 1
+        ]);
+        await texec(cid, `
+          INSERT INTO ems_import_lines
+            (import_id, line_no, operation, description, part_number, part_type,
+             qty, price_cents, labor_hours, labor_type, is_new)
+          VALUES ?`, [rows]
+        );
+      }
+
+      await notify({
+        companyId: cid,
+        event: 'supp.decision',
+        roId: match.roId,
+        title: est.supplementSeq
+          ? `Supplement ${est.supplementSeq} imported — ${est.roNumber ?? est.vin ?? 'unmatched'}`
+          : `Estimate imported — ${est.roNumber ?? est.vin ?? 'unmatched'}`,
+        body: `${est.lines.length} lines waiting for review on the import screen.`,
+        actorUserId: ctx.user.id,
+        dedupeKey: `ems:${importId}`
+      }).catch(() => {});
+
+
+      return {
+        ok: true as const, base, importId, estimate: est, match,
+        candidates: match.roId ? [] : await candidates(cid, est)
+      };
+    };
+
+    const results = [];
+    for (const s of sets) results.push(await importSet(s.base, s.files));
+
+    const good = results.filter(r => r.ok);
+    if (!good.length) {
+      const first = results[0] as { error: string; importId: number };
+      return reply.code(400).send({
+        error: results.length === 1 ? first.error : `None of the ${results.length} estimates could be read.`,
+        importId: first.importId, results
+      });
     }
 
-    await notify({
-      companyId: cid,
-      event: 'supp.decision',
-      roId: match.roId,
-      title: est.supplementSeq
-        ? `Supplement ${est.supplementSeq} imported — ${est.roNumber ?? est.vin ?? 'unmatched'}`
-        : `Estimate imported — ${est.roNumber ?? est.vin ?? 'unmatched'}`,
-      body: `${est.lines.length} lines waiting for review on the import screen.`,
-      actorUserId: ctx.user.id,
-      dedupeKey: `ems:${importId}`
-    }).catch(() => {});
-
+    /* The single-set shape is kept for anything that read it before. */
+    const one = good.length === 1 && results.length === 1 ? good[0] : null;
     return {
       ok: true,
-      importId,
-      estimate: est,
-      match,
-      candidates: match.roId ? [] : await candidates(cid, est)
+      count: results.length,
+      imported: good.length,
+      stray,
+      results,
+      ...(one ? { importId: one.importId, estimate: one.estimate, match: one.match, candidates: one.candidates } : {})
     };
   });
 

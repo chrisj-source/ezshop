@@ -15,6 +15,7 @@ import { registerPlatform } from './routes/platform';
 import { registerBoard } from './routes/board';
 import { registerRepairOrders } from './routes/ro';
 import { registerShopConfig } from './routes/config';
+import { registerStatuses } from './routes/statuses';
 import { registerNotifications } from './routes/notifications';
 import { registerDocuments } from './routes/documents';
 import { registerParts } from './routes/parts';
@@ -46,6 +47,8 @@ import { startDemoReset } from './lib/demo';
 import { startMentionReminders } from './jobs/mentions';
 import { startLeadChase } from './jobs/leadchase';
 import { startFunnelHolds } from './jobs/funnel-holds';
+import { registerExtInvoices } from './routes/extinvoices';
+import { startInvoiceSync } from './lib/extinvoices';
 import { closeQueue, startWorker } from './queue';
 import { makeDerivatives } from './jobs/derivatives';
 import { prunePageCache } from './jobs/page-cache';
@@ -80,6 +83,8 @@ async function main(): Promise<void> {
   await registerBoard(app);
   await registerRepairOrders(app);
   await registerShopConfig(app);
+  /* Statuses a shop adds itself, and support adding one for them. */
+  await registerStatuses(app);
   await registerNotifications(app);
   await registerDocuments(app);
   await registerParts(app);
@@ -117,6 +122,8 @@ async function main(): Promise<void> {
   await registerSms(app);
   /* Locations: a parent shop and the shops under it, plus per-shop tax. */
   await registerLocations(app);
+  /* A shop's own invoicing database, read hourly (switched on per shop). */
+  await registerExtInvoices(app);
 
   app.get('/api/health', async () => {
     const [r] = await master().query('SELECT 1 AS ok');
@@ -227,6 +234,9 @@ async function main(): Promise<void> {
   /* Website requests holding a slot nobody answered, and holds the shop's own
      hours no longer cover. Quarter-hourly. */
   startFunnelHolds();
+
+  /* Generated / sent / paid from each switched-on shop's invoicing database. Hourly. */
+  startInvoiceSync(app.log);
 
   /* Rendered PDF pages nobody has opened in a month. */
   const pageSweep = setInterval(() => {

@@ -413,6 +413,13 @@
         /* Picked up to paid — A/R, and only for the people who carry it. */
         (!paid && r.ar_days != null
           ? '<span class="csub" style="margin-top:2px">' + r.ar_days + 'd owed</span>'
+          : '') +
+        /* The invoicing tool's own stage, where the shop has it read. Kept apart
+           from Paid above, which is the CRM's payments on the file. */
+        (r.invoice !== undefined
+          ? '<span class="csub" style="margin-top:2px" title="From the invoicing tool">' +
+              (r.invoice ? 'Invoice ' + ({ generated: 'generated', sent: 'sent', paid: 'paid' }[r.invoice.stage] || r.invoice.stage) : 'No invoice') +
+            '</span>'
           : '') + '</div>' +
       '<div class="cdate">' + short(r.close_date) + ' <span class="pen">✎</span></div>' +
     '</div>';

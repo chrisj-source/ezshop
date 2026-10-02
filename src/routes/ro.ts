@@ -659,6 +659,15 @@ export async function registerRepairOrders(app: FastifyInstance): Promise<void> 
     const vals: unknown[] = [];
     const changes: string[] = [];
 
+    /* Order is checked by calendar day in the shop's timezone, because the
+       drawer sends a plain date for completed and picked up and the date in
+       carries a time. Comparing instants refused a car in and out the same day:
+       "2026-10-02" read as midnight, before a 10:30 check-in. */
+    const tz = ctx.company!.timezone || 'America/Chicago';
+    const ymd = (d: Date) => new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
+    const parse = (raw: string, time: boolean) => new Date(time && raw.length === 10 ? raw + 'T12:00' : raw);
+    const opened = b.openedAt ? parse(b.openedAt, true) : new Date(before.opened_at as string);
+
     for (const [key, def] of Object.entries(map)) {
       if (b[key] === undefined) continue;
       const raw = b[key];
@@ -674,9 +683,18 @@ export async function registerRepairOrders(app: FastifyInstance): Promise<void> 
       }
 
       // Accept "2026-08-06" or "2026-08-06T14:30" from either input type.
-      const d = new Date(def.time && raw.length === 10 ? raw + 'T12:00' : raw);
+      let d = parse(raw, def.time);
       if (isNaN(d.getTime())) {
         return reply.code(400).send({ error: `${def.label} is not a valid date.` });
+      }
+
+      if (key === 'deliveredAt' || key === 'closedAt') {
+        if (!isNaN(opened.getTime()) && ymd(d) < ymd(opened)) {
+          return reply.code(400).send({ error: `${def.label} cannot be before the date in.` });
+        }
+        /* Same day, given as a plain date: stamp it no earlier than the car
+           came in, so cycle time is never negative. */
+        if (raw.length === 10 && d < opened) d = new Date(opened.getTime());
       }
 
       sets.push(`${def.col} = ?`);
@@ -687,19 +705,6 @@ export async function registerRepairOrders(app: FastifyInstance): Promise<void> 
     }
 
     if (!sets.length) return reply.code(400).send({ error: 'Nothing to change' });
-
-    // A picked-up date means the file is delivered; sanity-check the order.
-    const opened = b.openedAt ? new Date(b.openedAt) : new Date(before.opened_at as string);
-    for (const later of ['deliveredAt', 'closedAt'] as const) {
-      if (b[later]) {
-        const d = new Date(b[later] as string);
-        if (d < opened) {
-          return reply.code(400).send({
-            error: `${map[later].label} cannot be before the date in.`
-          });
-        }
-      }
-    }
 
     vals.push(id);
     await texec(cid, `UPDATE repair_orders SET ${sets.join(', ')} WHERE id = ?`, vals);

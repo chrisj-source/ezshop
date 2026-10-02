@@ -7,7 +7,8 @@ import { sendSms, smsReady, STOP_LINE } from './sms';
 /**
  * Status update texts. The shop writes the wording (Admin › Text updates); the
  * binding of each update to statuses and lanes is ours, keyed on slot ids and
- * lane keys so renaming a status never moves a text.
+ * lane keys so renaming a status never moves a text. A status the shop added
+ * (lib/statuses.ts) has its own row, bound by sms_templates.slot_id.
  *
  * Each update goes once per file — except Supplement Needed, which goes each
  * time a file goes back for one. A refused send counts as sent for that rule:
@@ -101,6 +102,12 @@ async function triggerFor(companyId: number, roId: number, toSlot: string,
   if (toSlot === 'est.sent') return (await approvals(companyId, roId)) === 0 ? 'est_sent' : null;
   if (toSlot === 'est.needed') return (await approvals(companyId, roId)) > 0 ? 'supp_needed' : null;
   if (SLOT_TRIGGER[toSlot]) return SLOT_TRIGGER[toSlot];
+  /* A status the shop added carries its own text, bound by slot. Switched on,
+     it takes precedence over the lane update the way a built-in slot does;
+     switched off, the lane update still goes as it would have. */
+  const own = await tqOne<RowDataPacket & { trigger_key: string }>(companyId,
+    'SELECT trigger_key FROM sms_templates WHERE slot_id = ? AND enabled = 1', [toSlot]).catch(() => null);
+  if (own) return own.trigger_key;
   if (toLane && toLane !== fromLane && LANE_TRIGGER[toLane]) return LANE_TRIGGER[toLane];
   return null;
 }

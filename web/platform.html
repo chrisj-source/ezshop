@@ -449,6 +449,8 @@
 
     h.push(smsSection(d.sms || {}));
     h.push('<div class="sec">Locations</div><div id="locSec" style="padding:0 18px"><div class="sb">Loading\u2026</div></div>');
+    h.push('<div class="sec">Invoicing database</div><div id="invSrc" style="padding:0 18px;max-width:640px"><div class="sb">Loading\u2026</div></div>');
+    h.push('<div class="sec">Statuses</div><div id="stSec" style="padding:0 18px;max-width:640px"><div class="sb">Loading\u2026</div></div>');
 
     h.push('<div class="sec">People</div><div style="padding:0 18px">');
     d.users.forEach(function (u) {
@@ -462,7 +464,8 @@
 
     wireSms(c, d.sms || {});
     loadLocations(c);
-
+    loadStatuses(c);
+    loadInvoiceSource(c);
     $('acSave').addEventListener('click', function () {
       var btn = this;
       btn.disabled = true;
@@ -596,6 +599,131 @@
       '<input type="checkbox" data-' + key + '="' + p.id + '"' + (on ? ' checked' : '') + '>' + esc(p.name) +
       (p.role === 'owner' ? ' <span style="font:500 9px var(--font);letter-spacing:.08em;text-transform:uppercase;color:var(--acc2)">owner</span>' : '') +
       '</label>';
+  }
+
+  /* Adding a status for a shop, as support. One shop only; the shop owns it afterwards. */
+  function loadStatuses(c, note) {
+    api('/api/platform/companies/' + c.id + '/statuses').then(function (d) {
+      var el = $('stSec'); if (!el || SEL !== c.id) return;
+      var added = d.statuses.filter(function (s) { return Number(s.is_custom); });
+      var owners = {};
+      d.statuses.forEach(function (s) { owners[s.owner_role] = 1; });
+      function lanesIn(gid) {
+        var k = {};
+        d.statuses.forEach(function (s) { if (s.group_id === gid && s.lane_key) k[s.lane_key] = 1; });
+        return d.lanes.filter(function (l) { return k[l.lane_key]; });
+      }
+      function laneSel(gid) {
+        var ls = lanesIn(gid);
+        return ls.length
+          ? '<label style="display:block;margin-bottom:10px"><span style="' + LBL + '">Lane</span><select id="stLane" style="' + INP + '">' +
+              ls.map(function (l) { return '<option value="' + esc(l.lane_key) + '">' + esc(l.label) + (Number(l.enabled) ? '' : ' (off)') + '</option>'; }).join('') +
+            '</select></label>'
+          : '';
+      }
+      var gid0 = d.groups[0] ? d.groups[0].group_id : '';
+      el.innerHTML =
+        (note ? '<div class="msg ok" style="display:block;margin-bottom:10px">' + esc(note) + '</div>' : '') +
+        '<div style="font:400 11px var(--font);color:var(--dim);margin-bottom:10px">' + d.statuses.length + ' statuses' +
+          (added.length ? ', ' + added.length + ' added: ' + added.map(function (s) { return esc(s.label); }).join(', ') : ', none added') + '.</div>' +
+        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:0 12px">' +
+          '<label style="display:block;margin-bottom:10px"><span style="' + LBL + '">Group</span><select id="stGroup" style="' + INP + '">' +
+            d.groups.map(function (g) { return '<option value="' + esc(g.group_id) + '">' + esc(g.label) + '</option>'; }).join('') +
+          '</select></label>' +
+          '<div id="stLaneWrap">' + laneSel(gid0) + '</div>' +
+          '<label style="display:block;margin-bottom:10px"><span style="' + LBL + '">Name in the shop</span><input id="stLabel" maxlength="120" style="' + INP + '"></label>' +
+          '<label style="display:block;margin-bottom:10px"><span style="' + LBL + '">Name shown to the customer</span><input id="stClabel" maxlength="120" placeholder="blank hides it" style="' + INP + '"></label>' +
+          '<label style="display:block;margin-bottom:10px"><span style="' + LBL + '">Kind</span><select id="stKind" style="' + INP + '">' +
+            ['queue', 'active', 'milestone', 'complete'].map(function (k) { return '<option>' + k + '</option>'; }).join('') +
+          '</select></label>' +
+          '<label style="display:block;margin-bottom:10px"><span style="' + LBL + '">Owner role</span><input id="stOwner" list="stOwners" style="' + INP + '">' +
+            '<datalist id="stOwners">' + Object.keys(owners).sort().map(function (o) { return '<option value="' + esc(o) + '">'; }).join('') + '</datalist></label>' +
+        '</div>' +
+        '<div style="display:flex;gap:10px;align-items:center">' +
+          '<button class="btn" id="stAdd" style="border:1px solid var(--acc);color:var(--acc);padding:5px 11px">Add status</button>' +
+          '<div style="font:400 11px var(--font);color:var(--dim)">Goes at the end of the group, shown, with its text off. The shop reorders, hides and words it from Admin.</div>' +
+        '</div>';
+
+      $('stGroup').addEventListener('change', function () { $('stLaneWrap').innerHTML = laneSel($('stGroup').value); });
+      $('stAdd').addEventListener('click', function () {
+        var btn = this;
+        var body = {
+          groupId: $('stGroup').value, laneKey: $('stLane') ? $('stLane').value : null,
+          label: $('stLabel').value.trim(), customerLabel: $('stClabel').value.trim() || null,
+          kind: $('stKind').value, ownerRole: $('stOwner').value.trim()
+        };
+        btn.disabled = true;
+        api('/api/platform/companies/' + c.id + '/statuses', { method: 'POST', body: JSON.stringify(body) })
+          .then(function () { loadStatuses(c, 'Added ' + body.label + ' to ' + c.name + '.'); })
+          .catch(function (e) { btn.disabled = false; showErr(e); });
+      });
+    }).catch(function (e) {
+      var el = $('stSec'); if (el) el.innerHTML = '<div class="sb">' + esc(e.message) + '</div>';
+    });
+  }
+
+  /* The shop's own invoicing database, read hourly. Needs the External invoices
+     feature on above; the shop's owner can also set it from Admin. */
+  function loadInvoiceSource(c, note) {
+    api('/api/platform/companies/' + c.id + '/invoice-source').then(function (s) {
+      var el = $('invSrc'); if (!el || SEL !== c.id) return;
+      if (!s.featureOn && !s.configured) {
+        el.innerHTML = '<div class="sb">Switch <strong style="color:var(--text)">External invoices</strong> on under Features to set this up.</div>';
+        return;
+      }
+      function f(id, label, v, extra) {
+        return '<label style="display:block;margin-bottom:10px"><span style="' + LBL + '">' + label + '</span>' +
+          '<input id="' + id + '" value="' + esc(v == null ? '' : String(v)) + '" style="' + INP + '" ' + (extra || '') + '></label>';
+      }
+      var state = !s.configured ? 'Not set up'
+        : s.lastError ? 'Last read failed: ' + s.lastError
+        : s.lastOkAt ? 'Last read ' + new Date(String(s.lastOkAt).replace(' ', 'T')).toLocaleString() + ' \u00b7 ' + (s.lastCount || 0) + ' changed'
+        : 'Saved, not read yet';
+      el.innerHTML =
+        (note ? '<div class="msg ' + note.k + '" style="display:block;margin-bottom:10px">' + esc(note.t) + '</div>' : '') +
+        '<div style="font:400 11px var(--font);color:' + (s.lastError ? 'var(--stopped)' : 'var(--dim)') + ';margin-bottom:10px">' + esc(state) +
+          (s.featureOn ? '' : ' \u00b7 feature is off, so nothing is read') + '</div>' +
+        '<div style="display:grid;grid-template-columns:2fr 1fr;gap:0 12px">' +
+          f('ivHost', 'Host', s.host, 'spellcheck="false"') + f('ivPort', 'Port', s.port || 3306) +
+          f('ivDb', 'Database', s.dbName, 'spellcheck="false"') + f('ivCo', 'Company number in the tool', s.toolCompanyId) +
+          f('ivUser', 'Read-only login', s.dbUser, 'autocomplete="off" spellcheck="false"') +
+          '<label style="display:block;margin-bottom:10px"><span style="' + LBL + '">Password' + (s.configured ? ' \u2014 blank keeps it' : '') + '</span>' +
+            '<input id="ivPw" type="password" autocomplete="new-password" style="' + INP + '"></label>' +
+        '</div>' +
+        '<label style="display:flex;gap:7px;align-items:center;font:400 11.5px var(--font);color:var(--muted);margin-bottom:10px">' +
+          '<input type="checkbox" id="ivTls"' + (s.configured && !s.useTls ? '' : ' checked') + '> TLS</label>' +
+        '<div style="display:flex;gap:8px;flex-wrap:wrap">' +
+          '<button class="btn" id="ivSave" style="border:1px solid var(--acc);color:var(--acc);padding:5px 11px">Save and test</button>' +
+          (s.configured ? '<button class="btn" id="ivSync" style="border:1px solid var(--line);color:var(--muted);padding:5px 11px">Read now</button>' +
+            '<button class="btn" id="ivRm" style="border:1px solid var(--stopped);color:var(--stopped);padding:5px 11px">Remove</button>' : '') +
+        '</div>' +
+        '<div style="font:400 11px/1.6 var(--font);color:var(--dim);margin-top:10px">Give the login SELECT on <code>invoices</code>, <code>payments</code>, <code>clients</code>, <code>profiles</code> and <code>companies</code> only, and allow it from this server\u2019s IP. A location has its own connection.</div>';
+
+      $('ivSave').addEventListener('click', function () {
+        var b = this; b.disabled = true;
+        api('/api/platform/companies/' + c.id + '/invoice-source', { method: 'PUT', body: JSON.stringify({
+          host: $('ivHost').value.trim(), port: Number($('ivPort').value) || 3306, dbName: $('ivDb').value.trim(),
+          toolCompanyId: Number($('ivCo').value), dbUser: $('ivUser').value.trim(),
+          password: $('ivPw').value || undefined, useTls: $('ivTls').checked
+        }) }).then(function (r) {
+          loadInvoiceSource(c, r.test && r.test.error ? { k: 'err', t: 'Saved, but the test failed: ' + r.test.error }
+            : { k: 'ok', t: 'Connected to ' + r.test.company + ' \u2014 ' + r.test.invoices + ' invoices' + (r.test.hasSent ? '.' : '. No sent_at column yet \u2014 run migrate-2026-08e-sent.sql on that database.') });
+        }).catch(function (e) { b.disabled = false; showErr(e); });
+      });
+      var sy = $('ivSync');
+      if (sy) sy.addEventListener('click', function () {
+        sy.disabled = true;
+        api('/api/platform/companies/' + c.id + '/invoice-source/sync', { method: 'POST' })
+          .then(function (r) { loadInvoiceSource(c, { k: 'ok', t: r.read + ' invoices read, ' + r.matched + ' tied to a file.' }); })
+          .catch(function (e) { loadInvoiceSource(c, { k: 'err', t: e.message }); });
+      });
+      var rm = $('ivRm');
+      if (rm) rm.addEventListener('click', function () {
+        if (!confirm('Remove ' + c.name + '\u2019s invoicing connection? Invoices already read stay on the files.')) return;
+        api('/api/platform/companies/' + c.id + '/invoice-source', { method: 'DELETE' })
+          .then(function () { loadInvoiceSource(c); }).catch(showErr);
+      });
+    }).catch(function (e) { var el = $('invSrc'); if (el) el.innerHTML = '<div class="sb">' + esc(e.message) + '</div>'; });
   }
 
   function loadLocations(c) {

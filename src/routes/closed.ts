@@ -3,6 +3,7 @@ import { RowDataPacket } from 'mysql2/promise';
 import { tq, tqOne, texec, withTenantTx } from '../db/tenant';
 import { requireCompany, requireFeature } from '../middleware/context';
 import { scrubMoney } from '../permissions';
+import { stagesFor } from '../lib/extinvoices';
 import { correctTrigger, fireTrigger } from '../lib/pay';
 import { Basis, LABOR_TRADES, LaborEntry, Trade, priceEntry, saveCloseout } from '../lib/profit';
 
@@ -363,12 +364,16 @@ export async function registerClosed(app: FastifyInstance): Promise<void> {
     /* A/R is the owner's and accounting's business. Nobody else gets the column,
        and the figure never leaves the server for them. */
     const seesAr = ctx.caps.viewPayPlans;
+    const invStages = ctx.features.has('extinv')
+      ? await stagesFor(ctx.company!.id, rows.map(x => Number(x.id))) : null;
 
     return {
       from, to,
       seesAr,
+      extinv: !!invStages,
       rows: rows.map(r => scrubMoney({
         ...r,
+        invoice: invStages ? invStages.get(Number(r.id)) ?? null : undefined,
         paid: r.paid === 1,
         ar_days: seesAr ? r.ar_days : undefined
       }, ctx.caps)),

@@ -236,6 +236,27 @@ export function invalidateFeatures(companyId: number): void {
   featureCache.delete(companyId);
 }
 
+/**
+ * What a person may do at a shop other than the one they are signed in to —
+ * worked out the same way attachContext does it. Used when a write is offered
+ * across a location group, so the offer is only made where they could do it
+ * by signing in there.
+ */
+export async function capsAt(userId: number, companyId: number): Promise<Caps> {
+  const mem = await mqOne<RowDataPacket & { role: Role; status: string }>(
+    'SELECT role, status FROM memberships WHERE user_id = ? AND company_id = ?', [userId, companyId]);
+  if (!mem || mem.status !== 'active') return NO_CAPS;
+  const held = await mq<Array<RowDataPacket & { role_key: Role }>>(
+    'SELECT role_key FROM membership_roles WHERE user_id = ? AND company_id = ?', [userId, companyId]
+  ).catch(() => []);
+  const roles = sortRoles(held.length ? held.map(r => r.role_key) : [mem.role]);
+  const setting = await tqOne<RowDataPacket & { setting_value: string }>(
+    companyId, `SELECT setting_value FROM shop_settings WHERE setting_key = 'tech_sees_own_only'`
+  ).catch(() => null);
+  const defs = await roleDefs(companyId, setting?.setting_value !== '0');
+  return capsFromRows(roles, defs.roles, defs.caps);
+}
+
 /* ------------------------------------------------------------------ guards */
 
 export function requireUser(req: FastifyRequest, reply: FastifyReply): Ctx | null {

@@ -1409,6 +1409,9 @@
       ' not replied. A note on the file clears it.">&#9888; ' +
       (f.mentions > 1 ? f.mentions : '') + '</span>';
     if (f.roType === 'wholesale') out += '<span class="flag" style="color:var(--dim);border:1px solid var(--line)">WS</span>';
+    /* Invoice stage, read hourly from the shop's own invoicing database. The
+       least-advanced invoice on the file decides it. */
+    if (f.invoice) out += invFlag(f.invoice.stage, f.invoice.count);
     if (needsTech(f) && !f.totalLoss) out += '<span class="flag" style="color:var(--acc);border:1px solid var(--acc)" ' +
       'title="Nobody is on this file, or it has body or paint work with the other trade missing">Needs tech</span>';
 
@@ -3075,6 +3078,10 @@
     }
     /* Texts to and from the customer. The thread carries the number, so it is
        the customer-contact capability that shows it. */
+    if (ME.features.indexOf('extinv') >= 0) {
+      R.push('<div class="sec">Invoices</div>');
+      R.push('<div id="invSec"><div class="sub">Loading…</div></div>');
+    }
     if (ME.caps.viewCustomerContact) {
       R.push('<div class="sec">Customer communication</div>');
       R.push('<div id="smsSec"><div class="sub">Loading…</div></div>');
@@ -3749,6 +3756,86 @@
       });
     }
     if (ME.caps.viewCustomerContact) loadSms(id);
+    if (ME.features.indexOf('extinv') >= 0) loadInvoices(id);
+  }
+
+  /* ============================================ invoices (external) */
+
+  var INV_STAGE = {
+    generated: { t: 'Generated', c: 'var(--muted)' },
+    sent: { t: 'Sent', c: 'var(--acc)' },
+    paid: { t: 'Paid', c: 'var(--done)' },
+    void: { t: 'Void', c: 'var(--dim)' }
+  };
+
+  function invFlag(stage, count) {
+    var s = INV_STAGE[stage] || INV_STAGE.generated;
+    return '<span class="flag" style="color:' + s.c + ';border:1px solid ' + s.c + '" title="Invoice ' +
+      s.t.toLowerCase() + (count > 1 ? ' (the least-advanced of ' + count + ')' : '') + '">' +
+      (stage === 'paid' ? 'Paid' : stage === 'sent' ? 'Inv sent' : 'Invoiced') + '</span>';
+  }
+
+  function invDay(v) {
+    if (!v) return '\u2014';
+    var d = new Date(String(v).length === 10 ? v + 'T12:00' : String(v).replace(' ', 'T'));
+    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  }
+
+  function loadInvoices(id) {
+    api('/api/ro/' + id + '/invoices').then(function (d) {
+      if (OPEN !== id) return;
+      var el = $('invSec'); if (!el) return;
+      var h = [];
+      if (!d.invoices.length) {
+        h.push('<div class="sub">No invoice in the invoicing tool ties to this file yet.</div>');
+      }
+      d.invoices.forEach(function (v) {
+        var s = INV_STAGE[v.stage] || INV_STAGE.generated;
+        h.push('<div style="padding:8px 0;border-top:1px solid var(--whisper)">' +
+          '<div class="row" style="gap:8px;align-items:baseline">' +
+            '<span style="font:500 12px var(--font)">' + esc(v.number) + '</span>' +
+            '<span class="flag" style="color:' + s.c + ';border:1px solid ' + s.c + '">' + s.t + '</span>' +
+            (v.totalCents != null ? '<span style="margin-left:auto;font:400 11.5px var(--font);font-variant-numeric:tabular-nums">' +
+              money(v.totalCents) + '</span>' : '') +
+          '</div>' +
+          '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:6px">' +
+            [['Generated', v.generatedAt], ['Sent', v.sentAt], ['Paid', v.paidAt]].map(function (x) {
+              return '<div><div class="sub" style="text-transform:none;letter-spacing:0">' + x[0] + '</div>' +
+                '<div style="font:400 11.5px var(--font);color:' + (x[1] ? 'var(--text)' : 'var(--dim)') + '">' + invDay(x[1]) + '</div></div>';
+            }).join('') +
+          '</div>' +
+          '<div class="sub" style="text-transform:none;letter-spacing:0;margin-top:4px">' +
+            esc([v.profile, v.client].filter(Boolean).join(' \u00b7 ')) +
+            (v.manual ? ' \u00b7 tied by hand <a href="#" data-unlink="' + v.id + '">untie</a>' : '') + '</div>' +
+          '</div>');
+      });
+      if (ME.caps.money) {
+        h.push('<div class="row" style="gap:6px;margin-top:8px">' +
+          '<input id="invNum" placeholder="Invoice number" style="flex:1;min-width:0;background:transparent;border:1px solid var(--line);border-radius:4px;color:var(--text);font:400 11.5px var(--font);padding:5px 8px">' +
+          '<button class="btn btn-ghost" id="invLink">Tie to this file</button></div>');
+      }
+      h.push('<div class="sub" style="text-transform:none;letter-spacing:0;margin-top:6px">Read from the invoicing tool hourly' +
+        (d.lastOkAt ? ', last at ' + esc(smsWhen(String(d.lastOkAt).replace(' ', 'T'))) : '') + '. Sent and paid are marked there.</div>' +
+        '<div class="sub" id="invMsg" style="text-transform:none;letter-spacing:0"></div>');
+      el.innerHTML = h.join('');
+      var btn = $('invLink');
+      if (btn) btn.addEventListener('click', function () {
+        var n = $('invNum').value.trim(); if (!n) return;
+        btn.disabled = true;
+        api('/api/ro/' + id + '/invoices/link', { method: 'POST', body: JSON.stringify({ number: n }) })
+          .then(function () { loadInvoices(id); })
+          .catch(function (e) { btn.disabled = false; $('invMsg').textContent = e.message; $('invMsg').style.color = 'var(--stopped)'; });
+      });
+      Array.prototype.forEach.call(el.querySelectorAll('[data-unlink]'), function (a) {
+        a.addEventListener('click', function (e) {
+          e.preventDefault();
+          api('/api/ro/' + id + '/invoices/link', { method: 'POST', body: JSON.stringify({ unlink: Number(a.dataset.unlink) }) })
+            .then(function () { loadInvoices(id); });
+        });
+      });
+    }).catch(function (e) {
+      var el = $('invSec'); if (el) el.innerHTML = '<div class="sub">' + esc(e.message) + '</div>';
+    });
   }
 
   /* ============================================ customer communication */

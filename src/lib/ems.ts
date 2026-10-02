@@ -115,6 +115,33 @@ export type FileSet = Map<string, Buffer>;
 /** Files in an estimate folder that are not EMS tables. */
 const NOT_A_TABLE = new Set(['lock', 'log', 'bak', 'tmp', 'ini', 'db']);
 
+/**
+ * Split one upload into estimate sets. Every file of an EMS set shares the
+ * estimate's base name (`a9062516.env`, `a9062516.veh` …), and CCC's own
+ * `-hash` duplicates share it too once the suffix is stripped — so the base is
+ * the set. Dropping three vehicles' exports at once gives three sets, each
+ * parsed and imported on its own. Before this the whole drop went to one
+ * parse, which took the first .env, .veh and .ad1 it met and mixed vehicles.
+ *
+ * Files that do not look like an EMS table are returned as `stray`.
+ */
+export function splitSets(files: Array<{ filename: string; buffer: Buffer }>): {
+  sets: Array<{ base: string; files: Array<{ filename: string; buffer: Buffer }> }>;
+  stray: string[];
+} {
+  const by = new Map<string, { base: string; files: Array<{ filename: string; buffer: Buffer }> }>();
+  const stray: string[] = [];
+  for (const f of files) {
+    const m = /^(.*?)(?:-[0-9a-f]{4,})?\.([a-z0-9]{2,4})$/i.exec(f.filename.trim());
+    if (!m) { stray.push(f.filename); continue; }
+    if (NOT_A_TABLE.has(m[2].toLowerCase())) continue;
+    const key = m[1].toLowerCase();
+    if (!by.has(key)) by.set(key, { base: m[1], files: [] });
+    by.get(key)!.files.push(f);
+  }
+  return { sets: [...by.values()], stray };
+}
+
 /** Group uploaded files by their EMS extension, ignoring byte-identical copies. */
 export function groupSet(files: Array<{ filename: string; buffer: Buffer }>): {
   set: FileSet; envelopeName: string | null; skipped: string[];
@@ -141,7 +168,7 @@ export function groupSet(files: Array<{ filename: string; buffer: Buffer }>): {
     if (set.has(ext)) {
       // A second copy of the same table under a -hash name is CCC's own
       // duplicate and expected. A different estimate's table is not.
-      if (bases.get(ext) !== base) skipped.push(f.filename);
+      if ((bases.get(ext) ?? '').toLowerCase() !== base.toLowerCase()) skipped.push(f.filename);
       continue;
     }
     set.set(ext, f.buffer);

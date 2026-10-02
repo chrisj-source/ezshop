@@ -22,7 +22,7 @@ export async function registerShopConfig(app: FastifyInstance): Promise<void> {
       tq<RowDataPacket[]>(cid, `SELECT s.slot_id, s.group_id, s.lane_key, s.label, s.customer_label, s.kind,
                                        s.owner_role, s.age_yellow_hours, s.age_red_hours, s.follow_up_hours,
                                        s.module_tags, s.default_next, s.counts_toward_cycle, s.is_terminal,
-                                       s.notify_customer, s.visible, s.sort_order
+                                       s.notify_customer, s.visible, s.sort_order, s.is_custom
                                 FROM statuses s
                                 JOIN status_groups g ON g.group_id = s.group_id
                                 ORDER BY g.sort_order, s.sort_order`),
@@ -93,6 +93,11 @@ export async function registerShopConfig(app: FastifyInstance): Promise<void> {
     vals.push(slot);
 
     await texec(ctx.company!.id, `UPDATE statuses SET ${sets.join(', ')} WHERE slot_id = ?`, vals);
+    /* An added status's text is listed under the status's name. */
+    if (typeof b.label === 'string' && b.label.trim()) {
+      await texec(ctx.company!.id, 'UPDATE sms_templates SET label = ? WHERE slot_id = ?',
+        [b.label.trim().slice(0, 80), slot]).catch(() => undefined);
+    }
     await texec(ctx.company!.id,
       `INSERT INTO audit_log (user_id, user_name, entity, action, detail) VALUES (?, ?, 'status', 'updated', ?)`,
       [ctx.user.id, ctx.user.name, JSON.stringify({ slot, ...b })]

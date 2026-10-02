@@ -4,6 +4,7 @@ import { tq } from '../db/tenant';
 import { requireCompany, requireFeature } from '../middleware/context';
 import { scrubCustomer, scrubMoney } from '../permissions';
 import { openMentionCounts } from '../lib/mentions';
+import { stagesFor } from '../lib/extinvoices';
 
 interface BoardRow extends RowDataPacket {
   id: number; ro_number: string; status_slot: string | null; status_since: Date | null;
@@ -164,6 +165,9 @@ export async function registerBoard(app: FastifyInstance): Promise<void> {
     /* Who is still waiting on an answer, per file. One query for the page
        rather than one per row. */
     const mentionCounts = await openMentionCounts(ctx.company!.id, rows.map(x => Number(x.id)));
+    /* Invoice stage from the shop's own invoicing database, where it is read. */
+    const invStages = ctx.features.has('extinv')
+      ? await stagesFor(ctx.company!.id, rows.map(x => Number(x.id))) : new Map();
 
     const now = Date.now();
     const files = rows.map(r => {
@@ -208,6 +212,7 @@ export async function registerBoard(app: FastifyInstance): Promise<void> {
            red triangle; the count matters because a file with five unanswered
            tags should not look like one with a single tag. */
         mentions: mentionCounts.get(Number(r.id)) ?? 0,
+        invoice: invStages.get(Number(r.id)) ?? null,
         totalLossAt: r.total_loss_at,
         totalLossNote: r.total_loss_note,
         kind: r.kind,

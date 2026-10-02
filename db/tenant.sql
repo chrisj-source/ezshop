@@ -105,6 +105,9 @@ CREATE TABLE statuses (
   notify_customer     TINYINT(1)   NOT NULL DEFAULT 0,
   visible             TINYINT(1)   NOT NULL DEFAULT 1,
   sort_order          INT          NOT NULL DEFAULT 0,
+  is_custom           TINYINT(1)   NOT NULL DEFAULT 0 COMMENT 'added by the shop, 038',
+  created_by          BIGINT UNSIGNED NULL,
+  created_at          DATETIME     NULL,
   KEY ix_status_group (group_id, sort_order),
   KEY ix_status_owner (owner_role),
   CONSTRAINT fk_status_group FOREIGN KEY (group_id) REFERENCES status_groups(group_id),
@@ -1499,3 +1502,26 @@ INSERT INTO funnel_consent (id, label, body) VALUES (1,
   'Text me about my repair.',
   'I agree to receive text messages from ______ at the number provided, including repair updates, estimate and appointment notifications, and occasional service messages. Consent is not a condition of purchase. Message frequency varies. Message and data rates may apply. Reply STOP to opt out or HELP for help.')
 ON DUPLICATE KEY UPDATE id = id;
+
+CREATE TABLE IF NOT EXISTS external_invoices (
+  ext_id          INT UNSIGNED  NOT NULL PRIMARY KEY COMMENT 'invoices.id in the tool',
+  number          VARCHAR(32)   NOT NULL,
+  profile         VARCHAR(40)   NULL,
+  client_name     VARCHAR(160)  NULL,
+  vehicle         VARCHAR(160)  NULL,
+  vin             VARCHAR(24)   NULL,
+  stock           VARCHAR(40)   NULL,
+  invoice_date    DATE          NULL,
+  due_date        DATE          NULL,
+  total_cents     BIGINT        NOT NULL DEFAULT 0,
+  paid_cents      BIGINT        NOT NULL DEFAULT 0,
+  status          VARCHAR(8)    NOT NULL COMMENT 'open, paid or void, as the tool has it',
+  generated_at    DATETIME      NULL,
+  sent_at         DATETIME      NULL,
+  paid_at         DATE          NULL COMMENT 'last payment received',
+  ro_id           BIGINT UNSIGNED NULL,
+  match_how       VARCHAR(12)   NULL COMMENT 'vin, ro, manual',
+  synced_at       DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  KEY ix_extinv_ro (ro_id),
+  KEY ix_extinv_number (number)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
