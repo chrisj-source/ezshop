@@ -2476,9 +2476,29 @@
       /* The account is shared by every file on it, so it is picked, never
          typed. Picking moves this file and its car; nothing about the account
          itself changes here. */
+      /* The current account is always an option, so the picker can never be
+         blank. The list normally rides on the drawer; if it did not arrive, it
+         is fetched the way check-in fetches it. */
+      var acctOpts = (d.accounts || []).map(function (a) { return [String(a.id), a.name]; });
+      if (!acctOpts.some(function (o) { return o[0] === String(r.client_id); })) {
+        acctOpts.unshift([String(r.client_id), r.customer_name || 'Current account']);
+      }
+      if (!(d.accounts || []).length) {
+        api('/api/clients?kind=wholesale').then(function (res) {
+          var sel = $('e_clientId');
+          if (!sel || String(OPEN) !== String(r.id)) return;
+          var cur = sel.value;
+          (res.clients || []).forEach(function (a) {
+            if (a.active === 0 || String(a.id) === String(r.client_id)) return;
+            var o = document.createElement('option');
+            o.value = String(a.id); o.textContent = a.name;
+            sel.appendChild(o);
+          });
+          sel.value = cur;
+        }).catch(function () {});
+      }
       L.push('<div class="fieldset">' +
-        esel('clientId', 'Wholesale account', String(r.client_id),
-          (d.accounts || []).map(function (a) { return [String(a.id), a.name]; })) +
+        esel('clientId', 'Wholesale account', String(r.client_id), acctOpts) +
         (seesContact
           ? f2('Phone', r.customer_phone, 1) + f2('Email', r.customer_email)
           : '') +
