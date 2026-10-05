@@ -761,6 +761,8 @@ export async function registerRepairOrders(app: FastifyInstance): Promise<void> 
       `SELECT r.id, r.client_id, r.vehicle_id, r.insurer_client_id, r.ro_number, r.voided_at,
               r.claim_number, r.policy_number, r.date_of_loss, r.adjuster, r.ro_type,
               c.name AS customer_name, c.phone AS customer_phone, c.email AS customer_email,
+              c.address AS customer_address, c.city AS customer_city, c.state AS customer_state,
+              c.zip AS customer_zip, c.kind AS customer_kind,
               ins.name AS insurer_name,
               v.year, v.make, v.model, v.color, v.vin, v.plate, v.plate_state, v.mileage
        FROM repair_orders r
@@ -804,7 +806,52 @@ export async function registerRepairOrders(app: FastifyInstance): Promise<void> 
       const mayEditContact = ctx.caps.editCustomerContact;
       const CONTACT_COLS = new Set(['phone', 'email', 'address', 'city', 'state', 'zip']);
 
+      /* A wholesale account is shared by every file billed to it. Editing the
+         customer block on one file used to UPDATE that shared row, so renaming
+         one One Legacy car renamed the account on all of them. On an account
+         file the block now moves THIS file to another existing account, matched
+         by name — the same rule as creating one — and never writes the account.
+         Its details are edited in Clients. */
+      const onAccount = !!ro.client_id && ro.customer_kind && ro.customer_kind !== 'retail';
+      if (onAccount) {
+        const same = (a: unknown, z: unknown): boolean =>
+          (a === null || a === undefined || a === '' ? null : String(a)) ===
+          (z === null || z === undefined || z === '' ? null : String(z));
+        for (const [key, col, , len] of custCols) {
+          if (b[key] === undefined || col === 'name') continue;
+          if (!same(ro[`customer_${col}`], str(b[key], len))) {
+            throw Object.assign(new Error(
+              `${ro.customer_name} is a wholesale account shared by its other files. ` +
+              'Change its details in Clients, or pick a different account for this file.'
+            ), { statusCode: 409, field: key });
+          }
+        }
+        const name = b.customerName === undefined ? null : str(b.customerName, 190);
+        if (b.customerName !== undefined && !name) {
+          throw Object.assign(new Error('A customer needs a name.'), { statusCode: 400 });
+        }
+        if (name && !same(ro.customer_name, name)) {
+          const [hit] = await c.query<RowDataPacket[]>(
+            `SELECT id, name FROM clients
+              WHERE kind = 'wholesale' AND active = 1 AND name = ? LIMIT 1`, [name]);
+          if (!hit.length) {
+            throw Object.assign(new Error(
+              `No wholesale account is called "${name}". Add it in Clients first — ` +
+              `renaming here would rename ${ro.customer_name} on every one of its files.`
+            ), { statusCode: 400, field: 'customerName' });
+          }
+          await c.query('UPDATE repair_orders SET client_id = ? WHERE id = ?', [hit[0].id, id]);
+          if (ro.vehicle_id) {
+            await c.query('UPDATE vehicles SET client_id = ? WHERE id = ? AND client_id = ?',
+              [hit[0].id, ro.vehicle_id, ro.client_id]);
+          }
+          changes.push(`Moved from ${ro.customer_name} to ${hit[0].name as string}`);
+          ro.client_id = hit[0].id;
+        }
+      }
+
       for (const [key, col, label, len] of custCols) {
+        if (onAccount) break;
         if (b[key] === undefined) continue;
         if (CONTACT_COLS.has(col) && !mayEditContact) {
           throw Object.assign(
