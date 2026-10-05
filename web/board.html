@@ -2472,7 +2472,19 @@
         'record — it was opened without a name. Type the name in and save, and the ' +
         'record is created and attached to the file.</div>');
     }
-    if (canEdit) {
+    if (canEdit && r.customer_kind === 'wholesale' && r.client_id) {
+      /* The account is shared by every file on it, so it is picked, never
+         typed. Picking moves this file and its car; nothing about the account
+         itself changes here. */
+      L.push('<div class="fieldset">' +
+        esel('clientId', 'Wholesale account', String(r.client_id),
+          (d.accounts || []).map(function (a) { return [String(a.id), a.name]; })) +
+        (seesContact
+          ? f2('Phone', r.customer_phone, 1) + f2('Email', r.customer_email)
+          : '') +
+        '</div>' + saveRow('cust', 'Moves this file to the picked account. ' +
+          'The account\'s own name and details are changed in Clients.'));
+    } else if (canEdit) {
       L.push('<div class="fieldset">' +
         ef('customerName', 'Name', r.customer_name) +
         (seesContact
