@@ -2125,14 +2125,43 @@
     detail('Shop', '<div class="drow"><div class="dk">Shop type</div>' +
       '<div class="dv">' + esc(CFG.company.shopType) + '</div></div>' +
       '<div class="drow"><div class="dk">Timezone</div>' +
-      '<div class="dv">' + esc(CFG.company.timezone) + '</div></div>' +
+      '<div class="dv">' + tzControl() + '</div></div>' +
       '<div class="drow"><div class="dk">Statuses</div>' +
       '<div class="dv">' + CFG.statuses.length + '</div></div>' +
       '<div class="drow"><div class="dk">Lanes</div>' +
       '<div class="dv">' + CFG.lanes.filter(function (l) { return l.enabled; }).length +
       ' on of ' + CFG.lanes.length + '</div></div>' +
       '<div class="sub" style="margin-top:12px">Shop type is set at the platform level, not here. ' +
-      'It decides which status template the shop started from.</div>');
+      'It decides which status template the shop started from.</div>' +
+      '<div class="sub" style="margin-top:6px">The timezone decides what time shop hours, the ' +
+      'scheduler and the booking form mean. Appointments already booked keep their moment.</div>');
+
+    if ($('tzSave')) $('tzSave').addEventListener('click', function () {
+      var tz = $('tzSel').value;
+      if (tz === CFG.company.timezone) return;
+      if (!confirm('Change the shop timezone to ' + tz + '? Shop hours and new bookings will read in it from now on.')) return;
+      api('/api/shop/timezone', { method: 'PUT', body: JSON.stringify({ timezone: tz }) })
+        .then(function () { say('Timezone saved.', 'ok'); return reloadConfig(); })
+        .catch(function (e) { say(e.message, 'err'); });
+    });
+  }
+
+  function tzControl() {
+    var cur = CFG.company.timezone || 'America/Chicago';
+    if (!(ME.role === 'owner' || ME.impersonating)) return esc(cur);
+    var us = [
+      ['America/New_York', 'Eastern'], ['America/Chicago', 'Central'],
+      ['America/Denver', 'Mountain'], ['America/Phoenix', 'Arizona (no DST)'],
+      ['America/Los_Angeles', 'Pacific'], ['America/Anchorage', 'Alaska'],
+      ['Pacific/Honolulu', 'Hawaii'], ['America/Puerto_Rico', 'Atlantic (Puerto Rico)']
+    ];
+    if (!us.some(function (z) { return z[0] === cur; })) us.unshift([cur, cur]);
+    return '<div class="row" style="gap:6px;align-items:center">' +
+      '<select id="tzSel">' + us.map(function (z) {
+        return '<option value="' + esc(z[0]) + '"' + (z[0] === cur ? ' selected' : '') + '>' +
+          esc(z[1] + ' \u00b7 ' + z[0]) + '</option>';
+      }).join('') + '</select>' +
+      '<button class="btn" id="tzSave" style="padding:4px 10px">Save</button></div>';
   }
 
   /** The Google Calendar card: connect, pick a calendar, disconnect. */

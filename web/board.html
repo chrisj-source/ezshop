@@ -1973,7 +1973,8 @@
           '<div style="display:flex;flex-direction:column;gap:6px;max-width:560px;' + (shown.length ? '' : 'margin:0 auto;') + 'text-align:left">' +
           f.map(function (r) {
             var state = r.voided_at ? 'Voided ' + day(r.voided_at)
-              : (r.close_date || r.closed_at) ? 'Closed ' + day(r.close_date || r.closed_at)
+              : r.close_date ? 'Closed ' + day(r.close_date)
+              : r.closed_at ? 'Picked up ' + day(r.closed_at) + ' · not closed'
               : (r.status_label || 'Open');
             return '<button class="btn btn-ghost" data-findro="' + r.id + '" style="display:flex;justify-content:space-between;gap:12px;text-align:left">' +
               '<span><strong>RO ' + esc(r.ro_number) + '</strong> \u00b7 ' +

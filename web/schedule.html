@@ -225,6 +225,14 @@
   function iso(d) {
     return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
   }
+  /* A DATE column arrives as midnight UTC ("2026-10-07T00:00:00.000Z"). Read as a
+     local time that is the evening before anywhere west of UTC, so a plain date is
+     taken by its first ten characters and never passed through new Date(). */
+  function dayKey(v) { return String(v).slice(0, 10); }
+  function dayDate(v) {
+    var p = dayKey(v).split('-');
+    return new Date(+p[0], +p[1] - 1, +p[2]);
+  }
   function mondayOf(d) {
     var x = new Date(d);
     x.setHours(12, 0, 0, 0);
@@ -353,7 +361,7 @@
 
       var mine = shown.filter(function (a) { return iso(wall(a.starts_at)) === key; });
       var off = (DATA.timeOff || []).filter(function (o) {
-        return iso(new Date(o.starts_on)) <= key && iso(new Date(o.ends_on)) >= key;
+        return dayKey(o.starts_on) <= key && dayKey(o.ends_on) >= key;
       });
       var used = DATA.used[key] || {};
       var isToday = key === todayIso;
@@ -749,38 +757,45 @@
    * week saying someone is not available. Owner only, and a clash with work
    * already booked warns rather than refuses.
    */
-  function openTimeOff() {
+  var OFF_EDIT = null;
+  function openTimeOff(edit) {
+    OFF_EDIT = edit || null;
+    var e = OFF_EDIT;
     show('Time off', 'Block out days or hours an employee is not available');
     $('dBody').innerHTML = '<div class="empty">Loading…</div>';
 
     api('/api/time-off?days=120').then(function (d) {
-      var h = ['<div class="sec">Block time out</div>'];
+      var h = ['<div class="sec">' + (e ? 'Change this block' : 'Block time out') + '</div>'];
 
       h.push('<div class="grid2">' +
         '<div><label class="fl">Who</label><select id="oWho" style="width:100%">' +
         STAFF.map(function (st) {
-          return '<option value="' + st.user_id + '">' + esc(st.display_name) + '</option>';
+          return '<option value="' + st.user_id + '"' +
+            (e && Number(e.user_id) === Number(st.user_id) ? ' selected' : '') + '>' +
+            esc(st.display_name) + '</option>';
         }).join('') + '</select></div>' +
         '<div><label class="fl">Reason</label>' +
-        '<input id="oReason" placeholder="Vacation, appointment, training" style="width:100%"></div>' +
+        '<input id="oReason" placeholder="Vacation, appointment, training" style="width:100%" value="' +
+        esc(e ? e.reason || '' : '') + '"></div>' +
         '<div><label class="fl">First day</label>' +
-        '<input type="date" id="oFrom" value="' + iso(new Date()) + '" style="width:100%"></div>' +
+        '<input type="date" id="oFrom" value="' + (e ? dayKey(e.starts_on) : iso(new Date())) + '" style="width:100%"></div>' +
         '<div><label class="fl">Last day</label>' +
-        '<input type="date" id="oTo" value="' + iso(new Date()) + '" style="width:100%"></div>' +
+        '<input type="date" id="oTo" value="' + (e ? dayKey(e.ends_on) : iso(new Date())) + '" style="width:100%"></div>' +
         '</div>');
 
       h.push('<label class="row" style="gap:7px;align-items:center;margin-top:12px">' +
-        '<input type="checkbox" id="oPart">' +
+        '<input type="checkbox" id="oPart"' + (e && e.start_time ? ' checked' : '') + '>' +
         '<span class="sub" style="text-transform:none;letter-spacing:0">Only part of the day</span>' +
         '</label>');
 
-      h.push('<div class="row" id="oHours" style="margin-top:9px" hidden>' +
-        '<input type="time" id="oStart" value="08:00">' +
+      h.push('<div class="row" id="oHours" style="margin-top:9px"' + (e && e.start_time ? '' : ' hidden') + '>' +
+        '<input type="time" id="oStart" value="' + (e && e.start_time ? String(e.start_time).slice(0, 5) : '08:00') + '">' +
         '<span class="sub">to</span>' +
-        '<input type="time" id="oEnd" value="12:00"></div>');
+        '<input type="time" id="oEnd" value="' + (e && e.end_time ? String(e.end_time).slice(0, 5) : '12:00') + '"></div>');
 
       h.push('<div class="row" style="margin-top:16px">' +
-        '<button class="btn btn-solid" id="oSave">Block this time</button>' +
+        '<button class="btn btn-solid" id="oSave">' + (e ? 'Save changes' : 'Block this time') + '</button>' +
+        (e ? '<button class="btn btn-ghost" id="oCancelEdit">Cancel</button>' : '') +
         '<span class="sub" style="flex:1;min-width:150px">A range of days, or hours within a day. ' +
         'Work already booked in the window is listed before anything is saved.</span></div>' +
         '<div class="msg" id="oMsg"></div>');
@@ -788,20 +803,32 @@
       h.push('<div class="sec">Blocked ahead</div>');
       if (!d.timeOff.length) h.push('<div class="sub">Nothing blocked in the next four months.</div>');
       d.timeOff.forEach(function (o) {
-        var span = iso(new Date(o.starts_on)) === iso(new Date(o.ends_on))
+        var span = dayKey(o.starts_on) === dayKey(o.ends_on)
           ? shortDay(o.starts_on)
           : shortDay(o.starts_on) + ' – ' + shortDay(o.ends_on);
-        h.push('<div class="offrow"><div style="flex:1;min-width:0">' +
+        h.push('<div class="offrow"' + (e && e.id === o.id ? ' style="opacity:.5"' : '') +
+          '><div style="flex:1;min-width:0">' +
           '<div style="font:400 12px var(--font)">' + esc(o.display_name) + ' · ' + esc(span) +
           (o.start_time ? ' · ' + String(o.start_time).slice(0, 5) + '–' +
             String(o.end_time || '').slice(0, 5) : ' · all day') + '</div>' +
           '<div class="sub">' + esc(o.reason || 'No reason given') +
           (o.created_name ? ' · set by ' + esc(o.created_name) : '') + '</div></div>' +
+          '<button class="btn btn-ghost" data-edit="' + o.id + '" ' +
+          'style="padding:4px 9px;font-size:10.5px">Edit</button>' +
           '<button class="btn btn-ghost" data-off="' + o.id + '" ' +
           'style="padding:4px 9px;font-size:10.5px">Remove</button></div>');
       });
 
       $('dBody').innerHTML = h.join('');
+      $('dBody').scrollTop = 0;
+
+      Array.prototype.forEach.call($('dBody').querySelectorAll('[data-edit]'), function (b) {
+        b.addEventListener('click', function () {
+          var o = d.timeOff.filter(function (x) { return String(x.id) === b.dataset.edit; })[0];
+          if (o) openTimeOff(o);
+        });
+      });
+      if ($('oCancelEdit')) $('oCancelEdit').addEventListener('click', function () { openTimeOff(); });
 
       $('oPart').addEventListener('change', function () {
         $('oHours').hidden = !this.checked;
@@ -831,8 +858,8 @@
     var part = $('oPart').checked;
     var msg = $('oMsg');
 
-    api('/api/time-off', {
-      method: 'POST',
+    api(OFF_EDIT ? '/api/time-off/' + OFF_EDIT.id : '/api/time-off', {
+      method: OFF_EDIT ? 'PATCH' : 'POST',
       body: JSON.stringify({
         userId: Number($('oWho').value),
         startsOn: $('oFrom').value,
@@ -864,7 +891,7 @@
   }
 
   function shortDay(v) {
-    return new Date(v).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    return dayDate(v).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
   }
 
   /* ----------------------------------------------------------- day limits */
@@ -958,7 +985,7 @@
   $('thisWeek').addEventListener('click', function () { FROM = iso(mondayOf(new Date())); load(); });
   $('bookBtn').addEventListener('click', function () { openBooking(iso(new Date())); });
   $('limitsBtn').addEventListener('click', openLimits);
-  $('offBtn').addEventListener('click', openTimeOff);
+  $('offBtn').addEventListener('click', function () { openTimeOff(); });
   $('scrim').addEventListener('click', closeDrawer);
   $('dClose').addEventListener('click', closeDrawer);
   document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeDrawer(); });

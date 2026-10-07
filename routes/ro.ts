@@ -231,10 +231,13 @@ export async function registerRepairOrders(app: FastifyInstance): Promise<void> 
 
         await c.query(
           `UPDATE repair_orders SET status_slot = ?, status_since = NOW(),
-             closed_at = IF(? = 1, NOW(), closed_at)
+             closed_at = IF(? = 1, NOW(), IF(close_date IS NULL, NULL, closed_at))
            WHERE id = ?`,
           [target.slot_id, target.is_terminal, id]
         );
+        /* The picked-up stamp belongs to the terminal status that set it. A file
+           moved back out of it, and never closed, is open again — leaving the
+           stamp made the board and search call it closed when nobody had. */
 
         await c.query(
           `INSERT INTO ro_status_history
