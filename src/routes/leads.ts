@@ -1030,7 +1030,7 @@ export async function registerLeads(app: FastifyInstance): Promise<void> {
         [roId, `Customer name changed from ${rename.from || '(blank)'} to ${rename.to}, to match lead ${lead.lead_number}.`,
          ctx.user.id, ctx.user.name]);
       await audit(cid, actorFrom(req), {
-        entity: 'client', entityId: rename.clientId, roId, action: 'client_renamed_from_lead', area: 'Customer',
+        entity: 'client', entityId: rename.clientId, roId, action: 'client_renamed_from_lead', area: 'Lead',
         label: `Name set from lead ${lead.lead_number}`,
         changes: [{ field: 'Name', from: rename.from, to: rename.to }]
       });

@@ -257,7 +257,7 @@ export async function registerSms(app: FastifyInstance): Promise<void> {
       await texec(cid, `INSERT INTO shop_settings (setting_key, setting_value) VALUES ('sms_staff_approval_on', ?)
         ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)`, [b.on ? '1' : '0']);
     }
-    await audit(cid, actorFrom(req), { entity: 'settings', action: 'staff_texts', area: 'Text updates',
+    await audit(cid, actorFrom(req), { entity: 'settings', action: 'staff_texts', area: 'Messages',
       label: 'Approval texts to staff changed', changes: [{ field: 'Approval text', from: null, to: b.on === undefined ? 'wording' : (b.on ? 'on' : 'off') }] });
     return { ok: true };
   });

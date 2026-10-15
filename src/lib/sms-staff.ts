@@ -63,7 +63,7 @@ export function fillStaff(body: string, f: { ro: string; vehicle: string; amount
 }
 
 export async function approvalText(cid: number, roId: number): Promise<void> {
-  if (!(await companyFeatures(cid)).has('sms') || !(await smsReady(cid))) return;
+  if (!(await companyFeatures(cid)).includes('sms') || !(await smsReady(cid))) return;
   const s = await approvalSettings(cid);
   if (!s.on) return;
   const ro = await tqOne<RowDataPacket>(cid, `
