@@ -1036,6 +1036,10 @@ CREATE TABLE lead_lanes (
   step2_hours     INT           NOT NULL DEFAULT 48,
   step2_group_id  BIGINT UNSIGNED NULL COMMENT 'NULL = sales managers',
   step3_hours     INT           NOT NULL DEFAULT 72 COMMENT 'step 3 tells the owner',
+  step1_min       INT           NULL,
+  step2_min       INT           NULL,
+  step3_min       INT           NULL,
+  rr_users        VARCHAR(400)  NULL COMMENT 'comma list of user ids; NULL = all sales managers',
   chase_quote_days INT          NOT NULL DEFAULT 3,
   statuses_off    VARCHAR(400)  NULL COMMENT 'comma list of lane statuses switched off',
   updated_at      DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP

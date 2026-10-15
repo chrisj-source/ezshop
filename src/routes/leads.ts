@@ -359,7 +359,9 @@ export async function registerLeads(app: FastifyInstance): Promise<void> {
       lead: scrubLead(lead as Record<string, unknown>, ctx.caps, ctx.user.id),
       events, appointments, followup: cfg,
       referral: await referralFor(cid, 'lead', id, ctx.caps).catch(() => null),
-      mayEditFee: mayEditFee(ctx.caps)
+      mayEditFee: mayEditFee(ctx.caps),
+      callbacks: await tq<RowDataPacket[]>(cid, 'SELECT id, due_at, note FROM lead_callbacks WHERE lead_id = ? AND done_at IS NULL ORDER BY due_at', [id]).catch(() => []),
+      ownerName: lead.owner_user_id ? (await tqOne<RowDataPacket>(cid, 'SELECT display_name FROM staff WHERE user_id = ?', [lead.owner_user_id]))?.display_name ?? null : null
     };
   });
 
@@ -565,7 +567,7 @@ export async function registerLeads(app: FastifyInstance): Promise<void> {
       /* addrState, not state: on a lead, state is the status enum. */
       address?: string; city?: string; addrState?: string; zip?: string;
       vehicleText?: string; damageNote?: string; source?: string; payer?: string;
-      ownerUserId?: number | null; receivedAt?: string;
+      ownerUserId?: number | null; receivedAt?: string; campaign?: string;
       split?: SplitInput;
       referral?: { referrerId?: number; newReferrer?: NewReferrer; noFee?: boolean; feeCents?: number | null; payee?: string | null };
     };
@@ -638,6 +640,7 @@ export async function registerLeads(app: FastifyInstance): Promise<void> {
         const cols = splitColumns('owner_pct', b.split);
         await c.query(`UPDATE leads SET ${cols.map(([k]) => k + ' = ?').join(', ')} WHERE id = ?`, [...cols.map(([, v]) => v), r.insertId]);
       }
+      if (b.campaign) await c.query('UPDATE leads SET campaign = ? WHERE id = ?', [String(b.campaign).slice(0, 60), r.insertId]);
       if (ref) {
         await c.query('UPDATE leads SET referrer_id = ?, referral_no_fee = ?, referral_fee_cents = ?, referral_payee = ? WHERE id = ?',
           [ref.id, ref.noFee ? 1 : 0, ref.fee, ref.payee, r.insertId]);

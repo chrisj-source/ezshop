@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1c2740">
+<title>Leads — Easy Shop</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/shell.css?v=8">
+<style>
+  #crmBar { display:flex; align-items:center; gap:9px; padding:10px 18px; flex:none; border-bottom:1px solid var(--line); white-space:nowrap; overflow-x:auto; }
+  #crmMain { flex:1; min-height:0; position:relative; display:flex; flex-direction:column; }
+  #crmBody { flex:1; min-height:0; display:flex; flex-direction:column; }
+  #crmBody input:focus, #crmBar input:focus, #crmModal input:focus, #crmModal select:focus, #crmModal textarea:focus { outline:2px solid var(--acc); outline-offset:1px; }
+  a { color:var(--acc2); } a:hover { color:var(--acc); }
+</style>
+</head>
+<body>
+<div class="bar">
+  <div class="brand"><div class="mark">ES</div><div class="word">Easy Shop</div></div>
+  <div class="vr"></div><div class="co" id="coName">—</div><div id="nav"></div><div class="spacer"></div>
+  <div id="bell"></div><div class="who" id="who">—</div><button class="ghostbtn" id="signout">Sign out</button>
+</div>
+<div class="hairline"></div>
+<div id="crmBar"></div>
+<div id="crmMain"><div id="crmBody"></div><div id="crmLead"></div></div>
+<div id="crmModal"></div>
+<div id="crmToast"></div>
+<script src="/shell.js?v=10"></script>
+<script src="/crm.js?v=1"></script>
+<script src="/crm-tasks.js?v=1"></script>
+<script src="/crm-refs.js?v=1"></script>
+<script src="/crm-clients.js?v=1"></script>
+<script src="/crm-lead.js?v=1"></script>
+<script>
+  window.addEventListener('hashchange', function () {
+    var h = location.hash.replace('#', '');
+    if (window.CRM && CRM.me) CRM.go(['tasks', 'refs', 'clients'].indexOf(h) >= 0 ? h : 'pipe');
+  });
+</script>
+</body>
+</html>

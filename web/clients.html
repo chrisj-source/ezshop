@@ -75,7 +75,7 @@
   <div class="dbody" id="dBody"></div>
 </aside>
 
-<script src="/shell.js?v=9"></script>
+<script src="/shell.js?v=10"></script>
 <script>
 (function () {
   var api = Shell.api, esc = Shell.esc;
@@ -413,7 +413,7 @@
           (s.feeCents !== null && s.state !== 'no_fee' ? '<span class="sub" style="margin-left:auto">' + money(s.feeCents) + '</span>' : '') +
           '</div><div class="log-m">' + esc(s.label) +
           (s.roId ? ' · <a href="/board.html?ro=' + s.roId + '">RO ' + esc(s.roNumber) + '</a>' : '') +
-          ' · <a href="/leads.html?lead=' + s.leadId + '">' + esc(s.leadNumber) + '</a></div></div>');
+          ' · <a href="/crm.html?lead=' + s.leadId + '">' + esc(s.leadNumber) + '</a></div></div>');
       });
       h.push('<div class="sub" style="margin-top:6px"><a href="/referrals.html">Open in Referrals</a></div>');
     }

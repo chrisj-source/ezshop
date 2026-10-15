@@ -7,7 +7,7 @@ import { actorFrom } from './audit';
 import { notify } from '../notify';
 import { LANES, ALWAYS, laneOf, STATUS, PARKED } from '../lib/pipeline';
 import { groupMembers, laneCfgs, touched, usersWithCap } from '../lib/leadops';
-import { referralFor } from '../lib/referrals';
+import { referralFor, referrals } from '../lib/referrals';
 
 const ROUTE_MODES = ['managers_rr', 'group_rr', 'person', 'writer'];
 
@@ -45,7 +45,7 @@ export async function registerLeadOps(app: FastifyInstance): Promise<void> {
     const cfg = lane ? (await laneCfgs(cid))[lane.key] : null;
     const off = String(cfg?.statuses_off ?? '').split(',');
     const files = ro?.client_id && ctx.caps.seesRepairOrders ? await tq<RowDataPacket[]>(cid, `
-      SELECT r.id, r.ro_number, r.opened_at, r.closed_at, s.label AS status_label, CONCAT_WS(' ', v.year, v.make, v.model) AS vehicle
+      SELECT r.id, r.ro_number, r.opened_at, r.closed_at, r.voided_at, s.label AS status_label, CONCAT_WS(' ', v.year, v.make, v.model) AS vehicle, v.vin
       FROM repair_orders r LEFT JOIN statuses s ON s.slot_id = r.status_slot LEFT JOIN vehicles v ON v.id = r.vehicle_id
       WHERE r.client_id = ? ORDER BY r.opened_at DESC LIMIT 40`, [ro.client_id]) : [];
     const leadEvents = lead ? await tq<RowDataPacket[]>(cid,
@@ -75,8 +75,61 @@ export async function registerLeadOps(app: FastifyInstance): Promise<void> {
       startsAtCheckIn: !lead,
       ro: ro ? { id: ro.id, number: ro.ro_number } : null,
       referral: lead ? await referralFor(cid, 'lead', Number(lead.id), ctx.caps).catch(() => null) : null,
-      appointments: appts, files, timeline
+      appointments: appts, files, timeline,
+      sent: ro?.client_id ? await (async () => {
+        const f = await tqOne<RowDataPacket>(cid, 'SELECT id FROM referrers WHERE client_id = ? AND active = 1 LIMIT 1', [ro!.client_id]);
+        if (!f) return null;
+        const list = await referrals(cid, 'l.referrer_id = ?', [Number(f.id)]);
+        const money = !!(ctx.caps.money || ctx.caps.salesManager);
+        const y = new Date().getFullYear();
+        return { referrerId: Number(f.id), count: list.length,
+          paidThisYearCents: money ? list.filter(r => r.state.key === 'paid' && r.paid_at && new Date(r.paid_at).getFullYear() === y).reduce((a, r) => a + r.state.feeCents, 0) : null,
+          list: list.map(r => ({ leadId: r.lead_id, customer: r.customer, vehicle: r.vehicle, label: r.state.label, state: r.state.key, feeCents: money ? r.state.feeCents : null })) };
+      })() : null
     };
+  });
+
+  /* The Clients screen (3b): every lead that became a customer or was lost —
+     won or lost, the lead becomes the record and is kept. */
+  app.get('/api/crm/clients', async (req, reply) => {
+    const ctx = requireCompany(req, reply);
+    if (!ctx) return;
+    if (!ctx.caps.viewLeads) return reply.code(403).send({ error: 'Not permitted' });
+    const cid = ctx.company!.id;
+    const rows = await tq<RowDataPacket[]>(cid, `
+      SELECT l.id, l.lead_number, TRIM(CONCAT_WS(' ', l.first_name, l.last_name)) AS name, l.phone, l.vehicle_text, l.source,
+             l.state, l.pipe_status, l.received_at, l.settled_at, l.ro_id, r.ro_number, r.closed_at, r.voided_at, r.client_id,
+             CONCAT_WS(' ', v.year, v.make, v.model) AS ro_vehicle,
+             (SELECT f.id FROM referrers f WHERE f.client_id = r.client_id AND f.active = 1 LIMIT 1) AS referrer_id
+      FROM leads l
+      LEFT JOIN repair_orders r ON r.id = l.ro_id
+      LEFT JOIN vehicles v ON v.id = r.vehicle_id
+      WHERE l.deleted_at IS NULL AND (l.ro_id IS NOT NULL OR l.state IN ('won','lost') OR l.pipe_status = 'not_repairing')
+      ORDER BY COALESCE(l.settled_at, r.opened_at, l.received_at) DESC LIMIT 1500`);
+    return { clients: rows.map(r => {
+      const tag = r.referrer_id ? ['REFERRER', 'var(--acc2)'] : r.voided_at ? ['VOID', 'var(--dim)'] : r.ro_id ? (r.closed_at ? ['PICKED UP', 'oklch(0.76 0.10 185)'] : ['IN SHOP', 'oklch(0.76 0.13 150)'])
+        : ['LOST', 'oklch(0.60 0.02 260)'];
+      return { leadId: r.id, clientId: r.client_id ? Number(r.client_id) : null, name: r.name || r.lead_number, sub: [r.ro_vehicle || r.vehicle_text, r.ro_number ? 'RO ' + r.ro_number : null, r.phone].filter(Boolean).join(' · '),
+        q: [r.name, r.phone, r.vehicle_text, r.ro_vehicle, r.ro_number, r.lead_number].join(' ').toLowerCase(), tag: tag[0], tone: tag[1], lost: !r.ro_id };
+    }) };
+  });
+
+  /** Reopen a lost lead: it goes back to work in its lane as Attempting to reclose. */
+  app.post('/api/leads/:id/reopen', async (req, reply) => {
+    const ctx = requireCompany(req, reply);
+    if (!ctx) return;
+    if (!ctx.caps.manageLeads) return reply.code(403).send({ error: 'Not permitted' });
+    const cid = ctx.company!.id, id = Number((req.params as { id: string }).id);
+    const l = await tqOne<RowDataPacket>(cid, 'SELECT source, ro_id FROM leads WHERE id = ? AND deleted_at IS NULL', [id]);
+    if (!l) return reply.code(404).send({ error: 'No such lead' });
+    if (l.ro_id) return reply.code(409).send({ error: 'That lead became a file. It is not lost.' });
+    const lane = laneOf(l.source);
+    const st = lane.statuses.includes('attempting_reclose') ? 'attempting_reclose' : lane.statuses[0];
+    await texec(cid, `UPDATE leads SET state = 'contacted', lost_reason = NULL, settled_at = NULL, pipe_status = ?, pipe_status_at = NOW(), esc_step = 0,
+      last_followup_at = NOW() WHERE id = ?`, [st, id]);
+    await texec(cid, `INSERT INTO lead_events (lead_id, kind, body, user_id, user_name) VALUES (?, 'auto', ?, ?, ?)`,
+      [id, `Reopened as a lead — ${STATUS[st].label}.`, ctx.user.id, ctx.user.name]);
+    return { ok: true };
   });
 
   /* ------------------------------------------------ Admin › Leads: sources */
@@ -107,20 +160,24 @@ export async function registerLeadOps(app: FastifyInstance): Promise<void> {
     if (!ROUTE_MODES.includes(mode) || (key !== 'field' && mode === 'writer')) return reply.code(400).send({ error: 'Pick who a new lead goes to.' });
     if (mode === 'group_rr' && !b.routeGroupId) return reply.code(400).send({ error: 'Pick the group.' });
     if (mode === 'person' && !b.routeUserId) return reply.code(400).send({ error: 'Pick the person.' });
-    const h1 = Math.round(Number(b.step1Hours)), h2 = Math.round(Number(b.step2Hours)), h3 = Math.round(Number(b.step3Hours));
-    if (!(h1 > 0 && h2 > h1 && h3 > h2)) return reply.code(400).send({ error: 'Ladder steps must increase: step 1 < step 2 < step 3 hours.' });
+    const m1 = Math.round(Number(b.step1Min ?? Number(b.step1Hours) * 60)), m2 = Math.round(Number(b.step2Min ?? Number(b.step2Hours) * 60)), m3 = Math.round(Number(b.step3Min ?? Number(b.step3Hours) * 60));
+    if (!(m1 > 0 && m2 > m1 && m3 > m2)) return reply.code(400).send({ error: 'Ladder steps must increase: step 1, then step 2, then step 3.' });
+    const h1 = Math.max(1, Math.round(m1 / 60)), h2 = Math.max(h1 + 1, Math.round(m2 / 60)), h3 = Math.max(h2 + 1, Math.round(m3 / 60));
+    const rr = Array.isArray(b.rrUsers) ? (b.rrUsers as unknown[]).map(Number).filter(Boolean).join(',') || null : null;
+    if (mode === 'managers_rr' && Array.isArray(b.rrUsers) && !rr) return reply.code(400).send({ error: 'Tick at least one sales manager, or new leads have nowhere to go.' });
     const off = (Array.isArray(b.statusesOff) ? b.statusesOff : []).map(String).filter(k => lane.statuses.includes(k));
     if (off.length >= lane.statuses.length) return reply.code(400).send({ error: 'Leave at least one status on in the lane.' });
     await texec(cid, `
-      INSERT INTO lead_lanes (lane_key, route_mode, route_group_id, route_user_id, step1_hours, step2_hours, step2_group_id, step3_hours, chase_quote_days, statuses_off)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO lead_lanes (lane_key, route_mode, route_group_id, route_user_id, step1_hours, step2_hours, step2_group_id, step3_hours, chase_quote_days, statuses_off, step1_min, step2_min, step3_min, rr_users)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON DUPLICATE KEY UPDATE route_mode = VALUES(route_mode), route_group_id = VALUES(route_group_id), route_user_id = VALUES(route_user_id),
         step1_hours = VALUES(step1_hours), step2_hours = VALUES(step2_hours), step2_group_id = VALUES(step2_group_id),
-        step3_hours = VALUES(step3_hours), chase_quote_days = VALUES(chase_quote_days), statuses_off = VALUES(statuses_off)`,
+        step3_hours = VALUES(step3_hours), chase_quote_days = VALUES(chase_quote_days), statuses_off = VALUES(statuses_off),
+        step1_min = VALUES(step1_min), step2_min = VALUES(step2_min), step3_min = VALUES(step3_min), rr_users = VALUES(rr_users)`,
       [key, mode, mode === 'group_rr' ? Number(b.routeGroupId) : null, mode === 'person' ? Number(b.routeUserId) : null,
-       h1, h2, b.step2GroupId ? Number(b.step2GroupId) : null, h3, Math.max(1, Math.round(Number(b.chaseQuoteDays) || 3)), off.join(',') || null]);
+       h1, h2, b.step2GroupId ? Number(b.step2GroupId) : null, h3, Math.max(1, Math.round(Number(b.chaseQuoteDays) || 3)), off.join(',') || null, m1, m2, m3, rr]);
     await audit(cid, actorFrom(req), { entity: 'settings', action: 'lead_lane', area: 'Setup', label: `Lead source settings — ${lane.label}`,
-      changes: [{ field: 'Route', from: null, to: mode }, { field: 'Ladder', from: null, to: `${h1}/${h2}/${h3}h` }] });
+      changes: [{ field: 'Route', from: null, to: mode }, { field: 'Ladder', from: null, to: `${m1}/${m2}/${m3} min` }] });
     return { ok: true };
   });
 
@@ -256,12 +313,12 @@ export async function registerLeadOps(app: FastifyInstance): Promise<void> {
         AND COALESCE(l.pipe_status,'') NOT IN ('not_repairing','${PARKED.join("','")}')`);
     const cbs = await tq<RowDataPacket[]>(cid, `
       SELECT c.id, c.lead_id, c.user_id, c.due_at, c.note, l.lead_number, TRIM(CONCAT_WS(' ', l.first_name, l.last_name)) AS name,
-             l.vehicle_text, l.owner_user_id, l.esc_step
+             l.vehicle_text, l.owner_user_id, l.esc_step, l.source
       FROM lead_callbacks c JOIN leads l ON l.id = c.lead_id WHERE c.done_at IS NULL AND l.deleted_at IS NULL`);
     const now = Date.now(), H = 3600e3;
     const tasks: Array<Record<string, unknown>> = [];
     const add = (l: RowDataPacket, kind: string, due: number, extra: Record<string, unknown> = {}) =>
-      tasks.push({ kind, leadId: l.id, leadNumber: l.lead_number, name: l.name, vehicle: l.vehicle_text,
+      tasks.push({ kind, leadId: l.id, leadNumber: l.lead_number, name: l.name, vehicle: l.vehicle_text, source: l.source,
         userId: l.owner_user_id ? Number(l.owner_user_id) : null, step: Number(l.esc_step) || 0, due: new Date(due).toISOString(), ...extra });
     for (const l of leads) {
       const lane = laneOf(l.source), c = cfgs[lane.key];
@@ -278,7 +335,7 @@ export async function registerLeadOps(app: FastifyInstance): Promise<void> {
       }
     }
     for (const c of cbs) {
-      tasks.push({ kind: 'callback', callbackId: c.id, leadId: c.lead_id, leadNumber: c.lead_number, name: c.name, vehicle: c.vehicle_text,
+      tasks.push({ kind: 'callback', callbackId: c.id, leadId: c.lead_id, source: c.source, leadNumber: c.lead_number, name: c.name, vehicle: c.vehicle_text,
         userId: c.user_id ? Number(c.user_id) : (c.owner_user_id ? Number(c.owner_user_id) : null), step: Number(c.esc_step) || 0,
         due: new Date(c.due_at).toISOString(), note: c.note });
     }
@@ -286,15 +343,25 @@ export async function registerLeadOps(app: FastifyInstance): Promise<void> {
     const mgr = !!ctx.caps.salesManager;
     const scoped = tasks.filter(t => all || t.userId === ctx.user.id || (mgr && (Number(t.step) >= 2 || t.userId === null)));
     const staff = await tq<RowDataPacket[]>(cid, 'SELECT user_id, display_name FROM staff ORDER BY display_name').catch(() => []);
-    const tm = await tq<RowDataPacket[]>(cid, 'SELECT tm.user_id, t.id AS team_id, t.name FROM team_members tm JOIN teams t ON t.id = tm.team_id');
+    const tm = await tq<RowDataPacket[]>(cid, `SELECT tm.user_id, t.id AS team_id, t.name, s.display_name AS manager
+      FROM team_members tm JOIN teams t ON t.id = tm.team_id LEFT JOIN staff s ON s.user_id = t.manager_user_id`);
+    /* Done today: callbacks closed and touches logged, per person. */
+    const doneRows = await tq<RowDataPacket[]>(cid, `
+      SELECT u, SUM(n) AS n FROM (
+        SELECT user_id AS u, COUNT(*) AS n FROM lead_callbacks WHERE done_at >= CURDATE() GROUP BY user_id
+        UNION ALL
+        SELECT user_id AS u, COUNT(*) AS n FROM lead_events WHERE kind = 'note' AND created_at >= CURDATE() AND user_id IS NOT NULL GROUP BY user_id
+      ) x GROUP BY u`).catch(() => []);
+    const done: Record<number, number> = {};
+    for (const r of doneRows) done[Number(r.u)] = Number(r.n);
     const ids = [...new Set(scoped.map(t => t.userId).filter(Boolean))] as number[];
     if (!all && !ids.includes(ctx.user.id)) ids.push(ctx.user.id);
     const people = ids.map(id => {
       const t = tm.find(x => Number(x.user_id) === id);
       return { userId: id, name: staff.find(s => Number(s.user_id) === id)?.display_name ?? `User ${id}`,
-        teamId: t ? Number(t.team_id) : null, team: t ? t.name : null };
+        teamId: t ? Number(t.team_id) : null, team: t ? t.name : null, manager: t ? t.manager : null };
     }).sort((a, b) => String(a.team ?? '~').localeCompare(String(b.team ?? '~')) || a.name.localeCompare(b.name));
-    return { tasks: scoped.sort((a, b) => String(a.due).localeCompare(String(b.due))), people, canHandOut: !!(ctx.caps.salesManager || ctx.caps.admin),
+    return { tasks: scoped.sort((a, b) => String(a.due).localeCompare(String(b.due))), people, done, canHandOut: !!(ctx.caps.salesManager || ctx.caps.admin),
       staff: staff.map(s => ({ userId: Number(s.user_id), name: s.display_name })) };
   });
 

@@ -22,7 +22,7 @@
         '<div style="display:flex;gap:22px;flex-wrap:wrap;margin-top:14px">' +
           (l ? hi('Came in', esc(l.lane || l.source) + (l.campaign ? ' · ' + esc(l.campaign) : '')) + hi('Owner', esc(l.owner || 'Unassigned')) +
             hi('Lead to RO', dur(l.leadToRoHours)) + (l.estimateCents != null ? hi('Estimate', fmt$(l.estimateCents)) : '') +
-            hi('Lead', '<a href="/leads.html?lead=' + l.id + '" style="color:var(--acc2)">' + esc(l.number) + '</a>') : hi('Came in', 'No lead — starts at check-in')) +
+            hi('Lead', '<a href="/crm.html?lead=' + l.id + '" style="color:var(--acc2)">' + esc(l.number) + '</a>') : hi('Came in', 'No lead — starts at check-in')) +
           (d.referral ? hi('Referral', esc(d.referral.referrer.name) + '<div style="font:400 10.5px var(--font);color:var(--dim);margin-top:2px">' + esc(d.referral.label) +
             (d.referral.feeCents != null && !d.referral.noFee ? ' · ' + fmt$(d.referral.feeCents) : '') + '</div>') : '') +
         '</div></div>';

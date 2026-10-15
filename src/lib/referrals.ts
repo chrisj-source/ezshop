@@ -79,7 +79,7 @@ export function refState(r: RefRow): RefState {
 }
 
 const REF_SELECT = `
-  SELECT l.id AS lead_id, l.lead_number, l.state AS lead_state,
+  SELECT l.id AS lead_id, l.lead_number, l.state AS lead_state, l.pipe_status, l.received_at,
          TRIM(CONCAT_WS(' ', l.first_name, l.last_name)) AS customer, l.vehicle_text AS vehicle,
          f.id AS referrer_id, f.name AS referrer_name, f.kind AS referrer_kind, f.payee_default,
          l.referral_no_fee, l.referral_fee_cents, l.referral_payee, l.referral_tl_decision, l.referral_tl_by,

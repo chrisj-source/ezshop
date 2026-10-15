@@ -8,43 +8,45 @@ import { tq, texec } from '../db/tenant';
  * repairing are in every lane — the automatic moves land in them.
  */
 
-export interface PipeStatus { key: string; label: string; tone: string }
+export interface PipeStatus { key: string; label: string; code: string; tone: string }
 
+const T = (key: string, label: string, code: string, tone: string): PipeStatus => ({ key, label, code, tone });
 export const STATUS: Record<string, PipeStatus> = {
-  fresh:              { key: 'fresh', label: 'Fresh', tone: 'var(--acc)' },
-  contacted:          { key: 'contacted', label: 'Contacted', tone: 'var(--move)' },
-  no_answer:          { key: 'no_answer', label: 'No answer', tone: 'var(--blocked)' },
-  awaiting_quote:     { key: 'awaiting_quote', label: 'Awaiting quote', tone: 'var(--acc2)' },
-  estimate_given:     { key: 'estimate_given', label: 'Estimate given', tone: 'var(--acc2)' },
-  eval_booked:        { key: 'eval_booked', label: 'Eval booked', tone: 'var(--move)' },
-  signed_up:          { key: 'signed_up', label: 'Signed up', tone: 'var(--acc)' },
-  awaiting_drop:      { key: 'awaiting_drop', label: 'Awaiting drop', tone: 'var(--move)' },
-  needs_reschedule:   { key: 'needs_reschedule', label: 'Needs reschedule', tone: 'var(--blocked)' },
-  attempting_reclose: { key: 'attempting_reclose', label: 'Attempting to reclose', tone: 'var(--blocked)' },
-  cancelled_appt:     { key: 'cancelled_appt', label: 'Cancelled appt', tone: 'var(--stopped)' },
-  appointment_set:    { key: 'appointment_set', label: 'Appointment set', tone: 'var(--done)' },
-  no_show:            { key: 'no_show', label: 'No show', tone: 'var(--stopped)' },
-  in_shop:            { key: 'in_shop', label: 'In the shop', tone: 'var(--done)' },
-  not_repairing:      { key: 'not_repairing', label: 'Not repairing', tone: 'var(--dim)' },
-  junk:               { key: 'junk', label: 'Junk', tone: 'var(--dim)' },
-  unqualified:        { key: 'unqualified', label: 'Unqualified', tone: 'var(--dim)' },
-  vendor:             { key: 'vendor', label: 'Vendor', tone: 'var(--dim)' }
+  fresh:              T('fresh', 'Fresh', 'NEW', 'oklch(0.80 0.13 80)'),
+  no_answer:          T('no_answer', 'No answer', 'N/A', 'oklch(0.72 0.14 30)'),
+  awaiting_quote:     T('awaiting_quote', 'Awaiting quote', 'QUOTE', 'oklch(0.74 0.10 245)'),
+  estimate_written:   T('estimate_written', 'Estimate written', 'EST', 'oklch(0.74 0.10 245)'),
+  estimate_sent:      T('estimate_sent', 'Estimate sent', 'SENT', 'oklch(0.74 0.10 220)'),
+  eval_done:          T('eval_done', 'Eval done', 'EVAL', 'oklch(0.74 0.10 270)'),
+  referrer_told:      T('referrer_told', 'Referrer told', 'TOLD', 'oklch(0.74 0.10 270)'),
+  needs_reschedule:   T('needs_reschedule', 'Needs reschedule', 'RESCH', 'oklch(0.76 0.13 55)'),
+  attempting_reclose: T('attempting_reclose', 'Attempting to reclose', 'RECL', 'oklch(0.74 0.12 310)'),
+  cancelled_appt:     T('cancelled_appt', 'Cancelled appt', 'CANC', 'oklch(0.70 0.15 25)'),
+  appointment_set:    T('appointment_set', 'Appointment set', 'APPT', 'oklch(0.76 0.13 150)'),
+  no_show:            T('no_show', 'No show', 'NOSHW', 'oklch(0.70 0.15 25)'),
+  in_shop:            T('in_shop', 'In the shop', 'SHOP', 'oklch(0.76 0.10 185)'),
+  not_repairing:      T('not_repairing', 'Not repairing', 'LOST', 'oklch(0.60 0.02 260)'),
+  junk:               T('junk', 'Junk', 'JUNK', 'oklch(0.55 0.02 260)'),
+  unqualified:        T('unqualified', 'Unqualified', 'UNQ', 'oklch(0.55 0.02 260)'),
+  vendor:             T('vendor', 'Vendor', 'VEND', 'oklch(0.55 0.02 260)')
 };
 
 export const ALWAYS = ['appointment_set', 'no_show', 'in_shop', 'not_repairing'];
 export const PARKED = ['junk', 'unqualified', 'vendor'];
+/** Off the working columns unless Show closed is ticked. The clock stops here too. */
+export const CLOSED = ['in_shop', 'not_repairing', ...PARKED];
 
 export const LANES = [
-  { key: 'internet', label: 'Internet', sources: ['website', 'google', 'scheduler', 'meta', 'tiktok'],
-    statuses: ['fresh', 'no_answer', 'awaiting_quote', 'needs_reschedule', 'attempting_reclose', 'cancelled_appt'], overdueHours: 2 },
+  { key: 'internet', label: 'Internet', sources: ['website', 'web_form', 'google', 'scheduler', 'meta', 'tiktok'],
+    statuses: ['fresh', 'no_answer', 'awaiting_quote', 'needs_reschedule', 'cancelled_appt', 'attempting_reclose'], overdueHours: 1 },
   { key: 'walkin', label: 'Walk-in', sources: ['walk-in'],
-    statuses: ['estimate_given', 'eval_booked', 'attempting_reclose', 'cancelled_appt'], overdueHours: 48 },
+    statuses: ['estimate_written', 'estimate_sent', 'eval_done', 'needs_reschedule', 'attempting_reclose'], overdueHours: 24 },
   { key: 'phone', label: 'Phone', sources: ['phone', 'other'],
-    statuses: ['fresh', 'no_answer', 'awaiting_quote', 'needs_reschedule', 'cancelled_appt'], overdueHours: 24 },
+    statuses: ['fresh', 'no_answer', 'awaiting_quote', 'needs_reschedule', 'cancelled_appt', 'attempting_reclose'], overdueHours: 1 },
   { key: 'referral', label: 'Referral', sources: ['referral'],
-    statuses: ['fresh', 'contacted', 'awaiting_quote', 'cancelled_appt'], overdueHours: 24 },
+    statuses: ['fresh', 'referrer_told', 'awaiting_quote', 'attempting_reclose'], overdueHours: 4 },
   { key: 'field', label: 'Field sales', sources: ['sales app'],
-    statuses: ['signed_up', 'awaiting_drop', 'needs_reschedule', 'cancelled_appt'], overdueHours: 24 }
+    statuses: ['fresh', 'no_answer', 'awaiting_quote', 'needs_reschedule', 'attempting_reclose'], overdueHours: 24 }
 ];
 
 export function laneOf(source: unknown): typeof LANES[number] {

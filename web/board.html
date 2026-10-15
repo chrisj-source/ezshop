@@ -709,7 +709,7 @@
 </div>
 
 <script src="/photos.js?v=5"></script>
-<script src="/shell.js?v=9"></script>
+<script src="/shell.js?v=10"></script>
 <script>
 (function () {
   var api = Shell.api, esc = Shell.esc;
@@ -3036,7 +3036,7 @@
         '<div class="hint" style="margin-top:3px">' + esc(rf.label) +
         (rf.feeCents !== null && !rf.noFee ? ' · ' + esc(money(rf.feeCents)) : '') +
         (rf.payee && rf.payee !== rf.referrer.name ? ' · to ' + esc(rf.payee) : '') +
-        ' · <a href="/leads.html?lead=' + rf.leadId + '">' + esc(rf.leadNumber) + '</a></div></div>');
+        ' · <a href="/crm.html?lead=' + rf.leadId + '">' + esc(rf.leadNumber) + '</a></div></div>');
     }
     $('dLeft').innerHTML = L.join('');
 

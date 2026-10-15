@@ -58,7 +58,7 @@
 </div>
 <div id="board"></div>
 
-<script src="/shell.js?v=9"></script>
+<script src="/shell.js?v=10"></script>
 <script>
 (function () {
   var api = Shell.api, esc = Shell.esc;
@@ -75,7 +75,7 @@
 
   function card(t, withOwner) {
     var owner = withOwner && t.userId ? (D.people.filter(function (p) { return p.userId === t.userId; })[0] || {}).name : '';
-    var h = '<div class="task' + (od(t) ? ' od' : '') + '"><a href="/leads.html?lead=' + t.leadId + '">' +
+    var h = '<div class="task' + (od(t) ? ' od' : '') + '"><a href="/crm.html?lead=' + t.leadId + '">' +
       '<div class="k">' + esc(KIND[t.kind] || t.kind) + (t.step >= 2 ? ' · step ' + t.step : '') + '</div>' +
       '<div class="t">' + esc(t.name || t.leadNumber) + '</div>' +
       '<div class="s">' + esc([t.vehicle, owner].filter(Boolean).join(' · ')) + '</div>' +

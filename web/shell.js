@@ -13,14 +13,12 @@ window.Shell = (function () {
   var NAV = [
     { key: 'board',    href: '/board.html',    label: 'Board',    feature: 'board' },
     { key: 'parts',    href: '/parts.html',    label: 'Parts',    feature: 'parts',   cap: 'manageParts' },
-    { key: 'leads',    href: '/leads.html',    label: 'Leads',    feature: 'leads',   cap: 'manageLeads' },
-    { key: 'clients',  href: '/clients.html',  label: 'Clients',  feature: 'clients' },
+    { key: 'leads',    href: '/crm.html',      label: 'Leads',    feature: 'leads',   cap: 'viewLeads' },
+    { key: 'clients',  href: '/crm.html#clients', label: 'Clients', feature: 'clients' },
     { key: 'schedule', href: '/schedule.html', label: 'Schedule', feature: 'sched' },
     { key: 'import',   href: '/import.html',   label: 'Import',   feature: 'ems',     cap: 'acceptImports' },
     { key: 'closed',   href: '/closed.html',   label: 'Closed',   feature: 'board',   cap: 'closeRepairOrders' },
     { key: 'reports',  href: '/reports.html',  label: 'Reports',  feature: 'reports', cap: 'viewReports' },
-    { key: 'tasks',    href: '/tasks.html',    label: 'Tasks',    feature: 'leads',   cap: 'viewLeads' },
-    { key: 'referrals', href: '/referrals.html', label: 'Referrals', feature: 'leads', cap: 'viewLeads' },
     /* Phone screens. Sales is written standing next to the car and check-in runs
        off the camera, so neither earns a slot in the desktop nav — the link is
        hidden above 900px, the same width the screens themselves cut at. */

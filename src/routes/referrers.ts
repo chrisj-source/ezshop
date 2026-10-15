@@ -37,6 +37,37 @@ export async function registerReferrers(app: FastifyInstance): Promise<void> {
     return { referrers: rows.map(r => money ? r : { ...r, default_fee_cents: null }) };
   });
 
+  /** The Referrers screen: every referrer with sent / won / open / owed / paid / last, and the KPI band. */
+  app.get('/api/referrers/summary', async (req, reply) => {
+    const ctx = requireCompany(req, reply);
+    if (!ctx) return;
+    if (!ctx.caps.viewLeads) return reply.code(403).send({ error: 'Not permitted' });
+    const cid = ctx.company!.id, money = !!(ctx.caps.money || ctx.caps.salesManager);
+    const refs = await tq<RowDataPacket[]>(cid, 'SELECT * FROM referrers WHERE active = 1 ORDER BY name');
+    const list = await referrals(cid, '1 = 1', []);
+    const year = new Date().getFullYear();
+    let kOwed = 0, kPaid = 0, kSent = 0, kWon = 0, w9 = 0;
+    const rows = refs.map(f => {
+      const mine = list.filter(r => r.referrer_id === Number(f.id));
+      const owed = mine.filter(r => r.state.key === 'owed' || r.state.key === 'held').reduce((a, r) => a + r.state.feeCents, 0);
+      const paidY = mine.filter(r => r.state.key === 'paid' && r.paid_at && new Date(r.paid_at).getFullYear() === year).reduce((a, r) => a + r.state.feeCents, 0);
+      const won = mine.filter(r => r.ro_id).length, open = mine.filter(r => r.state.key === 'open').length;
+      const w9w = !f.w9_on_file && paidY + mine.filter(r => r.state.key === 'owed').reduce((a, r) => a + r.state.feeCents, 0) > W9_LIMIT_CENTS;
+      kOwed += owed; kPaid += paidY; kSent += mine.length; kWon += won; if (w9w) w9++;
+      const payees = [...new Set(mine.map(r => r.referral_payee).filter(Boolean).concat(f.payee_default ? [f.payee_default] : []))];
+      return { id: f.id, name: f.name, company: f.company, kind: f.kind, phone: f.phone, email: f.email, clientId: f.client_id,
+        defaultFeeCents: money ? f.default_fee_cents : null, payeeDefault: f.payee_default, payees, w9OnFile: !!f.w9_on_file, w9Warn: money && w9w,
+        sent: mine.length, won, open, owedCents: money ? owed : null, paidCents: money ? paidY : null,
+        last: null as unknown,
+        lastLeadId: mine.length ? mine[0].lead_id : null };
+    });
+    const lastSent = await tq<RowDataPacket[]>(cid, 'SELECT referrer_id, MAX(received_at) AS last FROM leads WHERE referrer_id IS NOT NULL AND deleted_at IS NULL GROUP BY referrer_id');
+    for (const r of rows) r.last = lastSent.find(x => Number(x.referrer_id) === Number(r.id))?.last ?? null;
+    return { rows, money,
+      kpis: { referrers: rows.length, sent: kSent, won: kWon, rate: kSent ? Math.round(kWon * 100 / kSent) : 0,
+        owedCents: money ? kOwed : null, paidCents: money ? kPaid : null, w9 } };
+  });
+
   /** Already a client / already a referrer / possible match. */
   app.get('/api/referrers/match', async (req, reply) => {
     const ctx = requireCompany(req, reply);
@@ -75,6 +106,7 @@ export async function registerReferrers(app: FastifyInstance): Promise<void> {
       referrer: money ? f : { ...f, default_fee_cents: null },
       referrals: list.map(r => ({ leadId: r.lead_id, leadNumber: r.lead_number, customer: r.customer, vehicle: r.vehicle,
         roId: r.ro_id, roNumber: r.ro_number, state: r.state.key, label: r.state.label, payee: r.state.payee,
+        pipeStatus: (r as unknown as { pipe_status?: string }).pipe_status ?? null,
         feeCents: money ? r.state.feeCents : null })),
       totals: money ? t : null,
       w9Warn: money && !f.w9_on_file && t.paidCents + t.owedCents > W9_LIMIT_CENTS

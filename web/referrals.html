@@ -61,7 +61,7 @@
 <div class="viewrow" id="views"></div>
 <div id="main"></div>
 
-<script src="/shell.js?v=9"></script>
+<script src="/shell.js?v=10"></script>
 <script>
 (function () {
   var api = Shell.api, esc = Shell.esc;
@@ -176,7 +176,7 @@
         '<button class="btn btn-ghost" id="fSave">Save</button></div>';
       h += '<div class="sechead">Referrals sent · ' + d.referrals.length + '</div>' +
         (d.referrals.length ? '<table class="tbl"><tbody>' + d.referrals.map(function (r) {
-          return '<tr><td>' + esc(r.customer || '—') + '<div class="sub">' + esc(r.vehicle || '') + ' · <a href="/leads.html?lead=' + r.leadId + '">' + esc(r.leadNumber) + '</a>' +
+          return '<tr><td>' + esc(r.customer || '—') + '<div class="sub">' + esc(r.vehicle || '') + ' · <a href="/crm.html?lead=' + r.leadId + '">' + esc(r.leadNumber) + '</a>' +
             (r.roId ? ' · <a href="/board.html?ro=' + r.roId + '">RO ' + esc(r.roNumber) + '</a>' : '') + '</div></td>' +
             '<td>' + esc(r.label) + '</td><td class="num">' + (r.state === 'no_fee' ? '—' : r.feeCents !== null ? fmt$(r.feeCents) : '') + '</td></tr>';
         }).join('') + '</tbody></table>' : '<div class="empty">None yet.</div>');

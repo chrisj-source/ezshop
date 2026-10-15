@@ -23,6 +23,7 @@ export interface LaneCfg {
   route_group_id: number | null; route_user_id: number | null; rr_last_user_id: number | null;
   step1_hours: number; step2_hours: number; step2_group_id: number | null; step3_hours: number;
   chase_quote_days: number; statuses_off: string | null;
+  step1_min?: number | null; step2_min?: number | null; step3_min?: number | null; rr_users?: string | null;
 }
 
 export async function laneCfgs(cid: number): Promise<Record<string, LaneCfg>> {
@@ -30,6 +31,8 @@ export async function laneCfgs(cid: number): Promise<Record<string, LaneCfg>> {
   const out: Record<string, LaneCfg> = {};
   for (const l of LANES) {
     const r = rows.find(x => x.lane_key === l.key);
+    /* Minutes win when set (tenant 046); the hour fields carry the same figure, fractional. */
+    if (r && r.step1_min != null) { r.step1_hours = Number(r.step1_min) / 60; r.step2_hours = Number(r.step2_min) / 60; r.step3_hours = Number(r.step3_min) / 60; }
     out[l.key] = r ? { ...r } : {
       lane_key: l.key, route_mode: l.key === 'field' ? 'writer' : 'managers_rr', route_group_id: null, route_user_id: null,
       rr_last_user_id: null, step1_hours: l.overdueHours, step2_hours: l.overdueHours * 2, step2_group_id: null,
@@ -75,7 +78,12 @@ export async function pickOwner(cid: number, laneKey: string, writerId: number |
   const cfg = (await laneCfgs(cid))[laneKey];
   if (!cfg || cfg.route_mode === 'writer') return writerId;
   if (cfg.route_mode === 'person') return cfg.route_user_id ?? writerId;
-  const list = cfg.route_mode === 'group_rr' ? await groupMembers(cid, cfg.route_group_id) : await usersWithCap(cid, 'salesManager');
+  let list = cfg.route_mode === 'group_rr' ? await groupMembers(cid, cfg.route_group_id) : await usersWithCap(cid, 'salesManager');
+  if (cfg.route_mode === 'managers_rr' && cfg.rr_users) {
+    const pick = String(cfg.rr_users).split(',').map(Number);
+    const narrowed = list.filter(u => pick.includes(u));
+    if (narrowed.length) list = narrowed;
+  }
   const who = nextAfter(list, cfg.rr_last_user_id ? Number(cfg.rr_last_user_id) : null);
   if (who) await texec(cid, 'UPDATE lead_lanes SET rr_last_user_id = ? WHERE lane_key = ?', [who, laneKey]).catch(() => undefined);
   return who ?? writerId;

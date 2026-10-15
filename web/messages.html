@@ -148,7 +148,7 @@
 <div id="selbar"></div>
 <div id="main"></div>
 
-<script src="/shell.js?v=9"></script>
+<script src="/shell.js?v=10"></script>
 <script>
 (function () {
   var api = Shell.api, esc = Shell.esc, when = Shell.when;
@@ -358,7 +358,7 @@
     $('delOne').addEventListener('click', function () { del([SEL]); });
     var of = $('openFile');
     if (of) of.addEventListener('click', function () {
-      location.href = m.ro_id ? '/board.html?ro=' + m.ro_id : '/leads.html?lead=' + m.lead_id;
+      location.href = m.ro_id ? '/board.html?ro=' + m.ro_id : '/crm.html?lead=' + m.lead_id;
     });
   }
 

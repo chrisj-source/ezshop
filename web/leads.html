@@ -40,6 +40,9 @@
   /* Split: list left, detail panel pinned right. */
   .split { flex:1; min-height:0; display:grid; grid-template-columns:1fr 356px; }
   .listcol { overflow-y:auto; padding:0 0 20px; }
+  /* The pipeline fills the page; its lanes scroll on their own. */
+  body.pipe .listcol { overflow:hidden; padding:0; }
+  body.pipe #list { height:100%; }
   .leadgrid {
     display:grid; grid-template-columns:3px 1.6fr 1.35fr 1fr .9fr 1fr 62px;
     gap:13px; align-items:center; padding:0 18px;
@@ -208,11 +211,11 @@
   </div>
 </div>
 
-<script src="/shell.js?v=9"></script>
+<script src="/shell.js?v=10"></script>
 <script>
 (function () {
   var api = Shell.api, esc = Shell.esc;
-  var ME = null, META = null, LEADS = [], STAFF = [], SEL = null, TAB = 'working', SRC = 'All sources';
+  var ME = null, META = null, LEADS = [], STAFF = [], SEL = null, TAB = (/[?&]tab=(\w+)/.exec(location.search) || [0, 'working'])[1], SRC = 'All sources';
   var ADDING = false, DELETED = false, QUOTING = false;
 
   function todayISO() {
@@ -439,7 +442,7 @@
   }
 
   function render() {
-    var lh = $('list').previousElementSibling; if (lh && TAB !== 'pipe') lh.style.display = '';
+    if (TAB !== 'pipe') pipeMode(false);
     if (TAB === 'pipe') return renderPipeline();
     if (TAB === 'web') return renderWebRequests();
     var rows = filtered();
@@ -657,59 +660,114 @@
   }
 
   /* ------------------------------------------------------------ pipeline (1c)
-     One column per lane, side by side; rows oldest first; the status is the
-     coloured code on each row. Parked leads (junk, unqualified, vendor) are out
-     of every column behind the Parked toggle. */
-  var PIPE = null, PMETA = null, POWNER = '', POVER = false, PPARK = false;
+     The mockup, built: five lanes side by side, each headed with its count,
+     overdue, ladder and routing; rows oldest first with the status code, name,
+     owner, and on the right the appointment or how far up the ladder it is.
+     The lead docks on the right when one is picked (2a). */
+  var PIPE = null, PMETA = null, PSCOPE = 'all', PCLOSED = false, PPARK = false;
   function pipeMeta() { return PMETA ? Promise.resolve(PMETA) : api('/api/pipeline/meta').then(function (m) { PMETA = m; return m; }); }
-  function pchip(key) {
-    var s = PMETA && PMETA.statuses[key] || { label: key, tone: 'var(--dim)' };
-    return '<span style="font:600 8.5px var(--font);letter-spacing:.06em;text-transform:uppercase;color:' + s.tone +
-      ';border:1px solid ' + s.tone + ';border-radius:3px;padding:2px 5px;white-space:nowrap">' + esc(s.label) + '</span>';
+  function pdur(m) {
+    m = Math.max(0, Math.round(Number(m) || 0));
+    if (m < 60) return m + 'm';
+    if (m < 1440) return Math.floor(m / 60) + 'h' + (m % 60 ? m % 60 + 'm' : '');
+    return Math.floor(m / 1440) + 'd' + (Math.floor((m % 1440) / 60) ? Math.floor((m % 1440) / 60) + 'h' : '');
+  }
+  function pladder(arr) { return arr.map(function (m) { return m < 60 ? m + 'm' : m < 1440 ? (m / 60) + 'h' : (m / 1440) + 'd'; }).join(' · '); }
+  function pwhen(v) {
+    var d = Shell.wall ? Shell.wall(v) : new Date(v), now = new Date(), t = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    var dd = Math.round((new Date(d.getFullYear(), d.getMonth(), d.getDate()) - t) / 864e5);
+    var hr = d.getHours(), mn = d.getMinutes(), tm = ((hr % 12) || 12) + (mn ? ':' + String(mn).padStart(2, '0') : '') + ' ' + (hr < 12 ? 'AM' : 'PM');
+    return (dd === 0 ? 'Today ' : dd === 1 ? 'Tomorrow ' : d.toLocaleDateString('en-US', { weekday: 'short', day: 'numeric', month: 'short' }) + ' ') + tm;
+  }
+  var STEPC = ['var(--dim)', 'var(--acc)', 'oklch(0.76 0.13 55)', 'var(--stopped)'];
+  function pipeMode(on) {
+    document.body.classList.toggle('pipe', on);
+    $('kpis').style.display = on ? 'none' : '';
+    $('tabs').style.display = on ? 'none' : '';
+    var lh = $('list').previousElementSibling; if (lh) lh.style.display = on ? 'none' : '';
+    var split = document.querySelector('.split');
+    if (split) split.style.gridTemplateColumns = on && SEL == null && !ADDING ? '1fr' : '';
+    $('detCol').style.display = on && SEL == null && !ADDING ? 'none' : '';
   }
   function renderPipeline() {
-    var head = $('list').previousElementSibling; if (head) head.style.display = 'none';
-    $('list').innerHTML = '<div style="font:400 11.5px var(--font);color:var(--dim);padding:14px">Loading…</div>';
+    pipeMode(true);
+    if (!PIPE) $('list').innerHTML = '<div style="font:400 11.5px var(--font);color:var(--dim);padding:14px">Loading…</div>';
     Promise.all([pipeMeta(), api('/api/pipeline')]).then(function (x) {
       PIPE = x[1];
-      var q = ($('fSearch') ? $('fSearch').value : '').trim().toLowerCase();
-      var owners = {};
-      PIPE.leads.forEach(function (l) { if (l.owner_user_id) owners[l.owner_user_id] = l.owner_name || ('User ' + l.owner_user_id); });
-      var rows = PIPE.leads.filter(function (l) {
-        if (l.parked !== PPARK) return false;
-        if (POWNER && String(l.owner_user_id) !== POWNER) return false;
-        if (POVER && !l.overdue) return false;
-        if (q && [l.lead_number, l.name, l.phone, l.vehicle_text].join(' ').toLowerCase().indexOf(q) < 0) return false;
-        return true;
-      });
-      var bar = '<div style="display:flex;gap:10px;align-items:center;padding:10px 12px;flex-wrap:wrap;border-bottom:1px solid var(--whisper)">' +
-        '<select id="pOwner" class="detsel" style="width:auto"><option value="">Every owner</option>' +
-        Object.keys(owners).map(function (k) { return '<option value="' + k + '"' + (POWNER === k ? ' selected' : '') + '>' + esc(owners[k]) + '</option>'; }).join('') + '</select>' +
-        '<label style="display:flex;gap:5px;align-items:center;font:400 11.5px var(--font)"><input type="checkbox" id="pOver"' + (POVER ? ' checked' : '') + '> Overdue only</label>' +
-        '<label style="display:flex;gap:5px;align-items:center;font:400 11.5px var(--font)"><input type="checkbox" id="pPark"' + (PPARK ? ' checked' : '') + '> Parked</label></div>';
-      var cols = '<div style="display:grid;grid-auto-flow:column;grid-auto-columns:minmax(250px,1fr);gap:0;overflow-x:auto;min-height:0">' +
-        PIPE.lanes.map(function (ln) {
-          var mine = rows.filter(function (l) { return l.lane === ln.key; });
-          var od = mine.filter(function (l) { return l.overdue; }).length;
-          return '<div style="border-right:1px solid var(--whisper);min-width:0">' +
-            '<div style="padding:10px 12px;border-bottom:1px solid var(--line);display:flex;gap:8px;align-items:baseline">' +
-              '<span style="font:600 9px var(--font);letter-spacing:.12em;text-transform:uppercase;color:var(--acc2)">' + esc(ln.label) + '</span>' +
-              '<span style="font:400 11px var(--font);color:var(--dim)">' + mine.length + (od ? ' · <span style="color:var(--stopped)">' + od + ' overdue</span>' : '') + '</span></div>' +
-            (mine.length ? mine.map(function (l) {
-              return '<div class="prow" data-id="' + l.id + '" style="padding:8px 12px;border-bottom:1px solid var(--whisper);cursor:pointer;' +
-                (SEL === l.id ? 'background:var(--whisper);' : '') + (l.overdue ? 'border-left:2px solid var(--stopped);' : 'border-left:2px solid transparent;') + '">' +
-                '<div style="display:flex;gap:6px;align-items:center"><span style="font:500 12px var(--font);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(l.name || l.lead_number) + '</span>' + pchip(l.status) + '</div>' +
-                '<div style="font:400 10.5px var(--font);color:var(--dim);margin-top:3px">' + esc([l.vehicle_text, l.owner_name, ageText(Math.floor(Number(l.age_hours) / 24)), l.campaign].filter(Boolean).join(' · ')) + '</div></div>';
-            }).join('') : '<div style="font:400 11px var(--font);color:var(--dim);padding:12px">Nothing here.</div>') + '</div>';
-        }).join('') + '</div>';
-      $('list').innerHTML = bar + cols;
-      $('pOwner').addEventListener('change', function () { POWNER = this.value; renderPipeline(); });
-      $('pOver').addEventListener('change', function () { POVER = this.checked; renderPipeline(); });
-      $('pPark').addEventListener('change', function () { PPARK = this.checked; renderPipeline(); });
-      Array.prototype.forEach.call($('list').querySelectorAll('.prow'), function (el) {
-        el.addEventListener('click', function () { SEL = Number(el.dataset.id); ADDING = false; renderPipeline(); renderDetail(); });
-      });
+      paintPipeline();
     }).catch(function (e) { $('list').innerHTML = '<div style="padding:14px" class="msg err">' + esc(e.message) + '</div>'; });
+  }
+  function paintPipeline() {
+    var q = ($('pFind') ? $('pFind').value : '').trim().toLowerCase();
+    var base = PIPE.leads.filter(function (l) { return PPARK ? l.parked : (!l.parked && (PCLOSED || !l.closed)); });
+    var cnt = {
+      all: base.length,
+      mine: base.filter(function (l) { return Number(l.owner_user_id) === PIPE.me; }).length,
+      un: base.filter(function (l) { return !l.owner_user_id; }).length,
+      esc: base.filter(function (l) { return l.step >= 2; }).length
+    };
+    var rows = base.filter(function (l) {
+      if (PSCOPE === 'mine' && Number(l.owner_user_id) !== PIPE.me) return false;
+      if (PSCOPE === 'un' && l.owner_user_id) return false;
+      if (PSCOPE === 'esc' && l.step < 2) return false;
+      if (q && [l.lead_number, l.name, l.phone, l.vehicle_text, l.ro_number].join(' ').toLowerCase().indexOf(q) < 0) return false;
+      return true;
+    });
+    var seg = function (items, cur, attr) {
+      return '<div style="display:flex;border:1px solid var(--line);border-radius:6px;overflow:hidden">' + items.map(function (i) {
+        var on = i[0] === cur;
+        return (i[2] ? '<a href="' + i[2] + '"' : '<button ' + attr + '="' + i[0] + '"') + ' style="font:' + (on ? 500 : 400) + ' 12.5px var(--font);padding:7px 14px;border:none;cursor:pointer;text-decoration:none;' +
+          (on ? 'background:var(--acc);color:var(--bg)' : 'background:transparent;color:var(--muted)') + '">' + i[1] + (i[2] ? '</a>' : '</button>');
+      }).join('') + '</div>';
+    };
+    var bar = '<div style="display:flex;gap:10px;align-items:center;padding:10px 12px;flex-wrap:wrap;border-bottom:1px solid var(--line)">' +
+      seg([['pipe', 'Pipeline'], ['list', 'List'], ['tasks', 'Tasks', '/tasks.html'], ['refs', 'Referrers', '/referrals.html']], 'pipe', 'data-pview') +
+      seg([['all', 'All ' + cnt.all], ['mine', 'Mine ' + cnt.mine], ['un', 'Unassigned ' + cnt.un], ['esc', 'Escalated ' + cnt.esc]], PSCOPE, 'data-pscope') +
+      '<input id="pFind" class="detsel" placeholder="Find a name, vehicle, phone or RO…" style="flex:1;min-width:200px;max-width:380px" value="' + esc(q) + '">' +
+      '<label style="display:flex;gap:6px;align-items:center;font:400 12px var(--font);border:1px solid var(--line);border-radius:6px;padding:6px 10px"><input type="checkbox" id="pClosed"' + (PCLOSED ? ' checked' : '') + '> Show closed</label>' +
+      '<label style="display:flex;gap:6px;align-items:center;font:400 12px var(--font);border:1px solid var(--line);border-radius:6px;padding:6px 10px"><input type="checkbox" id="pPark"' + (PPARK ? ' checked' : '') + '> Parked</label>' +
+      '<button class="winbtn" id="pNew" style="margin-left:auto;width:auto;padding:7px 16px">New lead</button></div>';
+    var cols = '<div style="display:grid;grid-auto-flow:column;grid-auto-columns:minmax(270px,1fr);overflow-x:auto;flex:1;min-height:0">' +
+      PIPE.lanes.map(function (ln) {
+        var mine = rows.filter(function (l) { return l.lane === ln.key; });
+        var od = mine.filter(function (l) { return l.overdue; }).length;
+        return '<div style="border-right:1px solid var(--line);min-width:0;display:flex;flex-direction:column;min-height:0">' +
+          '<div style="padding:10px 12px;border-bottom:1px solid var(--line);background:var(--surf)">' +
+            '<div style="display:flex;align-items:baseline;gap:8px"><span style="font:600 15px var(--font)">' + esc(ln.label) + '</span>' +
+            '<span style="font:400 13px var(--font);color:var(--muted)">' + mine.length + '</span>' +
+            (od ? '<span style="margin-left:auto;font:400 12px var(--font);color:var(--stopped)">' + od + ' overdue</span>' : '') + '</div>' +
+            '<div style="font:400 11.5px var(--font);color:var(--muted);margin-top:3px">' + esc(pladder(ln.ladderMin)) + ' · ' + esc(ln.route) + '</div></div>' +
+          '<div style="overflow-y:auto;flex:1;min-height:0">' +
+          (mine.length ? mine.map(function (l) {
+            var s = PMETA.statuses[l.status] || { code: '?', tone: 'var(--dim)' };
+            var flag, fc;
+            if (l.next_appt) { flag = pwhen(l.next_appt); fc = PMETA.statuses.appointment_set.tone; }
+            else if (l.status === 'in_shop' && l.ro_number) { flag = 'RO ' + l.ro_number; fc = s.tone; }
+            else if (l.step) { flag = 'S' + l.step + ' ' + pdur(l.overMin); fc = STEPC[l.step]; }
+            else { flag = pdur(l.age_min); fc = 'var(--muted)'; }
+            var bar = SEL === l.id ? 'var(--acc)' : l.step >= 2 ? STEPC[l.step] : 'transparent';
+            return '<div class="prow" data-id="' + l.id + '" style="display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:4px 10px;align-items:center;padding:9px 12px 9px 10px;cursor:pointer;' +
+              'border-bottom:1px solid var(--whisper);border-left:3px solid ' + bar + ';' + (SEL === l.id ? 'background:var(--surf);' : '') + (l.closed ? 'opacity:.55;' : '') + '">' +
+              '<span style="grid-row:span 2;align-self:start;margin-top:2px;font:600 10px var(--font);letter-spacing:.04em;color:' + s.tone + ';border:1px solid ' + s.tone + ';border-radius:3px;padding:2px 6px;min-width:44px;text-align:center">' + esc(s.code) + '</span>' +
+              '<span style="font:500 13.5px var(--font);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(l.name || l.lead_number) + '</span>' +
+              '<span></span>' +
+              '<span style="font:400 12px var(--font);color:' + (l.owner_user_id ? 'var(--muted)' : 'var(--acc)') + ';overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(l.owner_name || 'Unassigned') + '</span>' +
+              '<span style="font:500 12px var(--font);color:' + fc + ';white-space:nowrap;text-align:right">' + esc(flag) + '</span></div>';
+          }).join('') : '<div style="font:400 11.5px var(--font);color:var(--dim);padding:14px 12px">Nothing here.</div>') + '</div></div>';
+      }).join('') + '</div>';
+    $('list').innerHTML = '<div style="display:flex;flex-direction:column;height:100%;min-height:0">' + bar + cols + '</div>';
+    var f = $('pFind');
+    f.addEventListener('input', function () { var p = f.selectionStart; paintPipeline(); var g = $('pFind'); g.focus(); g.setSelectionRange(p, p); });
+    Array.prototype.forEach.call($('list').querySelectorAll('[data-pscope]'), function (b) { b.addEventListener('click', function () { PSCOPE = b.dataset.pscope; paintPipeline(); }); });
+    Array.prototype.forEach.call($('list').querySelectorAll('[data-pview]'), function (b) {
+      b.addEventListener('click', function () { if (b.dataset.pview === 'list') { TAB = 'working'; pipeMode(false); renderTabs(); render(); } });
+    });
+    $('pClosed').addEventListener('change', function () { PCLOSED = this.checked; paintPipeline(); });
+    $('pPark').addEventListener('change', function () { PPARK = this.checked; paintPipeline(); });
+    $('pNew').addEventListener('click', function () { ADDING = true; SEL = null; pipeMode(true); renderDetail(); });
+    Array.prototype.forEach.call($('list').querySelectorAll('.prow'), function (el) {
+      el.addEventListener('click', function () { SEL = Number(el.dataset.id); ADDING = false; pipeMode(true); paintPipeline(); renderDetail(); });
+    });
   }
   /* The lead's pipeline status, in the detail: its lane's statuses plus parked. */
   function pipeSelect(lead) {
@@ -1631,6 +1689,7 @@
     SEL = null;
     render();
     renderDetail();
+    if (TAB === 'pipe') pipeMode(true);
   });
 
   /* Deleted leads are off the list by default. The toggle is how one is found
