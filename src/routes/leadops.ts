@@ -45,7 +45,7 @@ export async function registerLeadOps(app: FastifyInstance): Promise<void> {
     const cfg = lane ? (await laneCfgs(cid))[lane.key] : null;
     const off = String(cfg?.statuses_off ?? '').split(',');
     const files = ro?.client_id && ctx.caps.seesRepairOrders ? await tq<RowDataPacket[]>(cid, `
-      SELECT r.id, r.ro_number, r.opened_at, r.closed_at, r.voided_at, s.label AS status_label, CONCAT_WS(' ', v.year, v.make, v.model) AS vehicle, v.vin
+      SELECT r.id, r.ro_number, r.opened_at, COALESCE(r.picked_up_at, r.closed_at) AS closed_at, r.voided_at, s.label AS status_label, CONCAT_WS(' ', v.year, v.make, v.model) AS vehicle, v.vin
       FROM repair_orders r LEFT JOIN statuses s ON s.slot_id = r.status_slot LEFT JOIN vehicles v ON v.id = r.vehicle_id
       WHERE r.client_id = ? ORDER BY r.opened_at DESC LIMIT 40`, [ro.client_id]) : [];
     const leadEvents = lead ? await tq<RowDataPacket[]>(cid,
@@ -98,7 +98,7 @@ export async function registerLeadOps(app: FastifyInstance): Promise<void> {
     const cid = ctx.company!.id;
     const rows = await tq<RowDataPacket[]>(cid, `
       SELECT l.id, l.lead_number, TRIM(CONCAT_WS(' ', l.first_name, l.last_name)) AS name, l.phone, l.vehicle_text, l.source,
-             l.state, l.pipe_status, l.received_at, l.settled_at, l.ro_id, r.ro_number, r.closed_at, r.voided_at, r.client_id,
+             l.state, l.pipe_status, l.received_at, l.settled_at, l.ro_id, r.ro_number, COALESCE(r.picked_up_at, r.closed_at) AS closed_at, r.voided_at, r.client_id,
              CONCAT_WS(' ', v.year, v.make, v.model) AS ro_vehicle,
              (SELECT f.id FROM referrers f WHERE f.client_id = r.client_id AND f.active = 1 LIMIT 1) AS referrer_id
       FROM leads l

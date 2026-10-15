@@ -83,7 +83,7 @@ const REF_SELECT = `
          TRIM(CONCAT_WS(' ', l.first_name, l.last_name)) AS customer, l.vehicle_text AS vehicle,
          f.id AS referrer_id, f.name AS referrer_name, f.kind AS referrer_kind, f.payee_default,
          l.referral_no_fee, l.referral_fee_cents, l.referral_payee, l.referral_tl_decision, l.referral_tl_by,
-         r.id AS ro_id, r.ro_number, r.closed_at, r.total_loss_at, r.voided_at,
+         r.id AS ro_id, r.ro_number, COALESCE(r.picked_up_at, r.closed_at) AS closed_at, r.total_loss_at, r.voided_at,
          p.id AS paid_id, p.paid_at, p.amount_cents AS paid_amount, p.payee AS paid_payee,
          p.method AS paid_method, p.reference AS paid_reference
   FROM leads l

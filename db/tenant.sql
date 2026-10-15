@@ -199,6 +199,7 @@ CREATE TABLE repair_orders (
   rental_provider   VARCHAR(32)   NULL COMMENT 'Avis, Budget, Enterprise, Hertz, Loaner',
   rental_covered    TINYINT(1)    NOT NULL DEFAULT 0 COMMENT 'policy covers it, so there is reimbursement to chase',
   commission_payable TINYINT(1)   NOT NULL DEFAULT 1 COMMENT 'marked on the sales pay side, per file',
+  picked_up_at      DATETIME      NULL COMMENT 'Date picked up — stamped at Picked Up (tenant 047)',
   sales_pct         DECIMAL(5,2)  NULL COMMENT 'salesperson 1 share; NULL = no split',
   sales2_user_id    BIGINT UNSIGNED NULL,
   sales2_pct        DECIMAL(5,2)  NULL,

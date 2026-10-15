@@ -6,7 +6,7 @@
 <meta name="theme-color" content="#1c2740">
 <title>Board — Easy Shop</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/shell.css?v=8">
+<link rel="stylesheet" href="/shell.css?v=9">
 <style>
   /* ---- shared ---- */
   .ro { font-weight:500; font-variant-numeric:tabular-nums; }
@@ -1976,7 +1976,7 @@
           f.map(function (r) {
             var state = r.voided_at ? 'Voided ' + day(r.voided_at)
               : r.close_date ? 'Closed ' + day(r.close_date)
-              : r.closed_at ? 'Picked up ' + day(r.closed_at) + ' · not closed'
+              : (r.picked_up_at || r.closed_at) ? 'Picked up ' + day(r.picked_up_at || r.closed_at) + ' · not closed'
               : (r.status_label || 'Open');
             return '<button class="btn btn-ghost" data-findro="' + r.id + '" style="display:flex;justify-content:space-between;gap:12px;text-align:left">' +
               '<span><strong>RO ' + esc(r.ro_number) + '</strong> \u00b7 ' +
@@ -2694,7 +2694,7 @@
         dateField('openedAt', 'Date in', r.opened_at) +
         dateField('promisedAt', 'Promised delivery', r.promised_at) +
         dateField('deliveredAt', 'Date completed', r.delivered_at) +
-        dateField('closedAt', 'Date picked up', r.closed_at) +
+        dateField('closedAt', 'Date picked up', r.picked_up_at || r.closed_at) +
         f2('Days in shop', daysIn(r), 1) +
         f2('Variance', r.target_days ? (daysIn(r) - r.target_days > 0 ? '+' : '') +
           (daysIn(r) - r.target_days) + 'd' : '—', 1) +
@@ -2704,7 +2704,7 @@
         f2('Date in', r.opened_at ? shopDate(r.opened_at) : null, 1) +
         f2('Promised', r.promised_at ? shopDate(r.promised_at) : null, 1) +
         f2('Completed', r.delivered_at ? shopDate(r.delivered_at) : null, 1) +
-        f2('Picked up', r.closed_at ? shopDate(r.closed_at) : null, 1) +
+        f2('Picked up', (r.picked_up_at || r.closed_at) ? shopDate(r.picked_up_at || r.closed_at) : null, 1) +
         f2('Days in shop', daysIn(r), 1) + '</div>');
     }
 

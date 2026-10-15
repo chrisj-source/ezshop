@@ -236,9 +236,13 @@ label.fl {
 .gridhead .hgrip:hover::after {
   content:''; position:absolute; right:5px; top:11px; bottom:9px; width:1px; background:var(--acc);
 }
+/* min-height, not height: zoomed in, or with a narrow status column, the flags
+   wrap to a second line and a fixed height let them spill over the next row. */
 .gridrow {
-  height:52px; border-bottom:1px solid var(--whisper); cursor:pointer;
+  min-height:52px; padding-top:6px; padding-bottom:6px; box-sizing:border-box;
+  border-bottom:1px solid var(--whisper); cursor:pointer;
 }
+.gridrow > div { min-width:0; }
 .gridrow:hover { background:var(--surf); }
 .cellmain {
   font:400 12px var(--font); color:var(--text);

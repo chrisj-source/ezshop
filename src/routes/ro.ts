@@ -277,9 +277,13 @@ export async function registerRepairOrders(app: FastifyInstance): Promise<void> 
 
         await c.query(
           `UPDATE repair_orders SET status_slot = ?, status_since = NOW(),
-             closed_at = IF(? = 1, COALESCE(closed_at, NOW()), IF(close_date IS NULL, NULL, closed_at))
+             closed_at = IF(? = 1, NOW(), IF(close_date IS NULL, NULL, closed_at)),
+             /* The pick-up date is its own column: closed_at means closed, and
+                stamping it at Picked Up took every picked-up car off the open
+                board (tenant 047). */
+             picked_up_at = IF(? = 1, COALESCE(picked_up_at, NOW()), IF(close_date IS NULL, NULL, picked_up_at))
            WHERE id = ?`,
-          [target.slot_id, pastPickup ? 1 : 0, id]
+          [target.slot_id, target.is_terminal, pastPickup ? 1 : 0, id]
         );
 
         await c.query(
@@ -829,7 +833,7 @@ export async function registerRepairOrders(app: FastifyInstance): Promise<void> 
       openedAt:    { col: 'opened_at',    label: 'Date in',        time: true },
       approvedAt:  { col: 'approved_at',  label: 'Date approved',  time: true },
       deliveredAt: { col: 'delivered_at', label: 'Date completed', time: true },
-      closedAt:    { col: 'closed_at',    label: 'Date picked up', time: true },
+      closedAt:    { col: 'picked_up_at', label: 'Date picked up', time: true },
       promisedAt:  { col: 'promised_at',  label: 'Promised',       time: false },
       dateOfLoss:  { col: 'date_of_loss', label: 'Date of loss',   time: false }
     };

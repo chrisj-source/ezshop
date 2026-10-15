@@ -79,13 +79,14 @@
   C.highlight = function () { if (VIEW === 'pipe' && PIPE) paintPipe(document.getElementById('crmBody')); };
   C.refreshToolbar = function () {
     var bar = document.getElementById('crmBar');
-    var subs = [['pipe', 'Pipeline'], ['tasks', 'Tasks'], ['refs', 'Referrers']];
-    var mid = VIEW === 'tasks' ? C.tasksToolbar() : VIEW === 'refs' ? C.refsToolbar() : pipeToolbar();
+    var w = C.webState && C.webState.D ? C.webState.D.waiting : null;
+    var subs = [['pipe', 'Pipeline'], ['tasks', 'Tasks'], ['refs', 'Referrers'], ['web', 'Web requests' + (w ? ' ' + w : '')]];
+    var mid = VIEW === 'tasks' ? C.tasksToolbar() : VIEW === 'refs' ? C.refsToolbar() : VIEW === 'web' ? C.webToolbar() : pipeToolbar();
     bar.innerHTML = C.seg(subs, VIEW, 'data-sub') + mid + '<div style="margin-left:auto"></div>' +
       (C.me.caps.manageLeads ? '<span id="crmNew" style="font:500 11px var(--font);color:var(--bg);background:var(--acc);border-radius:4px;padding:7px 14px;cursor:pointer;white-space:nowrap">New lead</span>' : '');
     C.each(bar, '[data-sub]', function (b) { b.addEventListener('click', function () { C.go(b.dataset.sub); }); });
     var nl = bar.querySelector('#crmNew'); if (nl) nl.addEventListener('click', C.newLead);
-    if (VIEW === 'tasks') C.wireTasksToolbar(bar); else if (VIEW === 'refs') C.wireRefsToolbar(bar); else wirePipeToolbar(bar);
+    if (VIEW === 'tasks') C.wireTasksToolbar(bar); else if (VIEW === 'refs') C.wireRefsToolbar(bar); else if (VIEW === 'web') C.wireWebToolbar(bar); else wirePipeToolbar(bar);
   };
 
   /* ------------------------------------------------------------ pipeline (1c) */
@@ -97,7 +98,6 @@
     return C.seg([['all', 'All ' + n.all], ['mine', 'Mine ' + n.mine], ['un', 'Unassigned ' + n.un], ['esc', 'Escalated ' + n.esc]], P.scope, 'data-scope') +
       '<input id="pq" value="' + C.esc(P.q) + '" placeholder="Find a name, vehicle, phone or RO…" style="width:240px;background:transparent;border:1px solid var(--line);border-radius:4px;color:var(--text);font:400 11.5px var(--font);padding:6px 10px">' +
       C.toggle('pClosed', P.closed, 'Show closed') + C.toggle('pPark', P.park, 'Parked') +
-      '<a href="/leads.html?tab=web" style="font:400 11.5px var(--font);padding:5px 10px;border-radius:4px;border:1px solid var(--line);color:var(--muted);text-decoration:none">Web requests</a>' +
       '<a href="/leads.html?tab=all" style="font:400 11.5px var(--font);padding:5px 10px;border-radius:4px;border:1px solid var(--line);color:var(--muted);text-decoration:none">List</a>';
   }
   function wirePipeToolbar(bar) {
@@ -157,7 +157,9 @@
       C.lanes = m.lanes;
       var h = location.hash.replace('#', ''), lm = /lead=(\d+)/.exec(location.search + '&' + h);
       if (lm) C.leadState.id = Number(lm[1]);
-      C.go(['tasks', 'refs', 'clients'].indexOf(h) >= 0 ? h : 'pipe');
+      C.go(['tasks', 'refs', 'clients', 'web'].indexOf(h) >= 0 ? h : 'pipe');
+      /* The waiting count on the Web requests tab, without opening it. */
+      C.api('/api/web-requests?tab=waiting').then(function (d) { if (!C.webState.D) { C.webState.D = d; C.webState.peek = true; C.refreshToolbar(); } }).catch(function () {});
       setInterval(function () { if (!document.hidden && !document.getElementById('crmModal').innerHTML) { if (VIEW === 'pipe') C.views.pipe(document.getElementById('crmBody')); else if (VIEW === 'tasks') C.views.tasks(document.getElementById('crmBody')); } }, 90000);
     });
   }).catch(function (e) { if (e.message !== 'signed out') console.error(e); });
