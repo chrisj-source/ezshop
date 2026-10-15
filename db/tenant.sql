@@ -474,6 +474,17 @@ CREATE TABLE leads (
   sales2_pct      DECIMAL(5,2)  NULL,
   sales3_user_id  BIGINT UNSIGNED NULL,
   sales3_pct      DECIMAL(5,2)  NULL,
+  pipe_status     VARCHAR(32)   NULL COMMENT 'lib/pipeline.ts; NULL = the lane first status',
+  esc_step        TINYINT       NOT NULL DEFAULT 0 COMMENT 'ladder step reached since the last touch',
+  esc_step_at     DATETIME      NULL,
+  pipe_status_at  DATETIME      NULL,
+  referrer_id     BIGINT UNSIGNED NULL,
+  referral_no_fee TINYINT(1)    NOT NULL DEFAULT 0,
+  referral_fee_cents BIGINT     NULL,
+  referral_payee  VARCHAR(160)  NULL COMMENT 'dealer fees: who it is paid to this time',
+  referral_tl_decision ENUM('pay','none') NULL COMMENT 'total loss: a manager decides',
+  referral_tl_by  VARCHAR(120)  NULL,
+  referral_tl_at  DATETIME      NULL,
   contract_doc_id BIGINT UNSIGNED NULL COMMENT 'photo from the sales app',
   appointment_id  BIGINT UNSIGNED NULL,
   ro_id           BIGINT UNSIGNED NULL COMMENT 'the file this lead became, converted or linked',
@@ -953,6 +964,107 @@ CREATE TABLE staff_sms (
   approval    TINYINT(1)    NULL,
   updated_by  BIGINT UNSIGNED NULL,
   updated_at  DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Referrers and referral payouts (tenant 043).
+CREATE TABLE referrers (
+  id               BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  kind             ENUM('agent','adjuster','dealer','past_customer') NOT NULL,
+  name             VARCHAR(160)  NOT NULL COMMENT 'the person, or the dealership',
+  company          VARCHAR(160)  NULL COMMENT 'agency / carrier / dealership group',
+  phone            VARCHAR(10)   NULL COMMENT 'ten digits',
+  email            VARCHAR(190)  NULL,
+  address          VARCHAR(190)  NULL,
+  city             VARCHAR(90)   NULL,
+  addr_state       VARCHAR(32)   NULL,
+  zip              VARCHAR(16)   NULL,
+  client_id        BIGINT UNSIGNED NULL COMMENT 'set when the referrer is an existing client',
+  default_fee_cents BIGINT       NULL,
+  payee_default    VARCHAR(160)  NULL COMMENT 'dealer: who the fee usually goes to (GM, service director...)',
+  w9_on_file       TINYINT(1)    NOT NULL DEFAULT 0,
+  note             VARCHAR(255)  NULL,
+  active           TINYINT(1)    NOT NULL DEFAULT 1,
+  created_by       BIGINT UNSIGNED NULL,
+  created_at       DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at       DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  KEY ix_ref_phone (phone),
+  KEY ix_ref_email (email),
+  KEY ix_ref_client (client_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE referral_payouts (
+  id            BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  lead_id       BIGINT UNSIGNED NOT NULL,
+  referrer_id   BIGINT UNSIGNED NOT NULL,
+  ro_id         BIGINT UNSIGNED NULL,
+  amount_cents  BIGINT        NOT NULL,
+  payee         VARCHAR(160)  NOT NULL,
+  earned_at     DATETIME      NULL,
+  pay_date      DATE          NULL,
+  method        VARCHAR(40)   NULL COMMENT 'check, cash, ...',
+  reference     VARCHAR(60)   NULL COMMENT 'check number',
+  note          VARCHAR(255)  NULL,
+  paid_at       DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  paid_by       BIGINT UNSIGNED NULL,
+  paid_by_name  VARCHAR(120)  NULL,
+  UNIQUE KEY uq_payout_lead (lead_id),
+  KEY ix_payout_referrer (referrer_id, paid_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Lead routing, ladder, groups, teams, callbacks (tenant 045).
+CREATE TABLE notify_groups (
+  id          BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  name        VARCHAR(80)   NOT NULL,
+  system_key  VARCHAR(32)   NULL COMMENT 'sales_managers: follows the capability, not edited by hand',
+  created_at  DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_ngroup_sys (system_key)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE notify_group_members (
+  group_id    BIGINT UNSIGNED NOT NULL,
+  user_id     BIGINT UNSIGNED NOT NULL,
+  PRIMARY KEY (group_id, user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE lead_lanes (
+  lane_key        VARCHAR(16)   NOT NULL PRIMARY KEY,
+  route_mode      ENUM('managers_rr','group_rr','person','writer') NOT NULL DEFAULT 'managers_rr',
+  route_group_id  BIGINT UNSIGNED NULL,
+  route_user_id   BIGINT UNSIGNED NULL,
+  rr_last_user_id BIGINT UNSIGNED NULL,
+  step1_hours     INT           NOT NULL DEFAULT 24 COMMENT 'step 1 is always the lead owner',
+  step2_hours     INT           NOT NULL DEFAULT 48,
+  step2_group_id  BIGINT UNSIGNED NULL COMMENT 'NULL = sales managers',
+  step3_hours     INT           NOT NULL DEFAULT 72 COMMENT 'step 3 tells the owner',
+  chase_quote_days INT          NOT NULL DEFAULT 3,
+  statuses_off    VARCHAR(400)  NULL COMMENT 'comma list of lane statuses switched off',
+  updated_at      DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE teams (
+  id               BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  name             VARCHAR(80)   NOT NULL,
+  manager_user_id  BIGINT UNSIGNED NULL,
+  created_at       DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE team_members (
+  user_id   BIGINT UNSIGNED NOT NULL PRIMARY KEY COMMENT 'a person is in one team',
+  team_id   BIGINT UNSIGNED NOT NULL,
+  KEY ix_tm_team (team_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE lead_callbacks (
+  id          BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  lead_id     BIGINT UNSIGNED NOT NULL,
+  user_id     BIGINT UNSIGNED NULL COMMENT 'whose task',
+  due_at      DATETIME      NOT NULL,
+  note        VARCHAR(255)  NULL,
+  done_at     DATETIME      NULL,
+  created_by  BIGINT UNSIGNED NULL,
+  created_at  DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  KEY ix_cb_open (done_at, due_at),
+  KEY ix_cb_lead (lead_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE commission_runs (

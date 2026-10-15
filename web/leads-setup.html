@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1c2740">
+<title>Leads setup — Easy Shop</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/shell.css?v=8">
+<style>
+  #main { flex:1; min-height:0; overflow-y:auto; padding:0 18px 40px; }
+  .titlerow { padding:16px 18px 0; } .titlerow h1 { font:500 18px var(--font); margin:0; }
+  .titlemeta { font:400 11.5px var(--font); color:var(--dim); margin-top:4px; }
+  .viewrow { display:flex; gap:3px; padding:14px 18px 0; border-bottom:1px solid var(--line); flex:none; }
+  .viewtab { font:400 12px var(--font); color:var(--dim); background:transparent; border:none; border-bottom:2px solid transparent; padding:8px 13px; margin-bottom:-1px; cursor:pointer; }
+  .viewtab.sel { color:var(--acc); font-weight:500; border-bottom-color:var(--acc); }
+  .card { border:1px solid var(--line); border-radius:8px; padding:14px 16px; margin-top:14px; max-width:820px; }
+  .card h3 { font:500 14px var(--font); margin:0 0 10px; }
+  .lbl { font:600 8.5px var(--font); letter-spacing:.12em; text-transform:uppercase; color:var(--dim); margin:12px 0 5px; }
+  .pick { background:var(--chip); border:1px solid var(--line); border-radius:4px; color:var(--text); font:400 11.5px var(--font); padding:6px 9px; }
+  .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+  .sub { font:400 10.5px var(--font); color:var(--dim); }
+  .chk { display:flex; gap:6px; align-items:center; font:400 11.5px var(--font); }
+  .msg { font:400 11px var(--font); margin-top:8px; }
+  .ok { color:var(--done); } .err { color:var(--stopped); }
+  .people { display:grid; grid-template-columns:repeat(auto-fill,minmax(180px,1fr)); gap:4px 12px; margin-top:6px; }
+</style>
+</head>
+<body>
+<div class="bar">
+  <div class="brand"><div class="mark">ES</div><div class="word">Easy Shop</div></div>
+  <div class="vr"></div><div class="co" id="coName">—</div><div id="nav"></div><div class="spacer"></div>
+  <div id="bell"></div><div class="who" id="who">—</div><button class="ghostbtn" id="signout">Sign out</button>
+</div>
+<div class="hairline"></div>
+<div class="titlerow"><h1>Leads setup</h1><div class="titlemeta"><a href="/admin.html">Admin</a> · who gets new leads, the escalation ladder, groups and teams</div></div>
+<div class="viewrow" id="views"></div>
+<div id="main"></div>
+<script src="/shell.js?v=9"></script>
+<script>
+(function () {
+  var api = Shell.api, esc = Shell.esc;
+  var $ = function (id) { return document.getElementById(id); };
+  var VIEW = 'sources', L = null;
+  function tabs() {
+    $('views').innerHTML = [['sources', 'Sources'], ['groups', 'Notification groups'], ['teams', 'Teams']].map(function (v) {
+      return '<button class="viewtab' + (v[0] === VIEW ? ' sel' : '') + '" data-v="' + v[0] + '">' + v[1] + '</button>';
+    }).join('');
+    Array.prototype.forEach.call($('views').querySelectorAll('[data-v]'), function (b) { b.addEventListener('click', function () { VIEW = b.dataset.v; go(); }); });
+  }
+  function go() { tabs(); return VIEW === 'sources' ? sources() : VIEW === 'groups' ? groups() : teams(); }
+  function opts(list, sel, blank) {
+    return (blank ? '<option value="">' + esc(blank) + '</option>' : '') + list.map(function (o) {
+      return '<option value="' + o[0] + '"' + (String(o[0]) === String(sel) ? ' selected' : '') + '>' + esc(o[1]) + '</option>';
+    }).join('');
+  }
+
+  function sources() {
+    $('main').innerHTML = '<div class="sub" style="margin-top:14px">Loading…</div>';
+    api('/api/admin/lead-lanes').then(function (d) {
+      L = d;
+      var staff = d.staff.map(function (s) { return [s.user_id, s.display_name]; });
+      var groups = d.groups.map(function (g) { return [g.id, g.name]; });
+      $('main').innerHTML = d.lanes.map(function (l) {
+        var c = l.cfg, off = String(c.statuses_off || '').split(',');
+        var field = l.key === 'field';
+        return '<div class="card" data-lane="' + l.key + '"><h3>' + esc(l.label) + '</h3>' +
+          '<div class="lbl">A new lead goes to</div>' +
+          (field ? '<div class="sub">Always the rep who wrote it.</div>' :
+          '<div class="row"><select class="pick" data-f="mode">' + opts([['managers_rr', 'Sales managers, round robin'], ['group_rr', 'A notification group, round robin'], ['person', 'One person']], c.route_mode) + '</select>' +
+          '<select class="pick" data-f="group">' + opts(groups, c.route_group_id, 'Group…') + '</select>' +
+          '<select class="pick" data-f="person">' + opts(staff, c.route_user_id, 'Person…') + '</select></div>' +
+          '<div class="sub" style="margin-top:4px">' + d.managers.length + ' sales manager' + (d.managers.length === 1 ? '' : 's') + ' hold the permission today.</div>') +
+          '<div class="lbl">Escalation ladder — hours with no call, email or note</div>' +
+          '<div class="row"><span class="sub">Step 1 · lead owner</span><input class="pick" type="number" min="1" style="width:70px" data-f="h1" value="' + c.step1_hours + '">' +
+          '<span class="sub">Step 2 ·</span><select class="pick" data-f="g2">' + opts(groups, c.step2_group_id || (d.groups.filter(function (g) { return g.system_key === 'sales_managers'; })[0] || {}).id) + '</select>' +
+          '<input class="pick" type="number" min="1" style="width:70px" data-f="h2" value="' + c.step2_hours + '">' +
+          '<span class="sub">Step 3 · owner</span><input class="pick" type="number" min="1" style="width:70px" data-f="h3" value="' + c.step3_hours + '"></div>' +
+          '<div class="lbl">Statuses this lane uses</div><div class="row">' +
+          l.statuses.map(function (s) { return '<label class="chk"><input type="checkbox" data-st="' + s.key + '"' + (off.indexOf(s.key) >= 0 ? '' : ' checked') + '> ' + esc(s.label) + '</label>'; }).join('') +
+          l.always.map(function (s) { return '<label class="chk" title="Every lane has this — the automatic moves land in it"><input type="checkbox" checked disabled> ' + esc(s.label) + '</label>'; }).join('') + '</div>' +
+          '<div class="lbl">Chase quote after</div><div class="row"><input class="pick" type="number" min="1" style="width:70px" data-f="cq" value="' + c.chase_quote_days + '"><span class="sub">days</span></div>' +
+          '<div class="row" style="margin-top:12px"><button class="btn" data-save="' + l.key + '">Save ' + esc(l.label) + '</button><span class="msg" data-msg></span></div></div>';
+      }).join('');
+      Array.prototype.forEach.call(document.querySelectorAll('[data-save]'), function (b) {
+        b.addEventListener('click', function () {
+          var card = b.closest('[data-lane]'), f = function (k) { var el = card.querySelector('[data-f="' + k + '"]'); return el ? el.value : null; };
+          var body = { routeMode: f('mode') || 'writer', routeGroupId: f('group') || null, routeUserId: f('person') || null,
+            step1Hours: Number(f('h1')), step2Hours: Number(f('h2')), step2GroupId: f('g2') || null, step3Hours: Number(f('h3')), chaseQuoteDays: Number(f('cq')),
+            statusesOff: Array.prototype.filter.call(card.querySelectorAll('[data-st]'), function (x) { return !x.checked; }).map(function (x) { return x.dataset.st; }) };
+          var m = card.querySelector('[data-msg]');
+          api('/api/admin/lead-lanes/' + b.dataset.save, { method: 'PUT', body: JSON.stringify(body) })
+            .then(function () { m.textContent = 'Saved.'; m.className = 'msg ok'; })
+            .catch(function (e) { m.textContent = e.message; m.className = 'msg err'; });
+        });
+      });
+    }).catch(function (e) { $('main').innerHTML = '<div class="msg err">' + esc(e.message) + '</div>'; });
+  }
+
+  function staffList() { return L ? Promise.resolve(L.staff) : api('/api/admin/lead-lanes').then(function (d) { L = d; return d.staff; }); }
+
+  function groups() {
+    $('main').innerHTML = '<div class="sub" style="margin-top:14px">Loading…</div>';
+    Promise.all([staffList(), api('/api/admin/notify-groups')]).then(function (x) {
+      var staff = x[0], gs = x[1].groups;
+      $('main').innerHTML = gs.map(function (g) {
+        var sys = !!g.system_key;
+        return '<div class="card" data-g="' + g.id + '"><div class="row"><input class="pick" data-name value="' + esc(g.name) + '"' + (sys ? ' disabled' : '') + ' style="flex:1">' +
+          (sys ? '' : '<button class="btn btn-ghost" data-del>Delete</button>') + '</div>' +
+          (sys ? '<div class="sub" style="margin-top:6px">Follows the Sales manager permission (Roles). Not edited by hand.</div>' : '') +
+          '<div class="people">' + staff.map(function (s) {
+            return '<label class="chk"><input type="checkbox" data-u="' + s.user_id + '"' + (g.members.indexOf(Number(s.user_id)) >= 0 ? ' checked' : '') + (sys ? ' disabled' : '') + '> ' + esc(s.display_name) + '</label>';
+          }).join('') + '</div>' + (sys ? '' : '<div class="row" style="margin-top:10px"><button class="btn" data-save>Save</button><span class="msg" data-msg></span></div>') + '</div>';
+      }).join('') + '<div class="card"><div class="row"><input class="pick" id="ng" placeholder="New group, e.g. Internet desk" style="flex:1"><button class="btn" id="ngAdd">Add group</button></div></div>';
+      $('ngAdd').addEventListener('click', function () {
+        api('/api/admin/notify-groups', { method: 'POST', body: JSON.stringify({ name: $('ng').value }) }).then(groups).catch(function (e) { window.alert(e.message); });
+      });
+      Array.prototype.forEach.call(document.querySelectorAll('[data-g]'), function (card) {
+        var id = card.dataset.g, s = card.querySelector('[data-save]'), del = card.querySelector('[data-del]');
+        if (s) s.addEventListener('click', function () {
+          var m = card.querySelector('[data-msg]');
+          api('/api/admin/notify-groups/' + id, { method: 'PUT', body: JSON.stringify({ name: card.querySelector('[data-name]').value,
+            members: Array.prototype.filter.call(card.querySelectorAll('[data-u]'), function (x) { return x.checked; }).map(function (x) { return Number(x.dataset.u); }) }) })
+            .then(function () { m.textContent = 'Saved.'; m.className = 'msg ok'; }).catch(function (e) { m.textContent = e.message; m.className = 'msg err'; });
+        });
+        if (del) del.addEventListener('click', function () {
+          if (!window.confirm('Delete this group?')) return;
+          api('/api/admin/notify-groups/' + id, { method: 'DELETE' }).then(groups).catch(function (e) { window.alert(e.message); });
+        });
+      });
+    }).catch(function (e) { $('main').innerHTML = '<div class="msg err">' + esc(e.message) + '</div>'; });
+  }
+
+  function teams() {
+    $('main').innerHTML = '<div class="sub" style="margin-top:14px">Loading…</div>';
+    Promise.all([staffList(), api('/api/teams')]).then(function (x) {
+      var staff = x[0], ts = x[1].teams;
+      var inTeam = {}; ts.forEach(function (t) { t.members.forEach(function (u) { inTeam[u] = t.name; }); });
+      $('main').innerHTML = '<div class="sub" style="margin-top:14px">A team is a name and a manager, and a person is in one team. It groups the Tasks queue; it is not a permission.</div>' +
+        ts.map(function (t) {
+          return '<div class="card" data-t="' + t.id + '"><div class="row"><input class="pick" data-name value="' + esc(t.name) + '" style="flex:1">' +
+            '<span class="sub">Manager</span><select class="pick" data-mgr>' + opts(staff.map(function (s) { return [s.user_id, s.display_name]; }), t.manager_user_id, 'None') + '</select>' +
+            '<button class="btn btn-ghost" data-del>Delete</button></div><div class="people">' + staff.map(function (s) {
+              var other = inTeam[s.user_id] && t.members.indexOf(Number(s.user_id)) < 0 ? ' <span class="sub">(' + esc(inTeam[s.user_id]) + ')</span>' : '';
+              return '<label class="chk"><input type="checkbox" data-u="' + s.user_id + '"' + (t.members.indexOf(Number(s.user_id)) >= 0 ? ' checked' : '') + '> ' + esc(s.display_name) + other + '</label>';
+            }).join('') + '</div><div class="row" style="margin-top:10px"><button class="btn" data-save>Save</button><span class="msg" data-msg></span></div></div>';
+        }).join('') + '<div class="card"><div class="row"><input class="pick" id="nt" placeholder="New team" style="flex:1"><button class="btn" id="ntAdd">Add team</button></div></div>';
+      $('ntAdd').addEventListener('click', function () {
+        api('/api/admin/teams', { method: 'POST', body: JSON.stringify({ name: $('nt').value }) }).then(teams).catch(function (e) { window.alert(e.message); });
+      });
+      Array.prototype.forEach.call(document.querySelectorAll('[data-t]'), function (card) {
+        var id = card.dataset.t;
+        card.querySelector('[data-save]').addEventListener('click', function () {
+          var m = card.querySelector('[data-msg]');
+          api('/api/admin/teams/' + id, { method: 'PUT', body: JSON.stringify({ name: card.querySelector('[data-name]').value,
+            managerUserId: card.querySelector('[data-mgr]').value ? Number(card.querySelector('[data-mgr]').value) : null,
+            members: Array.prototype.filter.call(card.querySelectorAll('[data-u]'), function (x) { return x.checked; }).map(function (x) { return Number(x.dataset.u); }) }) })
+            .then(teams).catch(function (e) { m.textContent = e.message; m.className = 'msg err'; });
+        });
+        card.querySelector('[data-del]').addEventListener('click', function () {
+          if (!window.confirm('Delete this team? Its people become unteamed.')) return;
+          api('/api/admin/teams/' + id, { method: 'DELETE' }).then(teams).catch(function (e) { window.alert(e.message); });
+        });
+      });
+    }).catch(function (e) { $('main').innerHTML = '<div class="msg err">' + esc(e.message) + '</div>'; });
+  }
+
+  api('/api/me').then(function (me) {
+    Shell.mount({ me: me, active: 'admin' });
+    if (!me.caps.admin) { $('main').innerHTML = '<div class="msg err">Owner only.</div>'; return; }
+    go();
+  }).catch(function (e) { if (e.message !== 'signed out') console.error(e); });
+})();
+</script>
+</body>
+</html>

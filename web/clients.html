@@ -203,6 +203,7 @@
         return '<div class="clientrow" data-id="' + c.id + '">' +
           '<div><div class="log-b">' + esc(c.name) +
           (c.platform_locked ? ' <span class="flag" style="color:var(--move);border:1px solid var(--move)">Platform</span>' : '') +
+          (c.referrer_id ? ' <span class="flag" style="color:var(--acc2);border:1px solid var(--acc2)">Referrer</span>' : '') +
           '</div><div class="sub">' + esc([c.contact_name, c.phone, c.email].filter(Boolean).join(' · ') || 'no contact') +
           '</div></div>' +
           '<div class="sub">' + esc(KIND === 'wholesale' ? wtLabel(c.wholesale_type)
@@ -401,6 +402,21 @@
       });
     }
 
+    /* What they have sent us. The referred customer's record never says who sent them. */
+    if (d.referrer) {
+      h.push('<div class="sec">Referrals sent · ' + d.referrer.sent.length +
+        (d.referrer.paidThisYearCents !== null ? ' · ' + money(d.referrer.paidThisYearCents) + ' paid this year' : '') + '</div>');
+      if (!d.referrer.sent.length) h.push('<div class="sub">None yet.</div>');
+      d.referrer.sent.forEach(function (s) {
+        h.push('<div class="log"><div class="row" style="gap:8px"><span class="log-b">' + esc(s.customer || '—') + '</span>' +
+          '<span class="sub">' + esc(s.vehicle || '') + '</span>' +
+          (s.feeCents !== null && s.state !== 'no_fee' ? '<span class="sub" style="margin-left:auto">' + money(s.feeCents) + '</span>' : '') +
+          '</div><div class="log-m">' + esc(s.label) +
+          (s.roId ? ' · <a href="/board.html?ro=' + s.roId + '">RO ' + esc(s.roNumber) + '</a>' : '') +
+          ' · <a href="/leads.html?lead=' + s.leadId + '">' + esc(s.leadNumber) + '</a></div></div>');
+      });
+      h.push('<div class="sub" style="margin-top:6px"><a href="/referrals.html">Open in Referrals</a></div>');
+    }
     $('dBody').innerHTML = h.join('');
     wireClient(c);
   }

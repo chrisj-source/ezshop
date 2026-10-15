@@ -1,5 +1,8 @@
 import { FastifyInstance } from 'fastify';
 import { SplitInput, splitColumns, splitError, warnNoPlan, salesFromLead } from '../lib/splits';
+import { createReferrer, NewReferrer, referralFor, referrerById, mayEditFee } from '../lib/referrals';
+import { pickOwner, touched } from '../lib/leadops';
+import { laneOf } from '../lib/pipeline';
 import { reconcile } from '../lib/pay';
 import { RowDataPacket, ResultSetHeader } from 'mysql2/promise';
 import { mq } from '../db/master';
@@ -354,7 +357,9 @@ export async function registerLeads(app: FastifyInstance): Promise<void> {
 
     return {
       lead: scrubLead(lead as Record<string, unknown>, ctx.caps, ctx.user.id),
-      events, appointments, followup: cfg
+      events, appointments, followup: cfg,
+      referral: await referralFor(cid, 'lead', id, ctx.caps).catch(() => null),
+      mayEditFee: mayEditFee(ctx.caps)
     };
   });
 
@@ -384,6 +389,7 @@ export async function registerLeads(app: FastifyInstance): Promise<void> {
              the stamp means the NEXT stretch of quiet earns a fresh one
              instead of this lead never being reported again. */
           chase_notified_at = NULL,
+          esc_step = 0, esc_step_at = NULL,
           /* Held from the shop's today, so a hold set at 9pm is not a day short. */
           followup_snooze_until = ${hold ? 'DATE_ADD(?, INTERVAL ? DAY)' : 'NULL'},
           first_reply_at = COALESCE(first_reply_at, NOW())
@@ -561,6 +567,7 @@ export async function registerLeads(app: FastifyInstance): Promise<void> {
       vehicleText?: string; damageNote?: string; source?: string; payer?: string;
       ownerUserId?: number | null; receivedAt?: string;
       split?: SplitInput;
+      referral?: { referrerId?: number; newReferrer?: NewReferrer; noFee?: boolean; feeCents?: number | null; payee?: string | null };
     };
 
     if (!b.phone && !b.email && !b.lastName) {
@@ -575,6 +582,29 @@ export async function registerLeads(app: FastifyInstance): Promise<void> {
     const refused = await refuseEmail(cid, b.email, 'new lead');
     if (refused) return reply.code(409).send({ error: refused, field: 'email' });
 
+    /* A referral lead must have a referrer — picked, made from a client, or
+       made here. The fee is set now: Fee / No fee, amount defaulting from the
+       referrer. */
+    let ref: { id: number; noFee: boolean; fee: number | null; payee: string | null } | null = null;
+    if (String(b.source ?? '').toLowerCase() === 'referral') {
+      const r = b.referral ?? {};
+      let rid = r.referrerId ? Number(r.referrerId) : 0;
+      if (!rid && r.newReferrer) {
+        try { rid = (await createReferrer(cid, r.newReferrer, ctx.user.id)).id; }
+        catch (e) { const x = e as Error & { code?: number }; return reply.code(typeof x.code === 'number' ? x.code : 500).send({ error: x.message, field: 'referrer' }); }
+      }
+      const f = rid ? await referrerById(cid, rid) : null;
+      if (!f) return reply.code(400).send({ error: 'A referral needs a referrer. Pick one or add them.', field: 'referrer' });
+      const fee = r.noFee ? null : (r.feeCents !== undefined && r.feeCents !== null ? Math.max(0, Math.round(Number(r.feeCents))) : (f.default_fee_cents ?? null));
+      ref = { id: rid, noFee: !!r.noFee, fee: fee === null ? null : Number(fee), payee: r.payee ? String(r.payee).trim() : null };
+    }
+
+    /* Who owns it: picked on the form, or the lane's routing. Field sales is
+       always the rep who wrote it. */
+    if (!b.ownerUserId) {
+      const lane = laneOf(b.source ?? 'phone');
+      b.ownerUserId = lane.key === 'field' ? ctx.user.id : ((await pickOwner(cid, lane.key, ctx.user.id).catch(() => null)) ?? ctx.user.id);
+    }
     const owner1 = b.ownerUserId ?? ctx.user.id;
     if (b.split) {
       const se = splitError(owner1, b.split);
@@ -607,6 +637,10 @@ export async function registerLeads(app: FastifyInstance): Promise<void> {
       if (b.split && (b.split.sales2UserId || b.split.sales3UserId)) {
         const cols = splitColumns('owner_pct', b.split);
         await c.query(`UPDATE leads SET ${cols.map(([k]) => k + ' = ?').join(', ')} WHERE id = ?`, [...cols.map(([, v]) => v), r.insertId]);
+      }
+      if (ref) {
+        await c.query('UPDATE leads SET referrer_id = ?, referral_no_fee = ?, referral_fee_cents = ?, referral_payee = ? WHERE id = ?',
+          [ref.id, ref.noFee ? 1 : 0, ref.fee, ref.payee, r.insertId]);
       }
 
       return r.insertId;
@@ -844,6 +878,8 @@ export async function registerLeads(app: FastifyInstance): Promise<void> {
     await texec(cid,
       `INSERT INTO lead_events (lead_id, kind, body, user_id, user_name) VALUES (?, 'note', ?, ?, ?)`,
       [id, body.trim(), ctx.user.id, ctx.user.name]);
+    /* A note is a touch: it resets the clock and the ladder. */
+    await touched(cid, id).catch(() => undefined);
 
     // Writing a note counts as making contact.
     await texec(cid,

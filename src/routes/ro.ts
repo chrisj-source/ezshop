@@ -6,6 +6,7 @@ import { mayMoveTo, scrubMoney } from '../permissions';
 import { notify } from '../notify';
 import { fireTrigger, correctTrigger, isPreApproval, reconcile, paidCommission, decideReview } from '../lib/pay';
 import { payPlanEditors, roSplits, splitError, splitColumns, warnNoPlan } from '../lib/splits';
+import { referralFor } from '../lib/referrals';
 
 import { audit, auditIn } from '../lib/audit';
 import { actorFrom } from './audit';
@@ -174,6 +175,8 @@ export async function registerRepairOrders(app: FastifyInstance): Promise<void> 
          they see the figures and the decision. */
       /* The sales split. Who is in it is not money; the percentages are part of
          the commission, so they go only to those who can see commission. */
+      /* A referred file carries the referral: who sent it, the payee, where the fee stands. */
+      referral: await referralFor(cid, 'ro', id, ctx.caps).catch(() => null),
       salesSplit: await (async () => {
         const sp = await roSplits(cid, id);
         const names = sp.length ? await tq<RowDataPacket[]>(cid, 'SELECT user_id, display_name FROM staff WHERE user_id IN (?)', [sp.map(s => s.userId)]).catch(() => []) : [];

@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1c2740">
+<title>Referrals — Easy Shop</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/shell.css?v=8">
+<style>
+  #main { flex:1; min-height:0; overflow-y:auto; padding:0 18px 30px; }
+  .titlerow { display:flex; align-items:flex-end; gap:22px; padding:16px 18px 0; flex:none; flex-wrap:wrap; }
+  .titlerow h1 { font:500 18px var(--font); margin:0; }
+  .titlemeta { font:400 11.5px var(--font); color:var(--dim); margin-top:4px; }
+  .viewrow { display:flex; align-items:center; gap:3px; padding:14px 18px 0; flex:none; border-bottom:1px solid var(--line); }
+  .viewtab { font:400 12px var(--font); color:var(--dim); background:transparent; border:none; border-bottom:2px solid transparent; padding:8px 13px; margin-bottom:-1px; cursor:pointer; }
+  .viewtab.sel { color:var(--acc); font-weight:500; border-bottom-color:var(--acc); }
+  .sechead { font:600 8.5px var(--font); letter-spacing:.12em; text-transform:uppercase; color:var(--acc2); margin:20px 0 8px; }
+  .tbl { width:100%; border-collapse:collapse; font:400 12px var(--font); }
+  .tbl th { text-align:left; font:600 8.5px var(--font); letter-spacing:.1em; text-transform:uppercase; color:var(--dim); padding:7px 8px; border-bottom:1px solid var(--line); }
+  .tbl td { padding:8px; border-bottom:1px solid var(--whisper); vertical-align:top; }
+  .num { text-align:right; font-variant-numeric:tabular-nums; }
+  .sub { font:400 10.5px var(--font); color:var(--dim); margin-top:2px; }
+  .warn { font:600 8px var(--font); letter-spacing:.07em; text-transform:uppercase; padding:2px 5px; border-radius:3px; color:var(--stopped); border:1px solid var(--stopped); margin-left:6px; white-space:nowrap; }
+  .tagh { font:600 8px var(--font); letter-spacing:.07em; text-transform:uppercase; padding:2px 5px; border-radius:3px; color:var(--move); border:1px solid var(--move); }
+  .pick { background:var(--chip); border:1px solid var(--line); border-radius:4px; color:var(--text); font:400 11.5px var(--font); padding:5px 8px; }
+  .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  .split { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1.2fr); gap:22px; margin-top:14px; }
+  .ref { padding:9px 8px; border-bottom:1px solid var(--whisper); cursor:pointer; }
+  .ref:hover, .ref.sel { background:var(--whisper); }
+  .empty { font:400 12px var(--font); color:var(--dim); padding:20px 0; }
+  a { color:var(--acc2); } a:hover { color:var(--acc); }
+  @media print {
+    .bar, .hairline, .viewrow, .noprint { display:none !important; }
+    body, #main { overflow:visible !important; background:#fff; color:#000; }
+    .tbl td, .tbl th { color:#000; border-color:#bbb; }
+  }
+  @media (max-width: 900px) { .split { grid-template-columns:1fr; } }
+</style>
+</head>
+<body>
+
+<div class="bar">
+  <div class="brand"><div class="mark">ES</div><div class="word">Easy Shop</div></div>
+  <div class="vr"></div>
+  <div class="co" id="coName">—</div>
+  <div id="nav"></div>
+  <div class="spacer"></div>
+  <div id="bell"></div>
+  <div class="who" id="who">—</div>
+  <button class="ghostbtn" id="signout">Sign out</button>
+</div>
+<div class="hairline"></div>
+
+<div class="titlerow">
+  <div>
+    <h1>Referrals</h1>
+    <div class="titlemeta" id="headmeta">Loading…</div>
+  </div>
+</div>
+<div class="viewrow" id="views"></div>
+<div id="main"></div>
+
+<script src="/shell.js?v=9"></script>
+<script>
+(function () {
+  var api = Shell.api, esc = Shell.esc;
+  var $ = function (id) { return document.getElementById(id); };
+  var ME = null, VIEW = 'payout', SELREF = null;
+  var KINDS = { agent: 'Insurance agent', adjuster: 'Adjuster / carrier', dealer: 'Dealer', past_customer: 'Past customer' };
+  function fmt$(c) { return '$' + (Number(c || 0) / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+  function day(s) { if (!s) return '—'; var d = new Date(String(s).slice(0, 10) + 'T12:00:00'); return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }); }
+  function feeRole() { return !!(ME.caps.salesManager || ME.caps.money); }
+
+  function views() {
+    var v = [];
+    if (ME.caps.money) v.push(['payout', 'Payout list']);
+    v.push(['referrers', 'Referrers']);
+    if (!v.some(function (x) { return x[0] === VIEW; })) VIEW = v[0][0];
+    $('views').innerHTML = v.map(function (x) {
+      return '<button class="viewtab' + (x[0] === VIEW ? ' sel' : '') + '" data-v="' + x[0] + '">' + x[1] + '</button>';
+    }).join('');
+    Array.prototype.forEach.call($('views').querySelectorAll('[data-v]'), function (b) {
+      b.addEventListener('click', function () { VIEW = b.dataset.v; render(); });
+    });
+  }
+
+  function render() { views(); return VIEW === 'payout' ? payout() : referrers(); }
+
+  /* One line per referral. Owed lines are grouped by the Friday they pay;
+     held total losses wait for a manager; paid lines stay 90 days. */
+  function payout() {
+    $('main').innerHTML = '<div class="empty">Loading…</div>';
+    api('/api/referrals/payouts').then(function (d) {
+      var owed = d.lines.filter(function (l) { return l.state === 'owed'; });
+      var held = d.lines.filter(function (l) { return l.state === 'held'; });
+      var paid = d.lines.filter(function (l) { return l.state === 'paid'; });
+      var tot = owed.reduce(function (a, l) { return a + Number(l.feeCents || 0); }, 0);
+      $('headmeta').textContent = owed.length + ' owed · ' + fmt$(tot) + (held.length ? ' · ' + held.length + ' held' : '');
+      var h = ['<div class="row noprint" style="margin-top:14px"><button class="btn" id="printBtn">Print payout list</button>' +
+        '<span class="sub">Outside referrers only. Staff are paid on Sales pay.</span></div>'];
+      var groups = {};
+      owed.forEach(function (l) { (groups[l.payDate] = groups[l.payDate] || []).push(l); });
+      if (!owed.length) h.push('<div class="sechead">Owed</div><div class="empty">Nothing owed.</div>');
+      Object.keys(groups).sort().forEach(function (pd) {
+        var g = groups[pd], s = g.reduce(function (a, l) { return a + Number(l.feeCents || 0); }, 0);
+        h.push('<div class="sechead">Payout ' + esc(day(pd)) + ' · ' + fmt$(s) + '</div>' + table(g, true));
+      });
+      if (held.length) h.push('<div class="sechead">Held — total loss, waiting on a manager</div>' + table(held, false));
+      if (paid.length) h.push('<div class="sechead">Paid, last 90 days</div>' + table(paid, false));
+      $('main').innerHTML = h.join('');
+      $('printBtn').addEventListener('click', function () { window.print(); });
+      Array.prototype.forEach.call($('main').querySelectorAll('[data-pay]'), function (b) {
+        b.addEventListener('click', function () {
+          var id = b.dataset.pay, m = $('pm' + id), r = $('pr' + id);
+          b.disabled = true;
+          api('/api/referrals/' + id + '/paid', { method: 'POST', body: JSON.stringify({ method: m.value, reference: r.value }) })
+            .then(payout).catch(function (e) { b.disabled = false; window.alert(e.message); });
+        });
+      });
+    }).catch(function (e) { $('main').innerHTML = '<div class="empty">' + esc(e.message) + '</div>'; });
+  }
+
+  function table(rows, payable) {
+    return '<table class="tbl"><thead><tr><th>Pay to</th><th>Referrer</th><th>Referred</th><th>Where it stands</th><th class="num">Fee</th>' +
+      (payable ? '<th class="noprint">Mark paid</th>' : '') + '</tr></thead><tbody>' +
+      rows.map(function (l) {
+        return '<tr><td>' + esc(l.payee) + (l.w9Warn ? '<span class="warn" title="Over $600 this year with no W-9 on file">W-9 needed</span>' : '') + '</td>' +
+          '<td>' + esc(l.referrer) + '<div class="sub">' + esc(KINDS[l.kind] || l.kind) + '</div></td>' +
+          '<td>' + esc(l.customer || '—') + '<div class="sub">' + esc(l.vehicle || '') +
+            (l.roId ? ' · <a href="/board.html?ro=' + l.roId + '">RO ' + esc(l.roNumber) + '</a>' : '') + ' · ' + esc(l.leadNumber) + '</div></td>' +
+          '<td>' + esc(l.label) + (l.state === 'paid' && (l.method || l.reference) ? '<div class="sub">' + esc([l.method, l.reference].filter(Boolean).join(' ')) + '</div>' : '') + '</td>' +
+          '<td class="num">' + fmt$(l.feeCents) + '</td>' +
+          (payable ? '<td class="noprint"><div class="row"><select class="pick" id="pm' + l.leadId + '"><option>Check</option><option>Cash</option><option>Other</option></select>' +
+            '<input class="pick" id="pr' + l.leadId + '" placeholder="Check #" style="width:80px"><button class="btn btn-ghost" data-pay="' + l.leadId + '">Paid</button></div></td>' : '') +
+          '</tr>';
+      }).join('') + '</tbody></table>';
+  }
+
+  function referrers() {
+    $('headmeta').textContent = 'Agents, adjusters, dealers and past customers who send work';
+    $('main').innerHTML = '<div class="split"><div><input class="pick" id="rq" placeholder="Search referrers" style="width:100%;margin-bottom:8px"><div id="rlist"></div></div><div id="rdet"></div></div>';
+    var t = null;
+    var list = function () {
+      api('/api/referrers?q=' + encodeURIComponent($('rq').value.trim())).then(function (d) {
+        $('rlist').innerHTML = d.referrers.length ? d.referrers.map(function (f) {
+          return '<div class="ref' + (SELREF === f.id ? ' sel' : '') + '" data-id="' + f.id + '"><div style="font:500 12px var(--font)">' + esc(f.name) +
+            (f.client_id ? ' <span class="tagh">Client</span>' : '') + '</div><div class="sub">' + esc(KINDS[f.kind] || f.kind) +
+            (f.company ? ' · ' + esc(f.company) : '') + ' · ' + f.sent + ' sent</div></div>';
+        }).join('') : '<div class="empty">No referrers yet. They are added from a referral lead.</div>';
+        Array.prototype.forEach.call($('rlist').querySelectorAll('[data-id]'), function (el) {
+          el.addEventListener('click', function () { SELREF = Number(el.dataset.id); list(); detail(SELREF); });
+        });
+      }).catch(function (e) { $('rlist').innerHTML = '<div class="empty">' + esc(e.message) + '</div>'; });
+    };
+    $('rq').addEventListener('input', function () { clearTimeout(t); t = setTimeout(list, 220); });
+    list();
+    if (SELREF) detail(SELREF);
+  }
+
+  function detail(id) {
+    $('rdet').innerHTML = '<div class="empty">Loading…</div>';
+    api('/api/referrers/' + id).then(function (d) {
+      var f = d.referrer, can = feeRole();
+      var h = '<div style="font:500 15px var(--font)">' + esc(f.name) + '</div>' +
+        '<div class="sub">' + esc(KINDS[f.kind] || f.kind) + (f.company ? ' · ' + esc(f.company) : '') + '</div>' +
+        '<div class="sub" style="margin-top:6px">' + esc([f.phone, f.email, [f.address, f.city, f.addr_state].filter(Boolean).join(', ')].filter(Boolean).join(' · ')) + '</div>' +
+        (f.client_id ? '<div class="sub"><a href="/clients.html">Also a client</a> — their repairs are on the client record</div>' : '');
+      if (d.totals) h += '<div class="row" style="margin-top:12px;gap:18px"><div><div class="sechead" style="margin:0 0 3px">Paid this year</div>' + fmt$(d.totals.paidCents) + '</div>' +
+        '<div><div class="sechead" style="margin:0 0 3px">Owed</div>' + fmt$(d.totals.owedCents) + '</div>' +
+        (d.w9Warn ? '<span class="warn">Over $600 this year — no W-9 on file</span>' : '') + '</div>';
+      if (can) h += '<div class="sechead">Settings</div><div class="row">' +
+        '<label class="row" style="font:400 11.5px var(--font)"><input type="checkbox" id="fW9"' + (f.w9_on_file ? ' checked' : '') + '> W-9 on file</label>' +
+        '<span class="sub">Usual fee</span><input class="pick" id="fFee" type="number" min="0" step="0.01" style="width:90px" value="' + (f.default_fee_cents !== null && f.default_fee_cents !== undefined ? (f.default_fee_cents / 100).toFixed(2) : '') + '">' +
+        (f.kind === 'dealer' ? '<span class="sub">Usually paid to</span><input class="pick" id="fPayee" style="width:140px" value="' + esc(f.payee_default || '') + '">' : '') +
+        '<button class="btn btn-ghost" id="fSave">Save</button></div>';
+      h += '<div class="sechead">Referrals sent · ' + d.referrals.length + '</div>' +
+        (d.referrals.length ? '<table class="tbl"><tbody>' + d.referrals.map(function (r) {
+          return '<tr><td>' + esc(r.customer || '—') + '<div class="sub">' + esc(r.vehicle || '') + ' · <a href="/leads.html?lead=' + r.leadId + '">' + esc(r.leadNumber) + '</a>' +
+            (r.roId ? ' · <a href="/board.html?ro=' + r.roId + '">RO ' + esc(r.roNumber) + '</a>' : '') + '</div></td>' +
+            '<td>' + esc(r.label) + '</td><td class="num">' + (r.state === 'no_fee' ? '—' : r.feeCents !== null ? fmt$(r.feeCents) : '') + '</td></tr>';
+        }).join('') + '</tbody></table>' : '<div class="empty">None yet.</div>');
+      $('rdet').innerHTML = h;
+      var s = $('fSave');
+      if (s) s.addEventListener('click', function () {
+        var body = { w9OnFile: $('fW9').checked, defaultFeeCents: $('fFee').value === '' ? null : Math.round(Number($('fFee').value) * 100) };
+        if ($('fPayee')) body.payeeDefault = $('fPayee').value;
+        api('/api/referrers/' + id, { method: 'PATCH', body: JSON.stringify(body) }).then(function () { detail(id); })
+          .catch(function (e) { window.alert(e.message); });
+      });
+    }).catch(function (e) { $('rdet').innerHTML = '<div class="empty">' + esc(e.message) + '</div>'; });
+  }
+
+  api('/api/me').then(function (me) {
+    ME = me;
+    Shell.mount({ me: me, active: 'referrals' });
+    if (!ME.caps.viewLeads && !ME.caps.money) {
+      $('main').innerHTML = '<div class="empty">Referrals are for the sales desk and accounting.</div>';
+      $('headmeta').textContent = '';
+      return;
+    }
+    render();
+  }).catch(function (e) { if (e.message !== 'signed out') console.error(e); });
+})();
+</script>
+</body>
+</html>

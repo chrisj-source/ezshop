@@ -92,6 +92,9 @@ export const CAP_DEFS: CapDef[] = [
   { key: 'leads',         label: 'Leads',                      section: 'Leads',    see: 'viewLeads',        change: 'manageLeads' },
   { key: 'del_lead',      label: 'Delete a lead',              section: 'Leads',    see: 'deleteLeads' },
   { key: 'win_lead',      label: 'Mark a lead won, and link it to an existing file', section: 'Leads', see: 'winLeads' },
+  /* Any number of people. Changes a referral fee after the lead is written,
+     decides a total-loss referral, and is the sales managers' group. */
+  { key: 'sales_manager', label: 'Sales manager',              section: 'Leads',    see: 'salesManager' },
 
   { key: 'paperwork',     label: 'Paperwork and PDFs',         section: 'Paperwork', see: 'viewPaperwork',   change: 'uploadPaperwork' },
   { key: 'del_doc',       label: 'Delete a document',          section: 'Paperwork', see: 'deleteDocuments' },
@@ -175,6 +178,7 @@ export interface Caps {
    * its close rate.
    */
   winLeads: boolean;
+  salesManager: boolean;
   /* paperwork */
   viewPaperwork: boolean;
   uploadPaperwork: boolean;
@@ -223,7 +227,7 @@ const CAPS_FIELDS: Array<keyof Caps> = [
   'money', 'editMoney', 'partsMoney', 'editPartsMoney', 'laborMoney', 'editLaborMoney',
   'commissionMoney', 'viewPayments', 'recordPayments', 'editPayments', 'seesRepairOrders', 'viewNotes', 'addNotes', 'viewInternalNotes', 'seesAllRepairOrders', 'ownWorkOnly',
   'editRepairOrders', 'anyStatus', 'markTotalLoss', 'voidRepairOrders', 'closeRepairOrders',
-  'uncloseRepairOrders', 'manageWholesaleClients', 'viewLeads', 'manageLeads', 'deleteLeads', 'winLeads', 'viewPaperwork',
+  'uncloseRepairOrders', 'manageWholesaleClients', 'viewLeads', 'manageLeads', 'deleteLeads', 'winLeads', 'salesManager', 'viewPaperwork',
   'uploadPaperwork', 'deleteDocuments', 'acceptImports', 'editAssignments', 'manageParts',
   'manageSublet', 'viewReports', 'exportReports', 'viewMoneyReports', 'viewPayPlans',
   'editPayPlans', 'viewCustomerContact', 'editCustomerContact', 'viewAudit', 'manageWebForms', 'admin', 'managePermissions'

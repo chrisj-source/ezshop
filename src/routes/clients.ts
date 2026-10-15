@@ -5,6 +5,7 @@ import { requireCompany } from '../middleware/context';
 import { auditRead } from '../lib/audit';
 import { actorFrom } from './audit';
 import { refuseEmail } from '../lib/suppression';
+import { referrals, yearTotals } from '../lib/referrals';
 
 /**
  * Clients: wholesale accounts (dealers, hail companies, auctions, fleets),
@@ -65,7 +66,8 @@ export async function registerClients(app: FastifyInstance): Promise<void> {
              (SELECT COUNT(*) FROM repair_orders r
                WHERE r.client_id = c.id AND r.closed_at IS NULL AND r.voided_at IS NULL) AS open_files,
              (SELECT COUNT(*) FROM repair_orders r
-               WHERE r.client_id = c.id AND YEAR(r.opened_at) = YEAR(CURDATE())) AS ytd_files
+               WHERE r.client_id = c.id AND YEAR(r.opened_at) = YEAR(CURDATE())) AS ytd_files,
+             (SELECT f.id FROM referrers f WHERE f.client_id = c.id AND f.active = 1 LIMIT 1) AS referrer_id
       FROM clients c
       ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
       ORDER BY c.kind, c.name`,
@@ -203,7 +205,24 @@ export async function registerClients(app: FastifyInstance): Promise<void> {
       FROM repair_orders
       WHERE client_id = ? AND YEAR(opened_at) = YEAR(CURDATE())`, [id]);
 
+    /* A client who sends us work: the referrals they sent and what they were
+       paid this year. The referred customer's record never shows who sent them. */
+    const rf = await tqOne<RowDataPacket>(ctx.company!.id, 'SELECT id FROM referrers WHERE client_id = ? AND active = 1 LIMIT 1', [id]);
+    let referrer: unknown = null;
+    if (rf) {
+      const money = !!(ctx.caps.money || ctx.caps.salesManager);
+      const list = await referrals(ctx.company!.id, 'l.referrer_id = ?', [Number(rf.id)]);
+      const t = await yearTotals(ctx.company!.id, Number(rf.id));
+      referrer = {
+        id: Number(rf.id),
+        sent: list.map(r => ({ leadId: r.lead_id, leadNumber: r.lead_number, customer: r.customer, vehicle: r.vehicle,
+          roId: r.ro_id, roNumber: r.ro_number, label: r.state.label, state: r.state.key, feeCents: money ? r.state.feeCents : null })),
+        paidThisYearCents: money ? t.paidCents : null
+      };
+    }
+
     return {
+      referrer,
       files: files.map(f => ctx.caps.money ? f : Object.assign({}, f, { amount_cents: undefined })),
       grossCents: ctx.caps.money ? Number(roll.gross_cents ?? 0) : null,
       avgDays: roll.avg_days === null ? null : Math.round(Number(roll.avg_days) * 10) / 10

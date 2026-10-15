@@ -331,6 +331,10 @@
     return load();
   }).catch(function (e) { if (e.message !== 'signed out') console.error(e); });
 
+  /* ?lead=123 opens that lead — linked from Referrals, the client page and the board. */
+  (function () { var m = /[?&]lead=(\d+)/.exec(location.search); if (m) { SEL = Number(m[1]); } })();
+
+  pipeMeta().catch(function () {});
   function load() {
     return api('/api/leads?settled=1' + (DELETED ? '&deleted=1' : '')).then(function (d) {
       LEADS = d.leads;
@@ -383,6 +387,7 @@
   function renderTabs() {
     var c = counts();
     var tabs = [
+      { k: 'pipe', t: 'Pipeline', c: c.working },
       { k: 'working', t: 'Working', c: c.working },
       { k: 'new', t: 'New', c: c['new'] },
       { k: 'quoted', t: 'Quoted', c: c.quoted },
@@ -434,6 +439,8 @@
   }
 
   function render() {
+    var lh = $('list').previousElementSibling; if (lh && TAB !== 'pipe') lh.style.display = '';
+    if (TAB === 'pipe') return renderPipeline();
     if (TAB === 'web') return renderWebRequests();
     var rows = filtered();
     var c = counts();
@@ -649,6 +656,266 @@
     $('detCol').classList.toggle('open', ADDING || SEL != null);
   }
 
+  /* ------------------------------------------------------------ pipeline (1c)
+     One column per lane, side by side; rows oldest first; the status is the
+     coloured code on each row. Parked leads (junk, unqualified, vendor) are out
+     of every column behind the Parked toggle. */
+  var PIPE = null, PMETA = null, POWNER = '', POVER = false, PPARK = false;
+  function pipeMeta() { return PMETA ? Promise.resolve(PMETA) : api('/api/pipeline/meta').then(function (m) { PMETA = m; return m; }); }
+  function pchip(key) {
+    var s = PMETA && PMETA.statuses[key] || { label: key, tone: 'var(--dim)' };
+    return '<span style="font:600 8.5px var(--font);letter-spacing:.06em;text-transform:uppercase;color:' + s.tone +
+      ';border:1px solid ' + s.tone + ';border-radius:3px;padding:2px 5px;white-space:nowrap">' + esc(s.label) + '</span>';
+  }
+  function renderPipeline() {
+    var head = $('list').previousElementSibling; if (head) head.style.display = 'none';
+    $('list').innerHTML = '<div style="font:400 11.5px var(--font);color:var(--dim);padding:14px">Loading…</div>';
+    Promise.all([pipeMeta(), api('/api/pipeline')]).then(function (x) {
+      PIPE = x[1];
+      var q = ($('fSearch') ? $('fSearch').value : '').trim().toLowerCase();
+      var owners = {};
+      PIPE.leads.forEach(function (l) { if (l.owner_user_id) owners[l.owner_user_id] = l.owner_name || ('User ' + l.owner_user_id); });
+      var rows = PIPE.leads.filter(function (l) {
+        if (l.parked !== PPARK) return false;
+        if (POWNER && String(l.owner_user_id) !== POWNER) return false;
+        if (POVER && !l.overdue) return false;
+        if (q && [l.lead_number, l.name, l.phone, l.vehicle_text].join(' ').toLowerCase().indexOf(q) < 0) return false;
+        return true;
+      });
+      var bar = '<div style="display:flex;gap:10px;align-items:center;padding:10px 12px;flex-wrap:wrap;border-bottom:1px solid var(--whisper)">' +
+        '<select id="pOwner" class="detsel" style="width:auto"><option value="">Every owner</option>' +
+        Object.keys(owners).map(function (k) { return '<option value="' + k + '"' + (POWNER === k ? ' selected' : '') + '>' + esc(owners[k]) + '</option>'; }).join('') + '</select>' +
+        '<label style="display:flex;gap:5px;align-items:center;font:400 11.5px var(--font)"><input type="checkbox" id="pOver"' + (POVER ? ' checked' : '') + '> Overdue only</label>' +
+        '<label style="display:flex;gap:5px;align-items:center;font:400 11.5px var(--font)"><input type="checkbox" id="pPark"' + (PPARK ? ' checked' : '') + '> Parked</label></div>';
+      var cols = '<div style="display:grid;grid-auto-flow:column;grid-auto-columns:minmax(250px,1fr);gap:0;overflow-x:auto;min-height:0">' +
+        PIPE.lanes.map(function (ln) {
+          var mine = rows.filter(function (l) { return l.lane === ln.key; });
+          var od = mine.filter(function (l) { return l.overdue; }).length;
+          return '<div style="border-right:1px solid var(--whisper);min-width:0">' +
+            '<div style="padding:10px 12px;border-bottom:1px solid var(--line);display:flex;gap:8px;align-items:baseline">' +
+              '<span style="font:600 9px var(--font);letter-spacing:.12em;text-transform:uppercase;color:var(--acc2)">' + esc(ln.label) + '</span>' +
+              '<span style="font:400 11px var(--font);color:var(--dim)">' + mine.length + (od ? ' · <span style="color:var(--stopped)">' + od + ' overdue</span>' : '') + '</span></div>' +
+            (mine.length ? mine.map(function (l) {
+              return '<div class="prow" data-id="' + l.id + '" style="padding:8px 12px;border-bottom:1px solid var(--whisper);cursor:pointer;' +
+                (SEL === l.id ? 'background:var(--whisper);' : '') + (l.overdue ? 'border-left:2px solid var(--stopped);' : 'border-left:2px solid transparent;') + '">' +
+                '<div style="display:flex;gap:6px;align-items:center"><span style="font:500 12px var(--font);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(l.name || l.lead_number) + '</span>' + pchip(l.status) + '</div>' +
+                '<div style="font:400 10.5px var(--font);color:var(--dim);margin-top:3px">' + esc([l.vehicle_text, l.owner_name, ageText(Math.floor(Number(l.age_hours) / 24)), l.campaign].filter(Boolean).join(' · ')) + '</div></div>';
+            }).join('') : '<div style="font:400 11px var(--font);color:var(--dim);padding:12px">Nothing here.</div>') + '</div>';
+        }).join('') + '</div>';
+      $('list').innerHTML = bar + cols;
+      $('pOwner').addEventListener('change', function () { POWNER = this.value; renderPipeline(); });
+      $('pOver').addEventListener('change', function () { POVER = this.checked; renderPipeline(); });
+      $('pPark').addEventListener('change', function () { PPARK = this.checked; renderPipeline(); });
+      Array.prototype.forEach.call($('list').querySelectorAll('.prow'), function (el) {
+        el.addEventListener('click', function () { SEL = Number(el.dataset.id); ADDING = false; renderPipeline(); renderDetail(); });
+      });
+    }).catch(function (e) { $('list').innerHTML = '<div style="padding:14px" class="msg err">' + esc(e.message) + '</div>'; });
+  }
+  /* The lead's pipeline status, in the detail: its lane's statuses plus parked. */
+  function pipeSelect(lead) {
+    if (!PMETA) return '';
+    var lane = PMETA.lanes.filter(function (l) { return l.sources.indexOf(String(lead.source || '').toLowerCase()) >= 0; })[0] ||
+      PMETA.lanes.filter(function (l) { return l.key === 'phone'; })[0];
+    var cur = lead.pipe_status || lane.statuses[0];
+    var opt = function (k) { return '<option value="' + k + '"' + (k === cur ? ' selected' : '') + '>' + esc(PMETA.statuses[k].label) + '</option>'; };
+    return '<div><div class="detlbl">Pipeline · ' + esc(lane.label) + '</div><select id="dPipe" class="detsel">' +
+      lane.statuses.map(opt).join('') + '<optgroup label="Parked">' + PMETA.parked.map(opt).join('') + '</optgroup></select></div>';
+  }
+
+  /* ----------------------------------------------------------- referrals
+     A referral lead must have a referrer. Typing one checks the client list:
+     phone or email is a match (Already a referrer → use them; Already a client
+     → Make referrer, pulled from the client and linked to their repairs); name
+     plus address is a weaker Possible match; a name alone never matches.
+     Fee / No fee is set here, the amount defaulting from the referrer. */
+  var REF_KINDS = [['agent', 'Insurance agent'], ['adjuster', 'Adjuster / carrier'], ['dealer', 'Dealer'], ['past_customer', 'Past customer']];
+  var REFD = null, REFEDIT = false, REFPICK = null, REFNEW = null;
+  function fmt$(c) { return '$' + (Number(c || 0) / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+  function kindLabel(k) { var x = REF_KINDS.filter(function (r) { return r[0] === k; })[0]; return x ? x[1] : k; }
+  function feeRole() { return !!(ME.caps.salesManager || ME.caps.money); }
+
+  function refBlock() {
+    return '<div id="nRef" style="display:none;margin-top:4px;padding:10px;border:1px solid var(--line);border-radius:8px">' +
+      '<div class="detlbl">Referred by</div>' +
+      '<div id="nRefPicked"></div>' +
+      '<div id="nRefFind"><input id="nRefQ" class="detsel" placeholder="Search referrers — name, company, phone">' +
+      '<div id="nRefHits"></div>' +
+      '<button class="btn btn-ghost" id="nRefAdd" style="margin-top:6px">New referrer</button></div>' +
+      '<div id="nRefNew" style="display:none;margin-top:6px">' +
+        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:7px">' +
+        '<div><div class="detlbl">Type</div><select id="rKind" class="detsel">' +
+          REF_KINDS.map(function (k) { return '<option value="' + k[0] + '">' + k[1] + '</option>'; }).join('') + '</select></div>' +
+        '<div><div class="detlbl">Name</div><input id="rName" class="detsel"></div>' +
+        '<div><div class="detlbl">Phone</div><input id="rPhone" class="detsel"></div>' +
+        '<div><div class="detlbl">Email</div><input id="rEmail" class="detsel" type="email"></div>' +
+        '<div style="grid-column:1/-1"><div class="detlbl">Address</div><input id="rAddr" class="detsel"></div>' +
+        '<div><div class="detlbl">Company / agency</div><input id="rCompany" class="detsel"></div>' +
+        (feeRole() ? '<div><div class="detlbl">Usual fee</div><input id="rFee" class="detsel" type="number" min="0" step="0.01"></div>' : '<div></div>') +
+        '<div id="rPayeeRow" style="display:none;grid-column:1/-1"><div class="detlbl">Fee usually goes to</div><input id="rPayee" class="detsel" placeholder="GM, service director…"></div>' +
+        '</div><div id="rMatch" style="margin-top:6px"></div>' +
+        '<button class="btn btn-ghost" id="rCancel" style="margin-top:6px">Back to search</button>' +
+      '</div>' +
+      '<div style="display:flex;gap:12px;align-items:center;margin-top:9px;flex-wrap:wrap">' +
+        '<label style="display:flex;gap:5px;align-items:center;font:400 11.5px var(--font)"><input type="radio" name="nRefFee" value="fee" checked> Fee</label>' +
+        '<label style="display:flex;gap:5px;align-items:center;font:400 11.5px var(--font)"><input type="radio" name="nRefFee" value="none"> No fee</label>' +
+        '<input id="nRefAmt" class="detsel" type="number" min="0" step="0.01" placeholder="Amount" style="width:110px">' +
+        '<input id="nRefPayee" class="detsel" placeholder="Paid to (dealer)" style="display:none;flex:1;min-width:140px">' +
+      '</div>' +
+      '<div style="font:400 10.5px var(--font);color:var(--dim);margin-top:5px">Earned when the referred car is picked up; paid the Friday after, Wednesday cut-off.</div>' +
+    '</div>' +
+    '<div id="nCustMatch"></div>';
+  }
+
+  function showPicked(f) {
+    REFPICK = f; REFNEW = null;
+    $('nRefFind').style.display = f ? 'none' : '';
+    $('nRefNew').style.display = 'none';
+    $('nRefPicked').innerHTML = f ? '<div style="display:flex;gap:8px;align-items:center;padding:6px 0">' +
+      '<div style="flex:1"><div style="font:500 12px var(--font)">' + esc(f.name) + '</div>' +
+      '<div style="font:400 10.5px var(--font);color:var(--dim)">' + esc(kindLabel(f.kind)) + (f.company ? ' · ' + esc(f.company) : '') +
+      (f.client_id ? ' · existing client' : '') + '</div></div>' +
+      '<button class="btn btn-ghost" id="nRefChange">Change</button></div>' : '';
+    if (f) {
+      $('nRefChange').addEventListener('click', function () { showPicked(null); });
+      if (f.default_fee_cents !== null && f.default_fee_cents !== undefined && !$('nRefAmt').value) $('nRefAmt').value = (Number(f.default_fee_cents) / 100).toFixed(2);
+      $('nRefPayee').style.display = f.kind === 'dealer' ? '' : 'none';
+      if (f.kind === 'dealer' && f.payee_default && !$('nRefPayee').value) $('nRefPayee').value = f.payee_default;
+    }
+  }
+
+  function wireRef() {
+    var src = $('nSource');
+    var toggle = function () { $('nRef').style.display = String(src.value).toLowerCase() === 'referral' ? '' : 'none'; };
+    src.addEventListener('change', toggle); toggle();
+    var t = null;
+    $('nRefQ').addEventListener('input', function () {
+      var q = this.value.trim();
+      clearTimeout(t);
+      t = setTimeout(function () {
+        if (!q) { $('nRefHits').innerHTML = ''; return; }
+        api('/api/referrers?q=' + encodeURIComponent(q)).then(function (d) {
+          $('nRefHits').innerHTML = d.referrers.length ? d.referrers.map(function (f, i) {
+            return '<div data-ri="' + i + '" style="padding:6px 4px;border-bottom:1px solid var(--whisper);cursor:pointer">' +
+              '<span style="font:500 12px var(--font)">' + esc(f.name) + '</span> <span style="font:400 10.5px var(--font);color:var(--dim)">' +
+              esc(kindLabel(f.kind)) + (f.company ? ' · ' + esc(f.company) : '') + ' · ' + f.sent + ' sent</span></div>';
+          }).join('') : '<div style="font:400 11px var(--font);color:var(--dim);padding:6px 0">No referrer by that. Add them as new.</div>';
+          Array.prototype.forEach.call($('nRefHits').querySelectorAll('[data-ri]'), function (el) {
+            el.addEventListener('click', function () { showPicked(d.referrers[Number(el.dataset.ri)]); });
+          });
+        }).catch(function () {});
+      }, 220);
+    });
+    $('nRefAdd').addEventListener('click', function () {
+      $('nRefFind').style.display = 'none'; $('nRefNew').style.display = '';
+      REFNEW = {};
+      if (!$('rName').value) $('rName').value = $('nRefQ').value.trim();
+    });
+    $('rCancel').addEventListener('click', function () { REFNEW = null; $('nRefNew').style.display = 'none'; $('nRefFind').style.display = ''; });
+    $('rKind').addEventListener('change', function () {
+      $('rPayeeRow').style.display = this.value === 'dealer' ? '' : 'none';
+      $('nRefPayee').style.display = this.value === 'dealer' ? '' : 'none';
+    });
+    var check = function () {
+      var q = 'phone=' + encodeURIComponent($('rPhone').value) + '&email=' + encodeURIComponent($('rEmail').value) +
+        '&name=' + encodeURIComponent($('rName').value) + '&address=' + encodeURIComponent($('rAddr').value);
+      api('/api/referrers/match?' + q).then(function (m) {
+        var box = $('rMatch'), h = [];
+        m.referrers.forEach(function (f, i) {
+          h.push('<div style="padding:7px;border:1px solid var(--acc2);border-radius:6px;margin-bottom:5px;font:400 11.5px var(--font)">' +
+            '<b>Already a referrer</b> — ' + esc(f.name) + ' · ' + esc(kindLabel(f.kind)) +
+            ' <button class="btn btn-ghost" data-use="' + i + '">Use them</button></div>');
+        });
+        if (!m.referrers.length) m.clients.forEach(function (c, i) {
+          h.push('<div style="padding:7px;border:1px solid var(--acc2);border-radius:6px;margin-bottom:5px;font:400 11.5px var(--font)">' +
+            '<b>Person already exists</b> — ' + esc(c.name) + (c.address ? ', ' + esc(c.address) : '') + ' is a client. Convert to referrer?' +
+            ' <button class="btn btn-ghost" data-conv="' + i + '">Yes, convert</button> <button class="btn btn-ghost" data-not="1">Not the same person</button></div>');
+        });
+        if (!m.referrers.length && !m.clients.length) m.possible.forEach(function (c, i) {
+          h.push('<div style="padding:7px;border:1px dashed var(--line);border-radius:6px;margin-bottom:5px;font:400 11.5px var(--font)">' +
+            'Possible match — ' + esc(c.name) + ', ' + esc(c.address || '') + ' (same name and address)' +
+            ' <button class="btn btn-ghost" data-conv-p="' + i + '">It is them</button> <button class="btn btn-ghost" data-not="1">Not the same person</button></div>');
+        });
+        box.innerHTML = h.join('');
+        var convert = function (c) {
+          api('/api/referrers', { method: 'POST', body: JSON.stringify({ fromClientId: c.id }) })
+            .then(function (r) { return api('/api/referrers/' + r.id); })
+            .then(function (d) { showPicked(d.referrer); })
+            .catch(function (e) { box.innerHTML = '<div class="msg err">' + esc(e.message) + '</div>'; });
+        };
+        Array.prototype.forEach.call(box.querySelectorAll('[data-use]'), function (b) { b.addEventListener('click', function () { showPicked(m.referrers[Number(b.dataset.use)]); }); });
+        Array.prototype.forEach.call(box.querySelectorAll('[data-conv]'), function (b) { b.addEventListener('click', function () { convert(m.clients[Number(b.dataset.conv)]); }); });
+        Array.prototype.forEach.call(box.querySelectorAll('[data-conv-p]'), function (b) { b.addEventListener('click', function () { convert(m.possible[Number(b.dataset.convP)]); }); });
+        Array.prototype.forEach.call(box.querySelectorAll('[data-not]'), function (b) { b.addEventListener('click', function () { box.innerHTML = ''; }); });
+      }).catch(function () {});
+    };
+    ['rPhone', 'rEmail', 'rAddr'].forEach(function (k) { $(k).addEventListener('blur', check); });
+    /* The referred customer gets the same check against the client list. */
+    var custCheck = function () {
+      var q = 'phone=' + encodeURIComponent($('nPhone').value) + '&email=' + encodeURIComponent($('nEmail').value) +
+        '&name=' + encodeURIComponent([$('nFirst').value, $('nLast').value].join(' ').trim()) + '&address=' + encodeURIComponent($('nAddress').value);
+      api('/api/referrers/match?' + q).then(function (m) {
+        var c = m.clients[0], p = m.possible[0];
+        $('nCustMatch').innerHTML = c ? '<div style="font:400 11px var(--font);color:var(--acc2);margin-top:6px">Already a client: ' + esc(c.name) + (c.address ? ', ' + esc(c.address) : '') + '</div>'
+          : p ? '<div style="font:400 11px var(--font);color:var(--dim);margin-top:6px">Possible match on the client list: ' + esc(p.name) + ', ' + esc(p.address || '') + '</div>' : '';
+      }).catch(function () {});
+    };
+    ['nPhone', 'nEmail', 'nAddress'].forEach(function (k) { $(k).addEventListener('blur', custCheck); });
+  }
+
+  function readRef() {
+    if (String($('nSource').value).toLowerCase() !== 'referral') return undefined;
+    var none = document.querySelector('input[name="nRefFee"]:checked').value === 'none';
+    var amt = $('nRefAmt').value;
+    var out = { noFee: none, feeCents: none || amt === '' ? undefined : Math.round(Number(amt) * 100), payee: $('nRefPayee').value.trim() || undefined };
+    if (REFPICK) out.referrerId = REFPICK.id;
+    else if (REFNEW) out.newReferrer = {
+      kind: $('rKind').value, name: $('rName').value.trim(), phone: $('rPhone').value.trim(), email: $('rEmail').value.trim(),
+      address: $('rAddr').value.trim(), company: $('rCompany').value.trim(),
+      defaultFeeCents: $('rFee') && $('rFee').value !== '' ? Math.round(Number($('rFee').value) * 100) : undefined,
+      payeeDefault: $('rPayee').value.trim() || undefined
+    };
+    return out;
+  }
+
+  /* The referral on an existing lead: who, where the fee stands, and — for
+     sales managers and money roles — Fee / No fee, amount, payee, and the
+     total-loss decision. */
+  function refDetail() {
+    var r = REFD;
+    if (!r) return '';
+    var h = '<div style="grid-column:1/-1"><div class="detlbl" style="margin-top:12px">Referral</div>' +
+      '<div style="padding:9px;border:1px solid var(--line);border-radius:8px">' +
+      '<div style="font:500 12px var(--font)">' + esc(r.referrer.name) + ' <span style="font:400 10.5px var(--font);color:var(--dim)">' + esc(kindLabel(r.referrer.kind)) + '</span></div>' +
+      '<div style="font:400 11px var(--font);color:var(--muted);margin-top:3px">' + esc(r.label) +
+      (r.feeCents !== null && !r.noFee ? ' · ' + fmt$(r.feeCents) : '') + (r.payee && r.payee !== r.referrer.name ? ' · to ' + esc(r.payee) : '') + '</div>';
+    if (r.canEdit) {
+      h += '<div style="display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap">' +
+        '<label style="display:flex;gap:5px;align-items:center;font:400 11.5px var(--font)"><input type="radio" name="dRefFee" value="fee"' + (r.noFee ? '' : ' checked') + '> Fee</label>' +
+        '<label style="display:flex;gap:5px;align-items:center;font:400 11.5px var(--font)"><input type="radio" name="dRefFee" value="none"' + (r.noFee ? ' checked' : '') + '> No fee</label>' +
+        '<input id="dRefAmt" class="detsel" type="number" min="0" step="0.01" style="width:100px" value="' + (r.feeCents ? (r.feeCents / 100).toFixed(2) : '') + '">' +
+        (r.referrer.kind === 'dealer' ? '<input id="dRefPayee" class="detsel" style="flex:1;min-width:120px" placeholder="Paid to" value="' + esc(r.payee || '') + '">' : '') +
+        '<button class="btn btn-ghost" id="dRefSave">Save</button></div>';
+      if (r.state === 'held') h += '<div style="display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap;font:400 11px var(--font)">Total loss — pay the fee?' +
+        '<button class="btn btn-primary" data-tl="pay">Pay it</button><button class="btn btn-ghost" data-tl="none">No fee</button></div>';
+    }
+    return h + '</div></div>';
+  }
+  function wireRefDetail(lead) {
+    var s = $('dRefSave');
+    if (s) s.addEventListener('click', function () {
+      var none = document.querySelector('input[name="dRefFee"]:checked').value === 'none';
+      var body = { noFee: none };
+      if (!none && $('dRefAmt').value !== '') body.feeCents = Math.round(Number($('dRefAmt').value) * 100);
+      if ($('dRefPayee')) body.payee = $('dRefPayee').value;
+      api('/api/leads/' + lead.id + '/referral', { method: 'PATCH', body: JSON.stringify(body) }).then(load).catch(function (e) { say(e.message, 'err'); });
+    });
+    Array.prototype.forEach.call(document.querySelectorAll('[data-tl]'), function (b) {
+      b.addEventListener('click', function () {
+        api('/api/leads/' + lead.id + '/referral', { method: 'PATCH', body: JSON.stringify({ tlDecision: b.dataset.tl }) }).then(load).catch(function (e) { say(e.message, 'err'); });
+      });
+    });
+  }
+
   /* Split sales. Salesperson 1 is the dropdown above; ticking 2 or 3 brings up
      their dropdown and a share. The three come to 100%, checked again on save.
      Each person is paid on their own plan, on their share. */
@@ -718,6 +985,7 @@
 
     api('/api/leads/' + l.id).then(function (d) {
       var lead = d.lead;
+      REFD = d.referral || null; REFEDIT = !!d.mayEditFee;
       var name = [lead.first_name, lead.last_name].filter(Boolean).join(' ') || 'Unnamed';
       var digits = String(lead.phone || '').replace(/[^0-9]/g, '');
       var phoneText = digits.length === 10
@@ -938,6 +1206,14 @@
         (lead.owner_user_id ? splitEditor('d', lead) +
           '<button class="btn btn-ghost" id="dSplitSave" style="margin-top:6px">Save split</button>' : '') +
         '</div>');
+      h.push(refDetail());
+      h.push('<div style="grid-column:1/-1"><a href="/record.html?lead=' + lead.id + '" style="font:400 11px var(--font);color:var(--acc2)">Open the full record</a></div>');
+      h.push(pipeSelect(lead));
+      /* Callback: the one task a person makes, and only by logging a touch. */
+      h.push('<div style="grid-column:1/-1"><div class="detlbl" style="margin-top:10px">Log a call and book a callback</div>' +
+        '<div style="display:flex;gap:7px;flex-wrap:wrap"><input id="cbAt" type="datetime-local" class="detsel" style="width:auto">' +
+        '<input id="cbNote" class="detsel" placeholder="What was said" style="flex:1;min-width:140px">' +
+        '<button class="btn btn-ghost" id="cbSave">Log and book</button></div></div>');
 
       if (lead.state === 'lost') {
         h.push('<div><div class="detlbl">Lost because</div><select class="detsel" id="dLost">' +
@@ -1155,6 +1431,18 @@
     });
 
     wireSplit('d');
+    wireRefDetail(lead);
+    var cbSave = $('cbSave');
+    if (cbSave) cbSave.addEventListener('click', function () {
+      if (!$('cbAt').value) return say('Pick when to call back.', 'err');
+      api('/api/leads/' + lead.id + '/callback', { method: 'POST', body: JSON.stringify({ dueAt: new Date($('cbAt').value).toISOString(), note: $('cbNote').value, how: 'Called' }) })
+        .then(load).catch(function (e) { say(e.message, 'err'); });
+    });
+    var dPipe = $('dPipe');
+    if (dPipe) dPipe.addEventListener('change', function () {
+      api('/api/leads/' + lead.id + '/pipe', { method: 'POST', body: JSON.stringify({ status: this.value }) })
+        .then(function () { if (TAB === 'pipe') renderPipeline(); return load(); }).catch(function (e) { say(e.message, 'err'); });
+    });
     var dSplitSave = $('dSplitSave');
     if (dSplitSave) dSplitSave.addEventListener('click', function () {
       api('/api/leads/' + lead.id, { method: 'PATCH', body: JSON.stringify({ split: readSplit('d') }) })
@@ -1302,12 +1590,14 @@
       STAFF.map(function (s) { return '<option value="' + s.id + '">' + esc(s.name) + '</option>'; }).join('') +
       '</select></div></div>' +
       splitEditor('n', null) +
+      refBlock() +
       '<div class="msg" id="nMsg"></div>' +
       '<button class="winbtn" id="saveLead">Save lead</button>' +
       '<div style="text-align:center;margin-top:9px">' +
       '<button class="btn btn-ghost" id="cancelLead">Cancel</button></div>';
 
     wireSplit('n');
+    REFPICK = null; REFNEW = null; wireRef();
     $('cancelLead').addEventListener('click', function () { ADDING = false; renderDetail(); });
 
     $('saveLead').addEventListener('click', function () {
@@ -1326,7 +1616,8 @@
         source: $('nSource').value,
         payer: $('nPayer') ? $('nPayer').value : undefined,
         ownerUserId: $('nOwner').value ? Number($('nOwner').value) : undefined,
-        split: readSplit('n')
+        split: readSplit('n'),
+        referral: readRef()
       };
       api('/api/leads', { method: 'POST', body: JSON.stringify(body) })
         .then(function (r) { ADDING = false; SEL = r.id; return load(); })

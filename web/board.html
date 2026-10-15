@@ -1655,8 +1655,10 @@
                f.color].filter(Boolean).join(' · ')) + '</div></div>';
 
       case 'owner':
-        return '<div style="min-width:0"><div class="cellmain" style="color:var(--muted)">' +
-          esc(f.customer || '—') + '</div><div class="cellsub">' +
+        /* A link to the customer record; the rest of the row still opens the file. */
+        return '<div style="min-width:0"><div class="cellmain" style="color:var(--muted)"><a href="#" data-cust="' + f.id + '" ' +
+          'style="color:var(--acc2);text-decoration:underline;text-underline-offset:3px">' +
+          esc(f.customer || '—') + '</a></div><div class="cellsub">' +
           esc(f.phone || '—') + '</div></div>';
 
       case 'insurance': {
@@ -2129,6 +2131,24 @@
       location.reload();
     });
   }
+
+  /* The customer record over the board: capture phase, so the row's own click never opens the file. */
+  document.addEventListener('click', function (e) {
+    var a = e.target && e.target.closest ? e.target.closest('[data-cust]') : null;
+    if (!a) return;
+    e.preventDefault(); e.stopPropagation();
+    var ov = document.createElement('div');
+    ov.style.cssText = 'position:fixed;inset:0;z-index:300;background:rgba(10,14,24,.6);display:flex;justify-content:flex-end';
+    ov.innerHTML = '<div style="width:min(760px,100%);height:100%;background:var(--bg);border-left:1px solid var(--line);display:flex;flex-direction:column">' +
+      '<div style="display:flex;justify-content:flex-end;gap:8px;padding:8px 10px;border-bottom:1px solid var(--line)">' +
+      '<a class="btn btn-ghost" href="/record.html?ro=' + a.dataset.cust + '">Open full page</a><button class="btn btn-ghost" data-x>Close</button></div>' +
+      '<div id="custRec" style="flex:1;min-height:0;overflow-y:auto"></div></div>';
+    ov.addEventListener('click', function (ev) { if (ev.target === ov || (ev.target.closest && ev.target.closest('[data-x]'))) ov.remove(); });
+    document.body.appendChild(ov);
+    var go = function () { window.CustomerRecord.render(document.getElementById('custRec'), 'ro=' + encodeURIComponent(a.dataset.cust)); };
+    if (window.CustomerRecord) go();
+    else { var s = document.createElement('script'); s.src = '/record.js?v=1'; s.onload = go; document.head.appendChild(s); }
+  }, true);
 
   /* ---------------------------------------------------------------- drawer */
 
@@ -3008,6 +3028,16 @@
         (ME.caps.viewPaperwork ? '' : ' accept="image/*"') + '></div>');
     }
 
+    /* A referred file carries the referral: who sent it, the payee, where the fee stands. */
+    if (d.referral) {
+      var rf = d.referral;
+      L.push('<div class="sec">Referral</div><div style="font:400 12px var(--font);padding:2px 0 8px">' +
+        esc(rf.referrer.name) + ' <span class="hint">' + esc({ agent: 'Insurance agent', adjuster: 'Adjuster / carrier', dealer: 'Dealer', past_customer: 'Past customer' }[rf.referrer.kind] || '') + '</span>' +
+        '<div class="hint" style="margin-top:3px">' + esc(rf.label) +
+        (rf.feeCents !== null && !rf.noFee ? ' · ' + esc(money(rf.feeCents)) : '') +
+        (rf.payee && rf.payee !== rf.referrer.name ? ' · to ' + esc(rf.payee) : '') +
+        ' · <a href="/leads.html?lead=' + rf.leadId + '">' + esc(rf.leadNumber) + '</a></div></div>');
+    }
     $('dLeft').innerHTML = L.join('');
 
     /* ---- right column: what you do to the file ---- */

@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1c2740">
+<title>Tasks — Easy Shop</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/shell.css?v=8">
+<style>
+  .titlerow { display:flex; align-items:flex-end; gap:18px; padding:16px 18px 10px; flex:none; flex-wrap:wrap; }
+  .titlerow h1 { font:500 18px var(--font); margin:0; }
+  .titlemeta { font:400 11.5px var(--font); color:var(--dim); margin-top:4px; }
+  .ctrls { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-left:auto; }
+  .pick { background:var(--chip); border:1px solid var(--line); border-radius:4px; color:var(--text); font:400 11.5px var(--font); padding:6px 9px; }
+  .seg { display:flex; border:1px solid var(--line); border-radius:4px; overflow:hidden; }
+  .seg button { background:transparent; border:none; color:var(--dim); font:400 11.5px var(--font); padding:6px 11px; cursor:pointer; }
+  .seg button.on { background:var(--chip); color:var(--text); }
+  #board { flex:1; min-height:0; display:flex; overflow:hidden; border-top:1px solid var(--line); }
+  .pin { flex:none; width:270px; border-right:1px solid var(--line); overflow-y:auto; background:var(--surf); }
+  .scroll { flex:1; min-width:0; overflow-x:auto; overflow-y:hidden; display:flex; }
+  .col { flex:none; width:260px; border-right:1px solid var(--whisper); display:flex; flex-direction:column; min-height:0; }
+  .colbody { overflow-y:auto; flex:1; min-height:0; }
+  .band { font:600 8.5px var(--font); letter-spacing:.12em; text-transform:uppercase; color:var(--acc2); padding:6px 12px; border-bottom:1px solid var(--whisper); cursor:pointer; }
+  .chead { padding:10px 12px; border-bottom:1px solid var(--line); }
+  .chead .n { font:500 12.5px var(--font); }
+  .chead .s { font:400 10.5px var(--font); color:var(--dim); margin-top:3px; }
+  .task { padding:9px 12px; border-bottom:1px solid var(--whisper); }
+  .task.od { border-left:2px solid var(--stopped); }
+  .task .k { font:600 8.5px var(--font); letter-spacing:.06em; text-transform:uppercase; color:var(--acc); }
+  .task .t { font:500 12px var(--font); margin-top:3px; }
+  .task .s { font:400 10.5px var(--font); color:var(--dim); margin-top:2px; }
+  .task a { color:inherit; text-decoration:none; }
+  .task a:hover .t { color:var(--acc2); }
+  .empty { font:400 11.5px var(--font); color:var(--dim); padding:14px 12px; }
+  .red { color:var(--stopped); }
+</style>
+</head>
+<body>
+<div class="bar">
+  <div class="brand"><div class="mark">ES</div><div class="word">Easy Shop</div></div>
+  <div class="vr"></div>
+  <div class="co" id="coName">—</div>
+  <div id="nav"></div>
+  <div class="spacer"></div>
+  <div id="bell"></div>
+  <div class="who" id="who">—</div>
+  <button class="ghostbtn" id="signout">Sign out</button>
+</div>
+<div class="hairline"></div>
+<div class="titlerow">
+  <div><h1>Tasks</h1><div class="titlemeta" id="headmeta">Loading…</div></div>
+  <div class="ctrls">
+    <div class="seg" id="mode"><button data-m="person" class="on">By person</button><button data-m="team">By team</button></div>
+    <input class="pick" id="find" placeholder="Find a person or team">
+    <label style="display:flex;gap:6px;align-items:center;font:400 11.5px var(--font)"><input type="checkbox" id="onlyOd"> Only people with overdue</label>
+  </div>
+</div>
+<div id="board"></div>
+
+<script src="/shell.js?v=9"></script>
+<script>
+(function () {
+  var api = Shell.api, esc = Shell.esc;
+  var $ = function (id) { return document.getElementById(id); };
+  var D = null, MODE = 'person', FOLD = {};
+  var KIND = { handout: 'Hand out', first_call: 'First call', chase_quote: 'Chase quote', confirm_appt: 'Confirm appt', reschedule: 'Reschedule', callback: 'Callback' };
+  function when(iso) {
+    var d = new Date(iso), now = new Date();
+    var same = d.toDateString() === now.toDateString();
+    return (same ? 'Today ' : d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + ' ') + d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+  }
+  function od(t) { return new Date(t.due).getTime() < Date.now(); }
+  function today(t) { return new Date(t.due).toDateString() === new Date().toDateString(); }
+
+  function card(t, withOwner) {
+    var owner = withOwner && t.userId ? (D.people.filter(function (p) { return p.userId === t.userId; })[0] || {}).name : '';
+    var h = '<div class="task' + (od(t) ? ' od' : '') + '"><a href="/leads.html?lead=' + t.leadId + '">' +
+      '<div class="k">' + esc(KIND[t.kind] || t.kind) + (t.step >= 2 ? ' · step ' + t.step : '') + '</div>' +
+      '<div class="t">' + esc(t.name || t.leadNumber) + '</div>' +
+      '<div class="s">' + esc([t.vehicle, owner].filter(Boolean).join(' · ')) + '</div>' +
+      '<div class="s' + (od(t) ? ' red' : '') + '">' + (od(t) ? 'Overdue · ' : 'Due ') + esc(when(t.due)) + (t.note ? ' · ' + esc(t.note) : '') + '</div></a>';
+    if (t.kind === 'handout' && D.canHandOut) {
+      h += '<div style="display:flex;gap:6px;margin-top:6px"><select class="pick" data-ho="' + t.leadId + '" style="flex:1"><option value="">Hand to…</option>' +
+        D.staff.map(function (s) { return '<option value="' + s.userId + '">' + esc(s.name) + '</option>'; }).join('') + '</select></div>';
+    }
+    if (t.kind === 'callback') h += '<button class="btn btn-ghost" data-done="' + t.callbackId + '" style="margin-top:6px">Done</button>';
+    return h + '</div>';
+  }
+  function column(title, sub, list, withOwner) {
+    var o = list.filter(od).length, d = list.filter(today).length;
+    return '<div class="col"><div class="chead"><div class="n">' + esc(title) + '</div><div class="s">' +
+      (o ? '<span class="red">' + o + ' overdue</span> · ' : '') + d + ' today · ' + list.length + ' open' + (sub ? ' · ' + esc(sub) : '') + '</div></div>' +
+      '<div class="colbody">' + (list.length ? list.map(function (t) { return card(t, withOwner); }).join('') : '<div class="empty">Nothing due.</div>') + '</div></div>';
+  }
+
+  function render() {
+    var q = $('find').value.trim().toLowerCase(), onlyOd = $('onlyOd').checked;
+    var un = D.tasks.filter(function (t) { return !t.userId; });
+    var tot = D.tasks.filter(od).length;
+    $('headmeta').textContent = D.tasks.length + ' open · ' + tot + ' overdue';
+    var pin = '<div class="pin">' + column('Unassigned', 'hand these out', un, false).replace('class="col"', 'class="col" style="width:auto;border:none"') + '</div>';
+    var mine = function (uid) { return D.tasks.filter(function (t) { return t.userId === uid; }); };
+    var cols = [];
+    if (MODE === 'person') {
+      var lastTeam = undefined;
+      D.people.forEach(function (p) {
+        var list = mine(p.userId);
+        if (q && (p.name + ' ' + (p.team || '')).toLowerCase().indexOf(q) < 0) return;
+        if (onlyOd && !list.some(od)) return;
+        var tk = p.team || 'No team';
+        if (tk !== lastTeam) {
+          lastTeam = tk;
+          var teamList = D.people.filter(function (x) { return (x.team || 'No team') === tk; });
+          if (FOLD[tk]) {
+            var all = []; teamList.forEach(function (x) { all = all.concat(mine(x.userId)); });
+            cols.push('<div class="col"><div class="band" data-fold="' + esc(tk) + '">▸ ' + esc(tk) + '</div>' + column(tk + ' · totals', teamList.length + ' people', all, true).replace('<div class="col">', '<div>') + '</div>');
+          }
+        }
+        if (FOLD[tk]) return;
+        cols.push('<div class="col"><div class="band" data-fold="' + esc(tk) + '">▾ ' + esc(tk) + '</div>' + column(p.name, '', list, false).replace('<div class="col">', '<div style="display:flex;flex-direction:column;min-height:0;flex:1">') + '</div>');
+      });
+    } else {
+      var teams = {};
+      D.people.forEach(function (p) { var k = p.team || 'No team'; (teams[k] = teams[k] || []).push(p); });
+      Object.keys(teams).sort().forEach(function (k) {
+        if (q && k.toLowerCase().indexOf(q) < 0) return;
+        var all = []; teams[k].forEach(function (p) { all = all.concat(mine(p.userId)); });
+        all.sort(function (a, b) { return a.due < b.due ? -1 : 1; });
+        if (onlyOd && !all.some(od)) return;
+        cols.push(column(k, teams[k].length + ' people', all, true));
+      });
+    }
+    $('board').innerHTML = pin + '<div class="scroll">' + (cols.join('') || '<div class="empty">No one matches.</div>') + '</div>';
+    Array.prototype.forEach.call(document.querySelectorAll('[data-fold]'), function (b) {
+      b.addEventListener('click', function () { var k = b.dataset.fold; FOLD[k] = !FOLD[k]; render(); });
+    });
+    Array.prototype.forEach.call(document.querySelectorAll('[data-ho]'), function (s) {
+      s.addEventListener('change', function () {
+        if (!s.value) return;
+        api('/api/leads/' + s.dataset.ho + '/handout', { method: 'POST', body: JSON.stringify({ userId: Number(s.value) }) }).then(load).catch(function (e) { window.alert(e.message); });
+      });
+    });
+    Array.prototype.forEach.call(document.querySelectorAll('[data-done]'), function (b) {
+      b.addEventListener('click', function () { api('/api/callbacks/' + b.dataset.done + '/done', { method: 'POST' }).then(load).catch(function (e) { window.alert(e.message); }); });
+    });
+  }
+
+  function load() { return api('/api/tasks').then(function (d) { D = d; render(); }).catch(function (e) { $('board').innerHTML = '<div class="empty">' + esc(e.message) + '</div>'; }); }
+
+  Array.prototype.forEach.call($('mode').querySelectorAll('button'), function (b) {
+    b.addEventListener('click', function () {
+      MODE = b.dataset.m;
+      Array.prototype.forEach.call($('mode').querySelectorAll('button'), function (x) { x.className = x === b ? 'on' : ''; });
+      render();
+    });
+  });
+  $('find').addEventListener('input', function () { if (D) render(); });
+  $('onlyOd').addEventListener('change', function () { if (D) render(); });
+
+  api('/api/me').then(function (me) {
+    Shell.mount({ me: me, active: 'tasks' });
+    if (!me.caps.viewLeads) { $('board').innerHTML = '<div class="empty">Tasks are for the sales desk.</div>'; return; }
+    load();
+    setInterval(load, 120000);
+  }).catch(function (e) { if (e.message !== 'signed out') console.error(e); });
+})();
+</script>
+</body>
+</html>

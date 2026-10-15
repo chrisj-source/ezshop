@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1c2740">
+<title>Customer — Easy Shop</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/shell.css?v=8">
+<style>#rec { flex:1; min-height:0; overflow-y:auto; } a { color:var(--acc2); } a:hover { color:var(--acc); }</style>
+</head>
+<body>
+<div class="bar">
+  <div class="brand"><div class="mark">ES</div><div class="word">Easy Shop</div></div>
+  <div class="vr"></div><div class="co" id="coName">—</div><div id="nav"></div><div class="spacer"></div>
+  <div id="bell"></div><div class="who" id="who">—</div><button class="ghostbtn" id="signout">Sign out</button>
+</div>
+<div class="hairline"></div>
+<div id="rec"></div>
+<script src="/shell.js?v=9"></script>
+<script src="/record.js?v=1"></script>
+<script>
+Shell.api('/api/me').then(function (me) {
+  Shell.mount({ me: me, active: 'leads' });
+  var p = new URLSearchParams(location.search), q = p.get('ro') ? 'ro=' + encodeURIComponent(p.get('ro')) : 'lead=' + encodeURIComponent(p.get('lead') || '');
+  CustomerRecord.render(document.getElementById('rec'), q);
+}).catch(function (e) { if (e.message !== 'signed out') console.error(e); });
+</script>
+</body>
+</html>

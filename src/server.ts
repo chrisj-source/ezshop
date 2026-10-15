@@ -48,6 +48,10 @@ import { startMentionReminders } from './jobs/mentions';
 import { startLeadChase } from './jobs/leadchase';
 import { startFunnelHolds } from './jobs/funnel-holds';
 import { registerExtInvoices } from './routes/extinvoices';
+import { registerReferrers } from './routes/referrers';
+import { registerPipeline } from './routes/pipeline';
+import { registerLeadOps } from './routes/leadops';
+import { startLadder } from './lib/leadops';
 import { startInvoiceSync } from './lib/extinvoices';
 import { closeQueue, startWorker } from './queue';
 import { makeDerivatives } from './jobs/derivatives';
@@ -124,6 +128,12 @@ async function main(): Promise<void> {
   await registerLocations(app);
   /* A shop's own invoicing database, read hourly (switched on per shop). */
   await registerExtInvoices(app);
+  /* Referrers, the fee on a referral lead, and the referral payout list. */
+  await registerReferrers(app);
+  /* The lead pipeline: lanes by source, a status per lead, the automatic moves. */
+  await registerPipeline(app);
+  /* Lead routing, the ladder, notification groups, teams and the tasks queue. */
+  await registerLeadOps(app);
 
   app.get('/api/health', async () => {
     const [r] = await master().query('SELECT 1 AS ok');
@@ -230,6 +240,8 @@ async function main(): Promise<void> {
 
   /* Leads nobody has touched: 12 hours for a sales write-up, 48 for the rest. */
   startLeadChase();
+  /* Escalation steps 2 and 3, and routing leads that arrived with no owner. Every 10 minutes. */
+  startLadder();
 
   /* Website requests holding a slot nobody answered, and holds the shop's own
      hours no longer cover. Quarter-hourly. */
