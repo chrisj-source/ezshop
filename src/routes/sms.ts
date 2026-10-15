@@ -14,6 +14,7 @@ import { suppressionState } from '../lib/suppression';
 import { mayTouch } from './ro';
 import { audit } from '../lib/audit';
 import { actorFrom } from './audit';
+import { approvalPeople, approvalSettings, fillStaff, STAFF_TOKENS } from '../lib/sms-staff';
 
 async function paudit(actor: number, companyId: number, action: string, detail: unknown): Promise<void> {
   await mexec('INSERT INTO platform_audit (actor_user_id, company_id, action, detail) VALUES (?, ?, ?, ?)',
@@ -218,6 +219,69 @@ export async function registerSms(app: FastifyInstance): Promise<void> {
     sets.push('updated_by = ?'); vals.push(ctx.user.id, key);
     const r = await texec(cid, `UPDATE sms_templates SET ${sets.join(', ')} WHERE trigger_key = ?`, vals);
     if (!r.affectedRows) return reply.code(404).send({ error: 'No such update' });
+    return { ok: true };
+  });
+
+  /* ------------------------------------------ admin: texts to the shop's people */
+
+  app.get('/api/admin/staff-texts', async (req, reply) => {
+    const ctx = requireCompany(req, reply);
+    if (!ctx) return;
+    if (!ctx.caps.admin) return reply.code(403).send({ error: 'Owner only' });
+    const cid = ctx.company!.id;
+    const s = await approvalSettings(cid);
+    return {
+      smsOn: ctx.features.has('sms') && await smsReady(cid),
+      approval: { on: s.on, body: s.body,
+        sample: fillStaff(s.body, { ro: 'RO 4K7731', vehicle: '2019 Ford F-150', amount: '$10,000.00' }) },
+      tokens: STAFF_TOKENS,
+      people: await approvalPeople(cid)
+    };
+  });
+
+  app.put('/api/admin/staff-texts', async (req, reply) => {
+    const ctx = requireCompany(req, reply);
+    if (!ctx) return;
+    if (!ctx.caps.admin) return reply.code(403).send({ error: 'Owner only' });
+    const cid = ctx.company!.id;
+    const b = req.body as { on?: boolean; body?: string };
+    if (b.body !== undefined) {
+      const t = String(b.body).trim();
+      if (!t) return reply.code(400).send({ error: 'A message cannot be empty.' });
+      if (t.length > 320) return reply.code(400).send({ error: 'Keep it under 320 characters.' });
+      if (/reply\s+stop/i.test(t)) return reply.code(400).send({ error: 'Leave the STOP line off — it is added to every text automatically.' });
+      await texec(cid, `INSERT INTO shop_settings (setting_key, setting_value) VALUES ('sms_staff_approval_text', ?)
+        ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)`, [t]);
+    }
+    if (b.on !== undefined) {
+      await texec(cid, `INSERT INTO shop_settings (setting_key, setting_value) VALUES ('sms_staff_approval_on', ?)
+        ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)`, [b.on ? '1' : '0']);
+    }
+    await audit(cid, actorFrom(req), { entity: 'settings', action: 'staff_texts', area: 'Text updates',
+      label: 'Approval texts to staff changed', changes: [{ field: 'Approval text', from: null, to: b.on === undefined ? 'wording' : (b.on ? 'on' : 'off') }] });
+    return { ok: true };
+  });
+
+  app.put('/api/admin/staff-texts/:userId', async (req, reply) => {
+    const ctx = requireCompany(req, reply);
+    if (!ctx) return;
+    if (!ctx.caps.admin) return reply.code(403).send({ error: 'Owner only' });
+    const cid = ctx.company!.id;
+    const uid = Number((req.params as { userId: string }).userId);
+    const b = req.body as { phone?: string | null; on?: boolean };
+    const people = await approvalPeople(cid);
+    if (!people.some(p => p.userId === uid)) {
+      return reply.code(400).send({ error: 'That person cannot see money, and the text carries the approval amount.' });
+    }
+    let phone: string | null | undefined;
+    if (b.phone !== undefined) {
+      phone = b.phone ? normalise('sms', String(b.phone)) || null : null;
+      if (b.phone && !phone) return reply.code(400).send({ error: 'That does not look like a ten-digit phone number.' });
+    }
+    await texec(cid, `INSERT INTO staff_sms (user_id, phone, approval, updated_by) VALUES (?, ?, ?, ?)
+      ON DUPLICATE KEY UPDATE phone = IF(? = 1, VALUES(phone), phone), approval = IF(? = 1, VALUES(approval), approval), updated_by = VALUES(updated_by)`,
+      [uid, phone ?? null, b.on === undefined ? null : (b.on ? 1 : 0), ctx.user.id,
+       phone !== undefined ? 1 : 0, b.on !== undefined ? 1 : 0]);
     return { ok: true };
   });
 

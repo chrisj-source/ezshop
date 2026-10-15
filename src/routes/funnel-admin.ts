@@ -553,7 +553,7 @@ export async function registerFunnelAdmin(app: FastifyInstance): Promise<void> {
       : `fr.state IN ('held','booked') AND fr.answered_at IS NULL`;
 
     const rows = await tq<RowDataPacket[]>(cid, `
-      SELECT fr.*, l.lead_number, r.ro_number,
+      SELECT fr.*, l.lead_number, r.ro_number, r.id AS ro_file_id,
              TIMESTAMPDIFF(MINUTE, NOW(), fr.hold_until) AS hold_minutes
         FROM funnel_requests fr
         LEFT JOIN leads l ON l.id = fr.lead_id

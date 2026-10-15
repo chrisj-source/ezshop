@@ -5,6 +5,7 @@ import { requireCompany, requireFeature } from '../middleware/context';
 import { pushAppointment } from './gcal';
 import { atShopWallClock, closedReason, nextOpen, shopCalendar } from '../lib/shophours';
 import { wallClock } from '../lib/shoptime';
+import { mexec } from '../db/master';
 
 const KINDS = ['drop', 'pickup', 'return', 'estimate', 'appraiser', 'sublet'] as const;
 export type Kind = typeof KINDS[number];
@@ -380,54 +381,10 @@ export async function registerScheduler(app: FastifyInstance): Promise<void> {
     if (ctx.role !== 'owner') return reply.code(403).send({ error: 'Owner only' });
 
     const cid = ctx.company!.id;
-    const b = req.body as {
-      userId: number; displayName?: string;
-      startsOn: string; endsOn?: string;
-      startTime?: string | null; endTime?: string | null;
-      reason?: string; override?: boolean;
-    };
-
-    if (!b.userId) return reply.code(400).send({ error: 'Pick who is off.' });
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(b.startsOn ?? '')) {
-      return reply.code(400).send({ error: 'A first day is required.' });
-    }
-
-    const endsOn = /^\d{4}-\d{2}-\d{2}$/.test(b.endsOn ?? '') ? b.endsOn! : b.startsOn;
-    if (endsOn < b.startsOn) return reply.code(400).send({ error: 'The last day is before the first.' });
-
-    const startTime = b.startTime || null;
-    const endTime = b.endTime || null;
-    if (startTime && endTime && endTime <= startTime) {
-      return reply.code(400).send({ error: 'The end time is before the start time.' });
-    }
-
-    const staff = await tqOne<RowDataPacket & { display_name: string }>(cid,
-      'SELECT display_name FROM staff WHERE user_id = ?', [b.userId]);
-    const name = (b.displayName || staff?.display_name || 'Employee').slice(0, 120);
-
-    // What is already booked inside the window, so the owner sees it before
-    // committing rather than discovering it on the day.
-    const booked = await tq<RowDataPacket[]>(cid, `
-      SELECT a.id, a.kind, a.starts_at, a.customer_name
-      FROM appointments a
-      WHERE a.cancelled_at IS NULL AND a.assigned_user_id = ?
-        AND DATE(a.starts_at) BETWEEN ? AND ?
-        ${startTime && endTime ? 'AND TIME(a.starts_at) < ? AND TIME(a.starts_at) >= ?' : ''}
-      ORDER BY a.starts_at`,
-      startTime && endTime ? [b.userId, b.startsOn, endsOn, endTime, startTime]
-                           : [b.userId, b.startsOn, endsOn]);
-
-    if (booked.length && !b.override) {
-      return reply.code(409).send({
-        error: `${name} has ${booked.length} appointment${booked.length === 1 ? '' : 's'} ` +
-          'inside that window.',
-        conflict: true, canOverride: true,
-        clashes: booked.map(a => ({
-          id: a.id,
-          text: `${KIND_LABEL[a.kind as Kind]} for ${a.customer_name} on ${isoDay(a.starts_at as Date)}`
-        }))
-      });
-    }
+    const b = req.body as OffBody;
+    const chk = await checkOff(cid, b);
+    if ('status' in chk) return reply.code(chk.status).send(chk.body);
+    const { name, endsOn, startTime, endTime, booked } = chk;
 
     const res = await texec(cid, `
       INSERT INTO employee_time_off
@@ -448,6 +405,83 @@ export async function registerScheduler(app: FastifyInstance): Promise<void> {
     return { ok: true, id: res.insertId, overrode: booked.length };
   });
 
+  /**
+   * Change a block in place. Same rules and the same clash check as making one,
+   * so an edit cannot quietly move somebody off onto booked work. The row keeps
+   * its id and who set it; the before and after go to the audit log.
+   */
+  app.patch('/api/time-off/:id', async (req, reply) => {
+    const ctx = requireCompany(req, reply);
+    if (!ctx) return;
+    if (ctx.role !== 'owner') return reply.code(403).send({ error: 'Owner only' });
+
+    const cid = ctx.company!.id;
+    const id = Number((req.params as { id: string }).id);
+    const before = await tqOne<RowDataPacket>(cid,
+      'SELECT * FROM employee_time_off WHERE id = ? AND cancelled_at IS NULL', [id]);
+    if (!before) return reply.code(404).send({ error: 'That block is gone.' });
+
+    const b = req.body as OffBody;
+    const chk = await checkOff(cid, b);
+    if ('status' in chk) return reply.code(chk.status).send(chk.body);
+    const { name, endsOn, startTime, endTime, booked } = chk;
+
+    await texec(cid, `
+      UPDATE employee_time_off
+      SET user_id = ?, display_name = ?, starts_on = ?, ends_on = ?,
+          start_time = ?, end_time = ?, reason = ?
+      WHERE id = ?`,
+      [b.userId, name, b.startsOn, endsOn, startTime, endTime,
+       (b.reason ?? '').slice(0, 120) || null, id]);
+
+    await texec(cid, `
+      INSERT INTO audit_log (user_id, user_name, entity, action, detail)
+      VALUES (?, ?, 'time_off', ?, ?)`,
+      [ctx.user.id, ctx.user.name, booked.length ? 'edited, booked over' : 'edited',
+       JSON.stringify({
+         timeOffId: id,
+         before: {
+           user: before.display_name, from: isoDay(before.starts_on as Date),
+           to: isoDay(before.ends_on as Date), start: before.start_time, end: before.end_time,
+           reason: before.reason
+         },
+         after: { user: name, from: b.startsOn, to: endsOn, start: startTime, end: endTime,
+                  reason: b.reason || null },
+         appointments: booked.map(a => a.id)
+       })]);
+
+    return { ok: true, id, overrode: booked.length };
+  });
+
+  /**
+   * The shop's timezone, set by its owner. Everything that asks "what day is it
+   * at the shop" reads this, so a change moves the meaning of shop hours, the
+   * booking form's windows and every typed appointment time from here on. Times
+   * already stored are instants and do not move. A location owns its own.
+   */
+  app.put('/api/shop/timezone', async (req, reply) => {
+    const ctx = requireCompany(req, reply);
+    if (!ctx) return;
+    if (ctx.role !== 'owner') return reply.code(403).send({ error: 'Owner only' });
+
+    const tz = String((req.body as { timezone?: string }).timezone ?? '').trim();
+    try {
+      new Intl.DateTimeFormat('en-US', { timeZone: tz });
+      if (!tz.includes('/')) throw new Error();
+    } catch {
+      return reply.code(400).send({ error: 'That is not a timezone this server knows.' });
+    }
+
+    const was = ctx.company!.timezone;
+    if (was === tz) return { ok: true, timezone: tz };
+    await mexec('UPDATE companies SET timezone = ? WHERE id = ?', [tz, ctx.company!.id]);
+    await texec(ctx.company!.id, `
+      INSERT INTO audit_log (user_id, user_name, entity, action, detail)
+      VALUES (?, ?, 'company', 'timezone changed', ?)`,
+      [ctx.user.id, ctx.user.name, JSON.stringify({ from: was, to: tz })]);
+    return { ok: true, timezone: tz };
+  });
+
   app.delete('/api/time-off/:id', async (req, reply) => {
     const ctx = requireCompany(req, reply);
     if (!ctx) return;
@@ -459,6 +493,64 @@ export async function registerScheduler(app: FastifyInstance): Promise<void> {
     if (!res.affectedRows) return reply.code(404).send({ error: 'That block is already gone.' });
     return { ok: true };
   });
+}
+
+interface OffBody {
+  userId: number; displayName?: string;
+  startsOn: string; endsOn?: string;
+  startTime?: string | null; endTime?: string | null;
+  reason?: string; override?: boolean;
+}
+
+/** Validation and the booked-work clash list, shared by making and editing a block. */
+async function checkOff(cid: number, b: OffBody): Promise<
+  | { status: number; body: Record<string, unknown> }
+  | { name: string; endsOn: string; startTime: string | null; endTime: string | null; booked: RowDataPacket[] }
+> {
+  if (!b.userId) return { status: 400, body: { error: 'Pick who is off.' } };
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(b.startsOn ?? '')) {
+    return { status: 400, body: { error: 'A first day is required.' } };
+  }
+  const endsOn = /^\d{4}-\d{2}-\d{2}$/.test(b.endsOn ?? '') ? b.endsOn! : b.startsOn;
+  if (endsOn < b.startsOn) return { status: 400, body: { error: 'The last day is before the first.' } };
+
+  const startTime = b.startTime || null;
+  const endTime = b.endTime || null;
+  if (startTime && endTime && endTime <= startTime) {
+    return { status: 400, body: { error: 'The end time is before the start time.' } };
+  }
+
+  const staff = await tqOne<RowDataPacket & { display_name: string }>(cid,
+    'SELECT display_name FROM staff WHERE user_id = ?', [b.userId]);
+  const name = (b.displayName || staff?.display_name || 'Employee').slice(0, 120);
+
+  // What is already booked inside the window, so the owner sees it before
+  // committing rather than discovering it on the day.
+  const booked = await tq<RowDataPacket[]>(cid, `
+    SELECT a.id, a.kind, a.starts_at, a.customer_name
+    FROM appointments a
+    WHERE a.cancelled_at IS NULL AND a.assigned_user_id = ?
+      AND DATE(a.starts_at) BETWEEN ? AND ?
+      ${startTime && endTime ? 'AND TIME(a.starts_at) < ? AND TIME(a.starts_at) >= ?' : ''}
+    ORDER BY a.starts_at`,
+    startTime && endTime ? [b.userId, b.startsOn, endsOn, endTime, startTime]
+                         : [b.userId, b.startsOn, endsOn]);
+
+  if (booked.length && !b.override) {
+    return {
+      status: 409,
+      body: {
+        error: `${name} has ${booked.length} appointment${booked.length === 1 ? '' : 's'} ` +
+          'inside that window.',
+        conflict: true, canOverride: true,
+        clashes: booked.map(a => ({
+          id: a.id,
+          text: `${KIND_LABEL[a.kind as Kind]} for ${a.customer_name} on ${isoDay(a.starts_at as Date)}`
+        }))
+      }
+    };
+  }
+  return { name, endsOn, startTime, endTime, booked };
 }
 
 /**

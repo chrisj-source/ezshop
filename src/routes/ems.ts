@@ -1,4 +1,5 @@
 import { FastifyInstance } from 'fastify';
+import { reconcile, fireTrigger } from '../lib/pay';
 import { PoolConnection, RowDataPacket, ResultSetHeader } from 'mysql2/promise';
 import { tq, texec, tqOne, withTenantTx } from '../db/tenant';
 import { requireCompany, requireFeature } from '../middleware/context';
@@ -623,7 +624,29 @@ export async function registerEms(app: FastifyInstance): Promise<void> {
       return { roId, created, changed, heldBack };
     });
 
-    return { ok: true, ...result };
+    /* An accepted estimate or supplement can move the approval amount, and the
+       commission is worked off it. Same rule as a hand edit: paid lines stand,
+       the difference goes on this week. */
+    if (result && (result as { roId?: number }).roId) {
+      await reconcile(ctx.company!.id, (result as { roId: number }).roId, `estimate import accepted by ${ctx.user.name}`)
+        .catch(e => req.log.error(e));
+    }
+
+    /* A file made from an import is a car already on site — the estimate is
+       written with it in the bay. Stamp the arrival (a drop fee rides on it),
+       and look for the lead it came from so the desk can tie the two together
+       rather than leave the lead being chased for work the shop already has. */
+    let leadMatches: Array<Record<string, unknown>> = [];
+    if (result.created) {
+      await fireTrigger(cid, result.roId, 'arrived', {
+        userId: ctx.user.id, userName: ctx.user.name, source: 'auto', note: 'file created from an estimate import'
+      }).catch(e => req.log.error(e));
+      leadMatches = await leadsLike(cid, {
+        name: imp.customer_name as string | null, phone: imp.customer_phone as string | null,
+        email: imp.customer_email as string | null
+      }).catch(() => []);
+    }
+    return { ok: true, ...result, leadMatches };
   });
 
   app.post('/api/ems/imports/:id/reject', async (req, reply) => {
@@ -654,6 +677,35 @@ interface MatchKeys { roNumber: string | null; vin: string | null; claimNumber: 
  * exact hit is a new file.
  */
 const OPEN_RO = 'r.close_date IS NULL AND r.closed_at IS NULL AND r.voided_at IS NULL';
+/**
+ * Open leads that look like this customer and are not on a file yet. Phone or
+ * email is a match; the name alone is only a possible one, and is said so —
+ * two John Smiths are not one customer.
+ */
+async function leadsLike(cid: number, k: { name: string | null; phone: string | null; email: string | null }) {
+  const digits = (k.phone ?? '').replace(/\D/g, '').replace(/^1(?=\d{10}$)/, '');
+  const email = (k.email ?? '').trim().toLowerCase();
+  const name = (k.name ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
+  if (digits.length !== 10 && !email && !name) return [];
+  const rows = await tq<RowDataPacket[]>(cid, `
+    SELECT l.id, l.lead_number, TRIM(CONCAT_WS(' ', l.first_name, l.last_name)) AS name,
+           l.phone, l.email, l.vehicle_text, l.state, l.received_at, s.display_name AS owner
+    FROM leads l LEFT JOIN staff s ON s.user_id = l.owner_user_id
+    WHERE l.ro_id IS NULL AND l.deleted_at IS NULL AND l.state <> 'lost'
+      AND ((? <> '' AND RIGHT(REGEXP_REPLACE(COALESCE(l.phone, ''), '[^0-9]', ''), 10) = ?)
+        OR (? <> '' AND LOWER(l.email) = ?)
+        OR (? <> '' AND LOWER(TRIM(CONCAT_WS(' ', l.first_name, l.last_name))) = ?))
+    ORDER BY l.received_at DESC LIMIT 6`,
+    [digits.length === 10 ? digits : '', digits, email, email, name, name]);
+  return rows.map(r => {
+    const rd = String(r.phone ?? '').replace(/\D/g, '').slice(-10);
+    const how = digits.length === 10 && rd === digits ? 'phone'
+      : email && String(r.email ?? '').toLowerCase() === email ? 'email' : 'name';
+    return { id: r.id, leadNumber: r.lead_number, name: r.name, vehicle: r.vehicle_text, state: r.state,
+             owner: r.owner, how, strong: how !== 'name', nameDiffers: String(r.name ?? '').toLowerCase() !== name };
+  });
+}
+
 const normVin = (v: string | null) => (v ?? '').replace(/\s+/g, '').toUpperCase() || null;
 
 async function findMatch(cid: number, k: MatchKeys): Promise<{ roId: number | null; confidence: 'exact' | 'likely' | 'none'; how: string | null }> {

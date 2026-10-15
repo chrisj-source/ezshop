@@ -2132,6 +2132,81 @@
 
   /* ---------------------------------------------------------------- drawer */
 
+  document.addEventListener('click', function (e) {
+    var b = e.target && e.target.closest ? e.target.closest('[data-crev]') : null;
+    if (!b || !OPEN) return;
+    var rid = b.getAttribute('data-crev'), act = b.getAttribute('data-crdo');
+    var amt = $('crAmt' + rid), note = $('crNote' + rid);
+    b.disabled = true;
+    api('/api/ro/' + OPEN + '/commission-reviews/' + rid, {
+      method: 'POST',
+      body: JSON.stringify({
+        decision: act,
+        adjustCents: act === 'adjust' ? Math.round(Number(amt && amt.value || 0) * 100) : undefined,
+        note: note ? note.value : ''
+      })
+    }).then(function () { openRo(OPEN); }).catch(function (err) { b.disabled = false; window.alert(err.message); });
+  });
+
+  /* Split sales on the file. Salesperson 1 is the Sales assignment above; 2 and
+     3 are ticked in. Percentages are commission, so the block is only offered
+     to those who can see commission. Locked once a commission is paid, except
+     for owner and accounting. */
+  function roSplitBlock(d) {
+    var ss = d.salesSplit || { people: [], canEdit: false };
+    if (!ME.caps.commissionMoney || !ss.canEdit) {
+      var others = (ss.people || []).filter(function (p) { return p.seq > 1; });
+      return others.length ? '<div class="hint" style="margin:6px 0">Split with ' +
+        others.map(function (p) { return esc(p.name || ''); }).join(' and ') +
+        (ss.locked ? '. Commission paid — owner and accounting can change it.' : '.') + '</div>' : '';
+    }
+    var by = {}; (ss.people || []).forEach(function (p) { by[p.seq] = p; });
+    var row = function (n) {
+      var p = by[n] || {};
+      return '<label style="display:flex;gap:7px;align-items:center;font:400 11.5px var(--font);color:var(--muted);margin-top:6px">' +
+        '<input type="checkbox" id="sp' + n + 'on"' + (p.userId ? ' checked' : '') + '> Salesperson ' + n + '</label>' +
+        '<div id="sp' + n + 'row" style="display:' + (p.userId ? 'flex' : 'none') + ';gap:8px;margin-top:4px">' +
+        '<select id="sp' + n + '" style="flex:1"><option value="">Pick…</option>' +
+        STAFF.map(function (st) {
+          return '<option value="' + st.user_id + '"' + (String(p.userId) === String(st.user_id) ? ' selected' : '') + '>' + esc(st.display_name) + '</option>';
+        }).join('') + '</select>' +
+        '<input id="sp' + n + 'pct" type="number" min="1" max="99" step="0.01" style="width:80px" placeholder="%" value="' + (p.pct || '') + '"></div>';
+    };
+    var html = '<div id="spBox" style="margin:10px 0 4px">' +
+      '<div class="fl2">Sales split</div>' +
+      '<div id="sp1row" style="display:' + (by[2] || by[3] ? 'flex' : 'none') + ';gap:8px;align-items:center;font:400 11.5px var(--font);color:var(--muted)">' +
+      'Salesperson 1 share <input id="sp1pct" type="number" min="1" max="100" step="0.01" style="width:80px" value="' + ((by[1] && (by[2] || by[3])) ? by[1].pct : '') + '">%</div>' +
+      row(2) + row(3) +
+      '<div id="spTotal" class="hint" style="margin-top:5px"></div>' +
+      '<div class="hint">Each person is paid on their own plan, on their share. The drop fee stays with salesperson 1. ' +
+      'Somebody without a sales pay plan is not paid, and owner and accounting are told.</div></div>';
+    setTimeout(function () {
+      var box = $('spBox'); if (!box) return;
+      box.dataset.was = JSON.stringify(readRoSplit());
+      var total = function () {
+        var on2 = $('sp2on').checked, on3 = $('sp3on').checked;
+        $('sp1row').style.display = on2 || on3 ? 'flex' : 'none';
+        $('sp2row').style.display = on2 ? 'flex' : 'none';
+        $('sp3row').style.display = on3 ? 'flex' : 'none';
+        if (!on2 && !on3) { $('spTotal').textContent = ''; return; }
+        var t = Number($('sp1pct').value || 0) + (on2 ? Number($('sp2pct').value || 0) : 0) + (on3 ? Number($('sp3pct').value || 0) : 0);
+        t = Math.round(t * 100) / 100;
+        $('spTotal').textContent = 'Split adds to ' + t + '%' + (t === 100 ? '' : ' — it has to come to 100%');
+        $('spTotal').style.color = t === 100 ? 'var(--dim)' : 'var(--stopped)';
+      };
+      box.addEventListener('input', total); box.addEventListener('change', total); total();
+    }, 0);
+    return html;
+  }
+  function readRoSplit() {
+    var on2 = $('sp2on') && $('sp2on').checked && $('sp2').value, on3 = $('sp3on') && $('sp3on').checked && $('sp3').value;
+    return {
+      ownerPct: on2 || on3 ? Number($('sp1pct').value || 0) : null,
+      sales2UserId: on2 ? Number($('sp2').value) : null, sales2Pct: on2 ? Number($('sp2pct').value || 0) : null,
+      sales3UserId: on3 ? Number($('sp3').value) : null, sales3Pct: on3 ? Number($('sp3pct').value || 0) : null
+    };
+  }
+
   function openRo(id) {
     OPEN = id;
     /* aria-hidden="false" on a visible dialog is a no-op that reads as a fix.
@@ -2239,6 +2314,9 @@
     if (a && a.value !== a.dataset.was) { moneyBody.amountCents = Math.round(Number(a.value || 0) * 100); moneyN++; }
     if (dd && dd.value !== dd.dataset.was) { moneyBody.deductibleCents = Math.round(Number(dd.value || 0) * 100); moneyN++; }
     if (hr && hr.value !== hr.dataset.was) { moneyBody.laborHours = Number(hr.value || 0); moneyN++; }
+    var pm = $('m_promise'), sp = $('m_short');
+    if (pm && pm.value !== pm.dataset.was) { moneyBody.discountCents = Math.round(Number(pm.value || 0) * 100); moneyN++; }
+    if (sp && sp.value !== sp.dataset.was) { moneyBody.shortpayCents = Math.round(Number(sp.value || 0) * 100); moneyN++; }
     if (moneyN) jobs.push(function () {
       return api('/api/ro/' + OPEN + '/money', { method: 'PATCH', body: JSON.stringify(moneyBody) });
     });
@@ -2253,6 +2331,18 @@
         });
       });
     });
+
+    /* The split goes after the assignments: salesperson 1 has to be on the
+       file first, and the server checks it. */
+    var spBox = $('spBox');
+    if (spBox) {
+      var sp = readRoSplit();
+      if (JSON.stringify(sp) !== spBox.dataset.was) {
+        jobs.push(function () {
+          return api('/api/ro/' + OPEN + '/sales-split', { method: 'PATCH', body: JSON.stringify(sp) });
+        });
+      }
+    }
 
     var promise = $('promiseText');
     if (promise && promise.value.trim()) {
@@ -2612,10 +2702,50 @@
         '<div><div class="fl2">Labor hours</div>' +
         '<input type="number" step="0.1" min="0" id="m_hours" style="width:100%" value="' +
         (Number(r.labor_hours) || 0) + '" data-was="' + (Number(r.labor_hours) || 0) + '"></div>' +
+        '<div><div class="fl2">Promises given</div>' +
+        '<input type="number" step="0.01" min="0" id="m_promise" style="width:100%" value="' +
+        ((r.discount_cents || 0) / 100).toFixed(2) + '" data-was="' +
+        ((r.discount_cents || 0) / 100).toFixed(2) + '"' +
+        (DTL && DTL.promiseLocked ? ' disabled title="Flagged after the commission was paid. Owner and accounting only."' : '') +
+        '></div>' +
+        '<div><div class="fl2">Insurance short-pay</div>' +
+        '<input type="number" step="0.01" min="0" id="m_short" style="width:100%" value="' +
+        ((r.shortpay_cents || 0) / 100).toFixed(2) + '" data-was="' +
+        ((r.shortpay_cents || 0) / 100).toFixed(2) + '"></div>' +
         f2('Parts cost', money(r.parts_cost_cents), 1) +
         f2('Sublet', money(r.sublet_cost_cents), 1) +
         f2('Deductible status', Number(r.deductible_waived) ? 'Waived by shop' : 'Customer pays') +
-        '</div><div class="savehint">Wholesale work is priced here.</div>');
+        '</div><div class="savehint">Wholesale work is priced here. A change to the approval or a short-pay re-works the sales commission; if it was already paid, the difference goes on this week\'s sales pay. ' +
+        (DTL && DTL.promiseLocked
+          ? 'The promise amount is locked: it changed after the commission was paid, and owner and accounting are deciding the deduction.'
+          : 'A promise changed after the commission was paid goes to owner and accounting to decide, and is then locked to them.') +
+        '</div>');
+      /* Owner and accounting: a late promise, and whether it comes off this
+         week's sales pay. The suggestion is the plan's rate on the change; it
+         can be overtyped. */
+      var revs = (DTL && DTL.commissionReviews) || [];
+      if (ME.caps.editPayPlans && revs.length) {
+        L.push('<div class="sec">Promise after payout</div>' + revs.map(function (v) {
+          var sug = (Number(v.suggest_cents) || 0) / 100;
+          var head = '<div class="fl2" style="margin-bottom:4px">' + esc(v.raised_by_name || 'Someone') + ' changed promises ' +
+            esc(money(v.from_cents)) + ' → ' + esc(money(v.to_cents)) + ' on ' + esc(String(v.raised_at).slice(0, 10)) +
+            ', after ' + esc(v.sales_name || 'the salesperson') + '\'s commission was paid (' + Number(v.rate_pct) + '%).</div>';
+          if (v.decided_at) {
+            return '<div style="padding:9px 0;border-bottom:1px solid var(--whisper)">' + head +
+              '<div class="hint">' + (v.adjust_cents
+                ? esc(money(v.adjust_cents)) + ' on sales pay, decided by ' + esc(v.decided_by_name || '')
+                : 'No deduction, decided by ' + esc(v.decided_by_name || '')) +
+              (v.note ? ' · ' + esc(v.note) : '') + '</div></div>';
+          }
+          return '<div style="padding:9px 0;border-bottom:1px solid var(--whisper)">' + head +
+            '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">' +
+            '<input type="number" step="0.01" id="crAmt' + v.id + '" value="' + sug.toFixed(2) + '" style="width:110px" aria-label="Amount on this week\'s sales pay">' +
+            '<input id="crNote' + v.id + '" placeholder="Note, optional" style="flex:1;min-width:140px">' +
+            '<button class="btn btn-primary" data-crev="' + v.id + '" data-crdo="adjust">Put on this week\'s sales pay</button>' +
+            '<button class="btn btn-ghost" data-crev="' + v.id + '" data-crdo="none">No deduction</button></div>' +
+            '<div class="hint" style="margin-top:4px">Negative takes it off; positive puts it back. It lands on this week only and is never re-worked.</div></div>';
+        }).join(''));
+      }
     }
 
     /* Assigned */
@@ -2647,6 +2777,7 @@
               (also.length ? esc('  (also ' + also.join(', ') + ')') : '') + '</option>';
           }).join('') + '</select></div>';
       }).join('') + '</div>' +
+      roSplitBlock(d) +
       '<div class="savehint">Every change is written to the activity log.</div>');
     } else {
       L.push('<div class="fieldset two">' + POSITIONS.map(function (p) {
@@ -2851,9 +2982,18 @@
       L.push('<div class="row" style="margin:12px 0 8px">' +
         '<select id="docType" style="flex:1;min-width:150px">' +
         '<option value="">Set the type from the file — a photo, or paperwork</option>' +
-        DOCTYPES.map(function (t) {
-          return '<option value="' + esc(t.key) + '">' + esc(t.label) + '</option>';
+        [['File', false], ['Financial', true]].map(function (g) {
+          return '<optgroup label="' + g[0] + '">' + DOCTYPES.filter(function (t) { return !!t.money === g[1]; })
+            .map(function (t) { return '<option value="' + esc(t.key) + '">' + esc(t.label) + '</option>'; })
+            .join('') + '</optgroup>';
         }).join('') + '</select></div>');
+      /* Said before the upload, not after: once it is saved this person cannot
+         open it, and it cannot be retyped to something they could. */
+      if (!ME.caps.money) {
+        L.push('<div class="hint" id="docFinWarn" hidden style="margin:-2px 0 8px;color:var(--acc2)">' +
+          'Financial. Once uploaded you will not be able to open it, and it cannot be changed to ' +
+          'another type.</div>');
+      }
       L.push('<div class="dropzone" id="drop">' +
         /* The prompt is its own element because the input is a CHILD of the
            dropzone: setting textContent on the zone itself would delete the
@@ -3531,6 +3671,13 @@
       });
     }
 
+    if ($('docType') && $('docFinWarn')) {
+      $('docType').addEventListener('change', function () {
+        var t = DOCTYPES.filter(function (x) { return x.key === $('docType').value; })[0];
+        $('docFinWarn').hidden = !(t && t.money);
+      });
+    }
+
     function upload(files) {
       if (!files || !files.length) return;
       var n = files.length;
@@ -3559,8 +3706,17 @@
             }
             /* Tiles do not appear until their thumbnail is made, so the toast is
                what tells the person it worked. */
-            var got = (res.j.documents || []).length;
+            var got = (res.j.documents || []).length, fin = Number(res.j.filedFinancial || 0);
+            if (fin && !got) {
+              say((fin === 1 ? 'Filed as financial.' : fin + ' filed as financial.') +
+                ' Your role cannot open financial documents, so ' +
+                (fin === 1 ? 'it is' : 'they are') + ' not listed here.', 'ok');
+              saying(DROP_TEXT);
+              input.value = '';
+              return refreshDocs();
+            }
             say(got + ' file' + (got === 1 ? '' : 's') + ' uploaded' +
+              (fin ? ' · ' + fin + ' filed as financial, not listed for your role' : '') +
               (res.j.pending ? ' · preparing thumbnails' : '') +
               (res.j.rejected && res.j.rejected.length
                 ? ' · ' + res.j.rejected.length + ' skipped, photos only' : ''), 'ok');

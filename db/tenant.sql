@@ -199,6 +199,11 @@ CREATE TABLE repair_orders (
   rental_provider   VARCHAR(32)   NULL COMMENT 'Avis, Budget, Enterprise, Hertz, Loaner',
   rental_covered    TINYINT(1)    NOT NULL DEFAULT 0 COMMENT 'policy covers it, so there is reimbursement to chase',
   commission_payable TINYINT(1)   NOT NULL DEFAULT 1 COMMENT 'marked on the sales pay side, per file',
+  sales_pct         DECIMAL(5,2)  NULL COMMENT 'salesperson 1 share; NULL = no split',
+  sales2_user_id    BIGINT UNSIGNED NULL,
+  sales2_pct        DECIMAL(5,2)  NULL,
+  sales3_user_id    BIGINT UNSIGNED NULL,
+  sales3_pct        DECIMAL(5,2)  NULL,
   materials_flat_cents BIGINT     NOT NULL DEFAULT 0 COMMENT 'used when there are no paint hours',
   labor_hours       DECIMAL(7,2)  NOT NULL DEFAULT 0,
   target_days       INT           NULL,
@@ -464,6 +469,11 @@ CREATE TABLE leads (
   estimate_note   VARCHAR(255)  NULL,
   estimate_requoted_at DATETIME NULL COMMENT 'last time the figure was replaced; the old one is in lead_events',
   owner_user_id   BIGINT UNSIGNED NULL,
+  owner_pct       DECIMAL(5,2)  NULL COMMENT 'salesperson 1 share; NULL = no split',
+  sales2_user_id  BIGINT UNSIGNED NULL,
+  sales2_pct      DECIMAL(5,2)  NULL,
+  sales3_user_id  BIGINT UNSIGNED NULL,
+  sales3_pct      DECIMAL(5,2)  NULL,
   contract_doc_id BIGINT UNSIGNED NULL COMMENT 'photo from the sales app',
   appointment_id  BIGINT UNSIGNED NULL,
   ro_id           BIGINT UNSIGNED NULL COMMENT 'the file this lead became, converted or linked',
@@ -903,12 +913,46 @@ CREATE TABLE commission_lines (
   paid_cents      BIGINT        NULL,
   supersedes_id   BIGINT UNSIGNED NULL,
   note            VARCHAR(255)  NULL,
+  manual          TINYINT(1)    NOT NULL DEFAULT 0 COMMENT 'written by a person, never touched by reconcile',
   created_at      DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at      DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   KEY ix_cl_person (user_id, period_end),
   KEY ix_cl_ro (ro_id, kind),
   KEY ix_cl_unpaid (paid_at, period_end),
   CONSTRAINT fk_cl_ro FOREIGN KEY (ro_id) REFERENCES repair_orders(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- A promise added after the commission was paid (tenant 040).
+CREATE TABLE commission_reviews (
+  id              BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  ro_id           BIGINT UNSIGNED NOT NULL,
+  user_id         BIGINT UNSIGNED NOT NULL COMMENT 'the salesperson who was paid',
+  paid_line_id    BIGINT UNSIGNED NOT NULL COMMENT 'the paid commission line it is about',
+  from_cents      BIGINT        NOT NULL,
+  to_cents        BIGINT        NOT NULL,
+  delta_cents     BIGINT        NOT NULL COMMENT 'to - from. Kept out of the formula for good',
+  rate_pct        DECIMAL(6,3)  NOT NULL DEFAULT 0,
+  raised_by       BIGINT UNSIGNED NULL,
+  raised_by_name  VARCHAR(120)  NULL,
+  raised_at       DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  decision        ENUM('adjust','none') NULL,
+  adjust_cents    BIGINT        NULL COMMENT 'signed; what went on sales pay',
+  line_id         BIGINT UNSIGNED NULL COMMENT 'the manual adjustment it wrote',
+  decided_by      BIGINT UNSIGNED NULL,
+  decided_by_name VARCHAR(120)  NULL,
+  decided_at      DATETIME      NULL,
+  note            VARCHAR(255)  NULL,
+  KEY ix_crev_ro (ro_id, decided_at),
+  CONSTRAINT fk_crev_ro FOREIGN KEY (ro_id) REFERENCES repair_orders(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Texts to the shop's own people (tenant 041).
+CREATE TABLE staff_sms (
+  user_id     BIGINT UNSIGNED NOT NULL PRIMARY KEY,
+  phone       VARCHAR(10)   NULL COMMENT 'ten digits',
+  approval    TINYINT(1)    NULL,
+  updated_by  BIGINT UNSIGNED NULL,
+  updated_at  DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE commission_runs (

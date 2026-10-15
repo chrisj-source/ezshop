@@ -450,6 +450,39 @@
               }).join('; ') + (ch.length > 4 ? ', and ' + (ch.length - 4) + ' more' : '') + '.'
             : '');
         msg.className = 'msg ok';
+        /* A new file and a lead that looks like the same customer: ask before
+           going to the board, so the lead stops being chased and the sale stays
+           with whoever worked it. */
+        var lm = r.leadMatches || [];
+        if (r.created && lm.length) {
+          var box = document.createElement('div');
+          box.className = 'leadpick';
+          box.style.cssText = 'margin-top:12px;padding:12px;border:1px solid var(--line);border-radius:8px';
+          box.innerHTML = '<div style="font:500 12px var(--font);margin-bottom:6px">Is this an open lead?</div>' +
+            lm.map(function (l) {
+              return '<div style="display:flex;gap:10px;align-items:center;padding:6px 0;border-top:1px solid var(--whisper);flex-wrap:wrap">' +
+                '<div style="flex:1;min-width:180px"><div style="font:500 12px var(--font)">' + esc(l.leadNumber) + ' · ' + esc(l.name || '') + '</div>' +
+                '<div style="font:400 11px var(--font);color:var(--dim)">' + (l.strong ? 'Same ' + esc(l.how) : 'Possible match — same name only') +
+                (l.vehicle ? ' · ' + esc(l.vehicle) : '') + (l.owner ? ' · ' + esc(l.owner) : '') + '</div></div>' +
+                (l.nameDiffers ? '<label style="font:400 11px var(--font);color:var(--muted);display:flex;gap:6px;align-items:center">' +
+                  '<input type="checkbox" data-rn="' + l.id + '"> Use the lead\'s name on the file</label>' : '') +
+                '<button class="btn btn-primary" data-link="' + l.id + '">Link</button></div>';
+            }).join('') +
+            '<div style="display:flex;justify-content:flex-end;margin-top:8px"><button class="btn btn-ghost" id="lpSkip">None of these</button></div>';
+          msg.parentNode.insertBefore(box, msg.nextSibling);
+          var go = function () { location.href = '/board.html?ro=' + r.roId; };
+          $('lpSkip').addEventListener('click', go);
+          box.querySelectorAll('[data-link]').forEach(function (b) {
+            b.addEventListener('click', function () {
+              var lid = b.getAttribute('data-link'), rn = box.querySelector('[data-rn="' + lid + '"]');
+              b.disabled = true;
+              api('/api/leads/' + lid + '/link-ro', {
+                method: 'POST', body: JSON.stringify({ roId: r.roId, renameClient: !!(rn && rn.checked) })
+              }).then(go).catch(function (e) { b.disabled = false; msg.textContent = e.message; msg.className = 'msg err'; });
+            });
+          });
+          return load();
+        }
         return load().then(function () {
           setTimeout(function () { location.href = '/board.html?ro=' + r.roId; },
             ch.length ? 2600 : 700);

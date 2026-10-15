@@ -13,6 +13,17 @@ import { audit } from '../lib/audit';
 import { actorFrom } from './audit';
 
 /**
+ * Financial documents (`is_money_doc`) are readable by the `money` capability
+ * and nobody else — the uploader included, because one pay screen is the
+ * financials. To everyone else they do not exist: every by-id route answers 404,
+ * lists and counts leave them out, and the history note never names them.
+ * A financial document never becomes a non-financial one; see the PATCH.
+ */
+function hiddenFrom(ctx: { caps: { money?: boolean } }, doc: { is_money_doc?: number | string } | null | undefined): boolean {
+  return !!doc && Number(doc.is_money_doc) === 1 && !ctx.caps.money;
+}
+
+/**
  * Documents.
  *
  * Every photo and every PDF gets a thumbnail, made on the server: HEIC decoded
@@ -108,7 +119,7 @@ export async function registerDocuments(app: FastifyInstance): Promise<void> {
       slots.set(index, slot);
     }
 
-    const saved: Array<{ id: number; label: string; pending: boolean }> = [];
+    const saved: Array<{ id: number; label: string; pending: boolean; money: boolean; type: string }> = [];
     const rejected: string[] = [];
 
     for (const [, slot] of slots) {
@@ -161,7 +172,7 @@ export async function registerDocuments(app: FastifyInstance): Promise<void> {
         }
       }
 
-      saved.push({ id: res.insertId, label, pending: thumbState === 'pending' });
+      saved.push({ id: res.insertId, label, pending: thumbState === 'pending', money: isMoneyDoc(type), type });
     }
 
     if (!saved.length) {
@@ -172,18 +183,35 @@ export async function registerDocuments(app: FastifyInstance): Promise<void> {
       });
     }
 
-    await texec(cid,
-      `INSERT INTO ro_notes (ro_id, kind, body, user_id, user_name) VALUES (?, 'auto', ?, ?, ?)`,
-      [roId, saved.length === 1
-        ? `Document added: ${saved[0].label}.`
-        : `${saved.length} documents added.`,
-       ctx.user.id, ctx.user.name]
-    );
+    /* The note is read by the whole floor, so it names only what the whole floor
+       can open. Financial uploads are recorded in the audit log instead. */
+    const open = saved.filter(s => !s.money), fin = saved.filter(s => s.money);
+    if (open.length) {
+      await texec(cid,
+        `INSERT INTO ro_notes (ro_id, kind, body, user_id, user_name) VALUES (?, 'auto', ?, ?, ?)`,
+        [roId, open.length === 1
+          ? `Document added: ${open[0].label}.`
+          : `${open.length} documents added.`,
+         ctx.user.id, ctx.user.name]
+      );
+    }
+    for (const f of fin) {
+      const typeLabel = DOC_TYPES.find(d => d.key === f.type)?.label ?? f.type;
+      await audit(cid, actorFrom(req), {
+        entity: 'document', entityId: f.id, roId, action: 'document_added',
+        area: 'Documents', label: `Financial document added — ${typeLabel}`,
+        changes: [{ field: 'Document', from: null, to: typeLabel }]
+      });
+    }
 
+    /* An uploader without `money` is told how many went in as financial, and
+       is never sent them back: the list they refresh to will not have them. */
+    const blind = !ctx.caps.money;
     return {
       ok: true,
-      documents: saved,
-      pending: saved.filter(s => s.pending).length,
+      documents: (blind ? open : saved).map(({ id, label, pending }) => ({ id, label, pending })),
+      filedFinancial: blind ? fin.length : 0,
+      pending: (blind ? open : saved).filter(s => s.pending).length,
       rejected
     };
   });
@@ -209,9 +237,7 @@ export async function registerDocuments(app: FastifyInstance): Promise<void> {
        FROM documents WHERE id = ? AND deleted_at IS NULL`, [id]
     );
     if (!doc) return reply.code(404).send({ error: 'No such document' });
-    if (doc.is_money_doc === 1 && !ctx.caps.money) {
-      return reply.code(403).send({ error: 'Not permitted' });
-    }
+    if (hiddenFrom(ctx, doc)) return reply.code(404).send({ error: 'No such document' });
     /* Paperwork is the office's, the owner's and the production manager's. */
     if (doc.is_pdf === 1 && !ctx.caps.viewPaperwork) {
       return reply.code(403).send({ error: 'Not permitted' });
@@ -258,9 +284,9 @@ export async function registerDocuments(app: FastifyInstance): Promise<void> {
     const { turn } = req.body as { turn?: number };
     const step = turn === -90 ? -90 : 90;
 
-    const doc = await tqOne<RowDataPacket & { rotation: number; is_image: number }>(
-      ctx.company!.id, 'SELECT rotation, is_image FROM documents WHERE id = ? AND deleted_at IS NULL', [id]);
-    if (!doc) return reply.code(404).send({ error: 'No such document' });
+    const doc = await tqOne<RowDataPacket & { rotation: number; is_image: number; is_money_doc: number }>(
+      ctx.company!.id, 'SELECT rotation, is_image, is_money_doc FROM documents WHERE id = ? AND deleted_at IS NULL', [id]);
+    if (!doc || hiddenFrom(ctx, doc)) return reply.code(404).send({ error: 'No such document' });
     if (!doc.is_image) return reply.code(400).send({ error: 'Only photos rotate.' });
 
     const next = (((Number(doc.rotation) + step) % 360) + 360) % 360;
@@ -274,6 +300,9 @@ export async function registerDocuments(app: FastifyInstance): Promise<void> {
     if (!ctx) return;
     const id = Number((req.params as { id: string }).id);
     const cid = ctx.company!.id;
+    const doc = await tqOne<RowDataPacket & { is_money_doc: number }>(cid,
+      'SELECT is_money_doc FROM documents WHERE id = ? AND deleted_at IS NULL', [id]);
+    if (!doc || hiddenFrom(ctx, doc)) return reply.code(404).send({ error: 'No such document' });
     await texec(cid, `UPDATE documents SET thumb_state = 'pending', thumb_tries = 0 WHERE id = ?`, [id]);
     const queued = await enqueueDerivative({ companyId: cid, documentId: id });
     if (!queued) await makeDerivatives({ companyId: cid, documentId: id }).catch(() => undefined);
@@ -307,7 +336,9 @@ export async function registerDocuments(app: FastifyInstance): Promise<void> {
 
     const pending = await tqOne<RowDataPacket & { n: number }>(ctx.company!.id,
       `SELECT COUNT(*) AS n FROM documents
-       WHERE ro_id = ? AND deleted_at IS NULL AND thumb_state = 'pending'`, [roId]);
+       WHERE ro_id = ? AND deleted_at IS NULL AND thumb_state = 'pending'
+         ${ctx.caps.money ? '' : 'AND is_money_doc = 0'}
+         ${ctx.caps.viewPaperwork ? '' : 'AND is_pdf = 0'}`, [roId]);
 
     return { media: rows, pending: Number(pending?.n ?? 0) };
   });
@@ -323,6 +354,7 @@ export async function registerDocuments(app: FastifyInstance): Promise<void> {
              thumb_key IS NOT NULL AS has_thumb, uploaded_name, created_at
       FROM documents
       WHERE ro_id = ? AND deleted_at IS NULL AND is_image = 1 AND thumb_state <> 'pending'
+        ${ctx.caps.money ? '' : 'AND is_money_doc = 0'}
       ORDER BY created_at, id`, [roId]);
 
     return { photos: rows };
@@ -333,6 +365,18 @@ export async function registerDocuments(app: FastifyInstance): Promise<void> {
     if (!ctx) return;
     const id = Number((req.params as { id: string }).id);
     const { label, docType } = req.body as { label?: string; docType?: string };
+
+    const doc = await tqOne<RowDataPacket & { is_money_doc: number }>(ctx.company!.id,
+      'SELECT is_money_doc FROM documents WHERE id = ? AND deleted_at IS NULL', [id]);
+    if (!doc || hiddenFrom(ctx, doc)) return reply.code(404).send({ error: 'No such document' });
+    if (docType !== undefined && !DOC_TYPES.some(d => d.key === docType)) {
+      return reply.code(400).send({ error: 'Unknown document type' });
+    }
+    /* One way only. Retyping a pay screen as "Other" would hand it to every role
+       the money capability was keeping it from — for the owner too. */
+    if (docType !== undefined && Number(doc.is_money_doc) === 1 && !isMoneyDoc(docType)) {
+      return reply.code(400).send({ error: 'A financial document stays financial.' });
+    }
 
     const sets: string[] = [];
     const vals: unknown[] = [];
@@ -357,10 +401,10 @@ export async function registerDocuments(app: FastifyInstance): Promise<void> {
     const cid = ctx.company!.id;
 
     const doc = await tqOne<RowDataPacket & {
-      storage_key: string; thumb_key: string | null; label: string; ro_id: number;
-    }>(cid, `SELECT storage_key, thumb_key, label, ro_id FROM documents
+      storage_key: string; thumb_key: string | null; label: string; ro_id: number; is_money_doc: number;
+    }>(cid, `SELECT storage_key, thumb_key, label, ro_id, is_money_doc FROM documents
              WHERE id = ? AND deleted_at IS NULL`, [id]);
-    if (!doc) return reply.code(404).send({ error: 'No such document' });
+    if (!doc || hiddenFrom(ctx, doc)) return reply.code(404).send({ error: 'No such document' });
 
     await texec(cid, 'UPDATE documents SET deleted_at = NOW() WHERE id = ?', [id]);
     await removeFile(doc.storage_key);
@@ -372,17 +416,20 @@ export async function registerDocuments(app: FastifyInstance): Promise<void> {
     for (const p of pages) await removeFile(p.storage_key);
     await texec(cid, 'DELETE FROM document_pages WHERE document_id = ?', [id]);
 
-    await texec(cid,
-      `INSERT INTO ro_notes (ro_id, kind, body, user_id, user_name) VALUES (?, 'auto', ?, ?, ?)`,
-      [doc.ro_id, `Document deleted: ${doc.label}.`, ctx.user.id, ctx.user.name]
-    );
+    if (Number(doc.is_money_doc) !== 1) {
+      await texec(cid,
+        `INSERT INTO ro_notes (ro_id, kind, body, user_id, user_name) VALUES (?, 'auto', ?, ?, ?)`,
+        [doc.ro_id, `Document deleted: ${doc.label}.`, ctx.user.id, ctx.user.name]
+      );
+    }
 
     /* Pulling paperwork off a file is one of the things the audit log exists
        for: the file no longer shows it, and nothing else would say who did. */
     await audit(cid, actorFrom(req), {
       entity: 'document', entityId: id, roId: doc.ro_id, action: 'document_deleted',
-      area: 'Documents', label: `Removed document — ${doc.label}`,
-      changes: [{ field: 'Document', from: doc.label, to: null }]
+      area: 'Documents',
+      label: Number(doc.is_money_doc) === 1 ? 'Removed financial document' : `Removed document — ${doc.label}`,
+      changes: [{ field: 'Document', from: Number(doc.is_money_doc) === 1 ? 'Financial document' : doc.label, to: null }]
     });
 
     return { ok: true };

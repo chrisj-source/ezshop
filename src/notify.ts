@@ -22,7 +22,10 @@ export type EventKey =
      11pm on a Saturday reaches the same people as one at midday — it is one
      event, and it obeys the suppression list like everything else: the in-app
      copy always, the email only if that address has not unsubscribed. */
-  | 'web.request';
+  | 'web.request'
+  /* A promise changed on a file whose commission was already paid. Sent only to
+     the people who hold the pay-plan capability, and carries no amounts. */
+  | 'pay.review';
 
 export interface NotifyInput {
   companyId: number;

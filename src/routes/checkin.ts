@@ -4,6 +4,7 @@ import { tq, texec, tqOne, withTenantTx } from '../db/tenant';
 import { requireCompany, requireFeature } from '../middleware/context';
 import { extensionOf, storageKey, writeStream } from '../lib/storage';
 import { isSuppressed, noteSuppressionHit } from '../lib/suppression';
+import { fireTrigger } from '../lib/pay';
 
 /**
  * Mobile check-in. A phone at the door: job type, VIN, decoded vehicle,
@@ -254,6 +255,13 @@ export async function registerCheckin(app: FastifyInstance): Promise<void> {
          p.bytes, ctx.user.id, ctx.user.name]
       );
     }
+
+    /* Check-in IS the car arriving. Stamp it, so a salesperson on a drop-fee
+       plan is paid it — the desk's New RO and the board's move to Vehicle
+       Arrived already did; the phone check-in never had. */
+    await fireTrigger(cid, roId, 'arrived', {
+      userId: ctx.user.id, userName: ctx.user.name, source: 'auto', note: 'mobile check-in'
+    }).catch(e => req.log.error(e));
 
     return { ok: true, id: roId, roNumber, photos: photos.length };
   });

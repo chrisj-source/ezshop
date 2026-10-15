@@ -163,7 +163,7 @@ export interface SendResult { ok: boolean; id: number | null; state: string; rea
  * suppression.
  */
 export async function sendSms(companyId: number, to: string, body: string, opts: {
-  purpose: 'transactional' | 'marketing' | 'test'; roId?: number | null; sentBy?: number | null;
+  purpose: 'transactional' | 'marketing' | 'test' | 'staff'; roId?: number | null; sentBy?: number | null;
   sentByName?: string | null; triggerKey?: string | null;
 }): Promise<SendResult> {
   const dest = normalise('sms', to);
@@ -188,7 +188,10 @@ export async function sendSms(companyId: number, to: string, body: string, opts:
     await noteSuppressionHit(companyId, 'sms', dest, `sms ${opts.purpose}`);
     return refuse('This number replied STOP.');
   }
-  if (opts.purpose !== 'test') {
+  /* 'staff' is the shop texting its own people (owner, accounting) on their own
+     numbers, set by the owner in Admin. Not a customer, so no consent record;
+     STOP from that phone is still honoured above, like every number. */
+  if (opts.purpose !== 'test' && opts.purpose !== 'staff') {
     const c = await mayContact(companyId, 'sms', dest, opts.purpose, opts.roId ?? null);
     if (!c.allowed) return refuse(c.reason ?? 'No consent on record for this number.');
   }

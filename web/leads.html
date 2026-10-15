@@ -550,9 +550,10 @@
           '<div class="lname">' + esc(r.customer_name) +
             (Number(r.is_repeat) ? ' <span class="lstate" style="color:var(--stopped);' +
               'border:1px solid var(--stopped)">asked twice this week</span>' : '') +
-            (r.ro_number ? ' <span class="lstate" style="color:var(--stopped);' +
+            (r.ro_number ? ' <a class="lstate" href="/board.html?ro=' + Number(r.ro_file_id) + '" ' +
+              'title="Open the file" style="color:var(--stopped);text-decoration:none;cursor:pointer;' +
               'border:1px solid var(--stopped)">car is here · RO ' + esc(r.ro_number) +
-              '</span>' : '') +
+              '</a>' : '') +
             (r.client_id && !r.lead_id ? ' <span class="lstate" style="color:var(--move);' +
               'border:1px solid var(--move)">returning customer</span>' : '') +
             (Number(r.conflicted_at ? 1 : 0) ? ' <span class="lstate" style="color:var(--stopped);' +
@@ -646,6 +647,57 @@
 
   function syncPanel() {
     $('detCol').classList.toggle('open', ADDING || SEL != null);
+  }
+
+  /* Split sales. Salesperson 1 is the dropdown above; ticking 2 or 3 brings up
+     their dropdown and a share. The three come to 100%, checked again on save.
+     Each person is paid on their own plan, on their share. */
+  function splitEditor(p, l) {
+    l = l || {};
+    var opts = function (sel) {
+      return '<option value="">Pick…</option>' + STAFF.map(function (s) {
+        return '<option value="' + s.id + '"' + (Number(sel) === s.id ? ' selected' : '') + '>' + esc(s.name) + '</option>';
+      }).join('');
+    };
+    var row = function (n, uid, pct) {
+      return '<label style="display:flex;gap:7px;align-items:center;font:400 11px var(--font);color:var(--muted);margin-top:6px">' +
+        '<input type="checkbox" id="' + p + 'S' + n + 'on"' + (uid ? ' checked' : '') + '> Salesperson ' + n + '</label>' +
+        '<div id="' + p + 'S' + n + 'row" style="display:' + (uid ? 'flex' : 'none') + ';gap:7px;margin-top:4px">' +
+        '<select id="' + p + 'S' + n + '" class="detsel" style="flex:1">' + opts(uid) + '</select>' +
+        '<input id="' + p + 'S' + n + 'pct" type="number" min="1" max="99" step="0.01" class="detsel" style="width:72px" placeholder="%" value="' + (pct || '') + '"></div>';
+    };
+    return '<div style="margin-top:8px" id="' + p + 'Split">' +
+      '<div id="' + p + 'S1row" style="display:' + (l.sales2_user_id || l.sales3_user_id ? 'flex' : 'none') + ';gap:7px;align-items:center;font:400 11px var(--font);color:var(--muted)">' +
+      'Salesperson 1 share <input id="' + p + 'S1pct" type="number" min="1" max="100" step="0.01" class="detsel" style="width:72px" value="' + (l.owner_pct || '') + '">%</div>' +
+      row(2, l.sales2_user_id, l.sales2_pct) + row(3, l.sales3_user_id, l.sales3_pct) +
+      '<div id="' + p + 'Stotal" style="font:400 10.5px var(--font);color:var(--dim);margin-top:5px"></div></div>';
+  }
+  function wireSplit(p) {
+    if (!$(p + 'Split')) return;
+    var total = function () {
+      var on2 = $(p + 'S2on').checked, on3 = $(p + 'S3on').checked;
+      $(p + 'S1row').style.display = on2 || on3 ? 'flex' : 'none';
+      $(p + 'S2row').style.display = on2 ? 'flex' : 'none';
+      $(p + 'S3row').style.display = on3 ? 'flex' : 'none';
+      if (!on2 && !on3) { $(p + 'Stotal').textContent = ''; return; }
+      var t = Number($(p + 'S1pct').value || 0) + (on2 ? Number($(p + 'S2pct').value || 0) : 0) + (on3 ? Number($(p + 'S3pct').value || 0) : 0);
+      t = Math.round(t * 100) / 100;
+      $(p + 'Stotal').textContent = 'Split adds to ' + t + '%' + (t === 100 ? '' : ' — it has to come to 100%');
+      $(p + 'Stotal').style.color = t === 100 ? 'var(--dim)' : 'var(--stopped)';
+    };
+    ['S2on', 'S3on', 'S1pct', 'S2pct', 'S3pct'].forEach(function (k) {
+      $(p + k).addEventListener('input', total); $(p + k).addEventListener('change', total);
+    });
+    total();
+  }
+  function readSplit(p) {
+    if (!$(p + 'Split')) return undefined;
+    var on2 = $(p + 'S2on').checked && $(p + 'S2').value, on3 = $(p + 'S3on').checked && $(p + 'S3').value;
+    return {
+      ownerPct: on2 || on3 ? Number($(p + 'S1pct').value || 0) : null,
+      sales2UserId: on2 ? Number($(p + 'S2').value) : null, sales2Pct: on2 ? Number($(p + 'S2pct').value || 0) : null,
+      sales3UserId: on3 ? Number($(p + 'S3').value) : null, sales3Pct: on3 ? Number($(p + 'S3pct').value || 0) : null
+    };
   }
 
   function renderDetail() {
@@ -876,13 +928,16 @@
             (noWin ? ' — convert it, or ask an owner' : '') +
             '</option>';
         }).join('') + '</select></div>');
-      h.push('<div><div class="detlbl">Owner</div><select class="detsel" id="dOwner">' +
+      h.push('<div><div class="detlbl">Salesperson</div><select class="detsel" id="dOwner">' +
         '<option value="">Unassigned</option>' +
         STAFF.map(function (s) {
           return '<option value="' + s.id + '"' +
             (String(lead.owner_user_id) === String(s.id) ? ' selected' : '') + '>' +
             esc(s.name) + '</option>';
-        }).join('') + '</select></div>');
+        }).join('') + '</select>' +
+        (lead.owner_user_id ? splitEditor('d', lead) +
+          '<button class="btn btn-ghost" id="dSplitSave" style="margin-top:6px">Save split</button>' : '') +
+        '</div>');
 
       if (lead.state === 'lost') {
         h.push('<div><div class="detlbl">Lost because</div><select class="detsel" id="dLost">' +
@@ -936,6 +991,9 @@
             '<select class="detsel" id="winRo" style="margin-bottom:8px">' +
             '<option value="">' + (won ? 'Pick an open file…' : 'No file yet') + '</option></select>' +
             (won ? '' : '<input id="winNote" placeholder="Note — optional" class="detsel">') +
+            (won ? '<label style="display:flex;gap:7px;align-items:center;font:400 11px var(--font);color:var(--muted);margin-bottom:8px">' +
+              '<input type="checkbox" id="linkRename"> Change the name on the file to ' +
+              esc([lead.first_name, lead.last_name].filter(Boolean).join(' ') || 'this lead\'s') + '</label>' : '') +
             '<button class="winbtn" id="' + (won ? 'linkRo' : 'winLead') + '">' +
             (won ? 'Link this file' : 'Mark won') + '</button></div>');
         }
@@ -1035,6 +1093,16 @@
     }
 
     $('dState').addEventListener('change', function () {
+      /* Booked means on the schedule: with nothing booked, send them to the
+         booking box rather than write a state the calendar does not show. */
+      if (this.value === 'appraisal_booked' && !nextAppt) {
+        this.value = lead.state;
+        if ($('bDate')) {
+          $('bDate').focus();
+          bsay('Pick the date and time — Add to calendar books it and marks the lead booked.', 'err');
+        } else say('Nothing is booked for this lead yet.', 'err');
+        return;
+      }
       api('/api/leads/' + lead.id, { method: 'PATCH', body: JSON.stringify({ state: this.value }) })
         .then(load).catch(function (e) { say(e.message, 'err'); });
     });
@@ -1084,6 +1152,13 @@
       api('/api/leads/' + lead.id, {
         method: 'PATCH', body: JSON.stringify({ state: 'estimate_sent' })
       }).then(load).catch(function (e) { say(e.message, 'err'); });
+    });
+
+    wireSplit('d');
+    var dSplitSave = $('dSplitSave');
+    if (dSplitSave) dSplitSave.addEventListener('click', function () {
+      api('/api/leads/' + lead.id, { method: 'PATCH', body: JSON.stringify({ split: readSplit('d') }) })
+        .then(load).catch(function (e) { say(e.message, 'err'); });
     });
 
     $('dOwner').addEventListener('change', function () {
@@ -1148,7 +1223,7 @@
       var roId = $('winRo').value;
       if (!roId) return say('Pick the file to link.', 'err');
       api('/api/leads/' + lead.id + '/link-ro', {
-        method: 'POST', body: JSON.stringify({ roId: Number(roId) })
+        method: 'POST', body: JSON.stringify({ roId: Number(roId), renameClient: !!($('linkRename') && $('linkRename').checked) })
       }).then(function () { return load(); }).catch(function (e) { say(e.message, 'err'); });
     });
 
@@ -1222,15 +1297,17 @@
         return '<option value="' + p.key + '">' + esc(p.label) + '</option>';
       }).join('') +
       '</select></div></div>' +
-      '<div><div class="detlbl">Owner</div><select id="nOwner" class="detsel">' +
+      '<div><div class="detlbl">Salesperson</div><select id="nOwner" class="detsel">' +
       '<option value="">Unassigned</option>' +
       STAFF.map(function (s) { return '<option value="' + s.id + '">' + esc(s.name) + '</option>'; }).join('') +
       '</select></div></div>' +
+      splitEditor('n', null) +
       '<div class="msg" id="nMsg"></div>' +
       '<button class="winbtn" id="saveLead">Save lead</button>' +
       '<div style="text-align:center;margin-top:9px">' +
       '<button class="btn btn-ghost" id="cancelLead">Cancel</button></div>';
 
+    wireSplit('n');
     $('cancelLead').addEventListener('click', function () { ADDING = false; renderDetail(); });
 
     $('saveLead').addEventListener('click', function () {
@@ -1248,7 +1325,8 @@
         damageNote: $('nNote').value.trim() || undefined,
         source: $('nSource').value,
         payer: $('nPayer') ? $('nPayer').value : undefined,
-        ownerUserId: $('nOwner').value ? Number($('nOwner').value) : undefined
+        ownerUserId: $('nOwner').value ? Number($('nOwner').value) : undefined,
+        split: readSplit('n')
       };
       api('/api/leads', { method: 'POST', body: JSON.stringify(body) })
         .then(function (r) { ADDING = false; SEL = r.id; return load(); })

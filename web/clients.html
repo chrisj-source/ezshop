@@ -391,12 +391,13 @@
       h.push('<div class="sub">Nothing on the board for this account.</div>');
     } else {
       d.files.forEach(function (f) {
-        h.push('<div class="log"><div class="row" style="gap:8px">' +
-          '<a href="/board.html?ro=' + f.id + '" class="log-b">' + esc(f.ro_number) + '</a>' +
+        h.push('<a class="log" href="/board.html?ro=' + f.id + '" title="Open the file on the board" ' +
+          'style="display:block;color:inherit;cursor:pointer"><div class="row" style="gap:8px">' +
+          '<span class="log-b" style="color:var(--acc2);text-decoration:underline;text-underline-offset:3px">RO ' + esc(f.ro_number) + '</span>' +
           '<span class="sub">' + esc(f.vehicle || '') + '</span>' +
           (ME.caps.money ? '<span class="sub" style="margin-left:auto">' + money(f.amount_cents) + '</span>' : '') +
           '</div><div class="log-m">' + esc(f.status_label || 'No status') + ' · ' +
-          f.days_in_shop + ' days' + (f.closed_at ? ' · closed' : '') + '</div></div>');
+          f.days_in_shop + ' days' + (f.closed_at ? ' · picked up' : '') + '</div></a>');
       });
     }
 

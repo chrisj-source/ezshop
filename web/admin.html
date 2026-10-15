@@ -2608,7 +2608,55 @@
         api('/api/admin/sms-reply-routing', { method: 'PUT', body: JSON.stringify({ routing: routing }) })
           .then(function () { say('Saved.', 'ok'); }).catch(function (e) { say(e.message); });
       });
+      renderStaffTexts();
     }).catch(function (e) { $('mid').innerHTML = '<div class="empty">' + esc(e.message) + '</div>'; });
+  }
+
+  /* Texts to the shop's own people. On whenever the shop texts; each person
+     who can see money can be put on it with their own mobile. */
+  function renderStaffTexts() {
+    api('/api/admin/staff-texts').then(function (d) {
+      var pad = $('mid').querySelector('.pad');
+      if (!pad) return;
+      var box = document.createElement('div');
+      box.innerHTML = '<div class="dlbl" style="margin-top:26px">To the shop: a file is approved</div>' +
+        '<div class="sub" style="text-transform:none;letter-spacing:0;margin:4px 0 10px">The first time a file is approved, a text goes to the people ticked here. ' +
+          'Owner and accounting get it automatically whenever this shop texts, on the phone on their login; nothing is sent while texting is off. It carries the approval amount, so only people who can see money are listed. ' +
+          'Fill-ins: ' + d.tokens.map(esc).join(' ') + '</div>' +
+        '<label style="display:flex;gap:8px;align-items:center;margin-bottom:8px"><input type="checkbox" id="stOn"' + (d.approval.on ? ' checked' : '') + '> Send it</label>' +
+        '<textarea id="stBody" rows="2" style="width:100%;max-width:640px">' + esc(d.approval.body) + '</textarea>' +
+        '<div class="sub" id="stSample" style="text-transform:none;letter-spacing:0;margin:4px 0 12px">Reads: ' + esc(d.approval.sample) + '</div>' +
+        '<table style="max-width:640px"><thead><tr><th style="width:52px">Gets it</th><th>Person</th><th style="width:170px">Mobile</th></tr></thead><tbody>' +
+        d.people.map(function (p) {
+          return '<tr data-uid="' + p.userId + '"><td><input type="checkbox" data-st-on' + (p.on ? ' checked' : '') + ' aria-label="Text ' + esc(p.name) + '"></td>' +
+            '<td>' + esc(p.name) + (p.isDefault ? ' <span class="sub" style="text-transform:none;letter-spacing:0">owner / accounting</span>' : '') +
+            (p.on && !p.phone ? '<div class="sub" style="text-transform:none;letter-spacing:0;color:var(--stopped)">No mobile — nothing is sent</div>' : '') + '</td>' +
+            '<td><input data-st-phone value="' + esc(p.fromLogin ? '' : (p.phone || '')) + '" placeholder="' + esc(p.fromLogin ? p.phone + ' (login)' : 'Ten digits') + '" style="width:100%"></td></tr>';
+        }).join('') + '</tbody></table>' +
+        '<div class="sub" id="stSay" style="text-transform:none;letter-spacing:0;margin-top:6px"></div>';
+      pad.appendChild(box);
+      var sayIt = function (t, ok) { $('stSay').textContent = t; $('stSay').style.color = ok ? 'var(--done)' : 'var(--stopped)'; };
+      $('stOn').addEventListener('change', function () {
+        api('/api/admin/staff-texts', { method: 'PUT', body: JSON.stringify({ on: this.checked }) })
+          .then(function () { sayIt('Saved.', true); }).catch(function (e) { sayIt(e.message); });
+      });
+      var was = $('stBody').value;
+      $('stBody').addEventListener('blur', function () {
+        if (this.value.trim() === was.trim()) return;
+        was = this.value;
+        api('/api/admin/staff-texts', { method: 'PUT', body: JSON.stringify({ body: this.value }) })
+          .then(function () { sayIt('Saved.', true); }).catch(function (e) { sayIt(e.message); });
+      });
+      Array.prototype.forEach.call(box.querySelectorAll('tr[data-uid]'), function (tr) {
+        var uid = tr.dataset.uid, put = function (b) {
+          return api('/api/admin/staff-texts/' + uid, { method: 'PUT', body: JSON.stringify(b) })
+            .then(function () { sayIt('Saved.', true); }).catch(function (e) { sayIt(e.message); });
+        };
+        tr.querySelector('[data-st-on]').addEventListener('change', function () { put({ on: this.checked }); });
+        var ph = tr.querySelector('[data-st-phone]'), pw = ph.value;
+        ph.addEventListener('blur', function () { if (ph.value !== pw) { pw = ph.value; put({ phone: ph.value || null }); } });
+      });
+    }).catch(function () {});
   }
 
   /* ====================================================== storage */

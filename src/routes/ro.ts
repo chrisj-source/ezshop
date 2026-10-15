@@ -4,7 +4,9 @@ import { texec, tq, tqOne, withTenantTx } from '../db/tenant';
 import { requireCompany, requireFeature, Ctx } from '../middleware/context';
 import { mayMoveTo, scrubMoney } from '../permissions';
 import { notify } from '../notify';
-import { fireTrigger, correctTrigger } from '../lib/pay';
+import { fireTrigger, correctTrigger, isPreApproval, reconcile, paidCommission, decideReview } from '../lib/pay';
+import { payPlanEditors, roSplits, splitError, splitColumns, warnNoPlan } from '../lib/splits';
+
 import { audit, auditIn } from '../lib/audit';
 import { actorFrom } from './audit';
 import { refuseEmail } from '../lib/suppression';
@@ -109,6 +111,15 @@ export async function registerRepairOrders(app: FastifyInstance): Promise<void> 
                                 WHERE kind = 'insurance' AND active = 1 ORDER BY name`)
     ]);
 
+    /* A wholesale file is moved between accounts by picking one, never by
+       typing a name. The current account is included even if it has since been
+       deactivated, so the picker can show what the file is on. */
+    const accounts = ro.customer_kind === 'wholesale' && ctx.caps.editRepairOrders
+      ? await tq<RowDataPacket[]>(cid,
+          `SELECT id, name FROM clients
+            WHERE kind = 'wholesale' AND (active = 1 OR id = ?) ORDER BY name`, [ro.client_id])
+      : [];
+
     const assignedMap: Record<string, { userId: number | null; name: string | null }> = {};
     for (const a of assigned) {
       assignedMap[a.position_key as string] = { userId: a.user_id as number | null, name: a.display_name as string | null };
@@ -158,6 +169,34 @@ export async function registerRepairOrders(app: FastifyInstance): Promise<void> 
           ORDER BY starts_at`, [id]).catch(() => []),
       taggable: ctx.caps.addNotes ? await taggablePeople(cid) : [],
       promises,
+      /* After the commission is paid, a raised promise locks the amount to owner
+         and accounting. Everyone with money access is told it is locked; only
+         they see the figures and the decision. */
+      /* The sales split. Who is in it is not money; the percentages are part of
+         the commission, so they go only to those who can see commission. */
+      salesSplit: await (async () => {
+        const sp = await roSplits(cid, id);
+        const names = sp.length ? await tq<RowDataPacket[]>(cid, 'SELECT user_id, display_name FROM staff WHERE user_id IN (?)', [sp.map(s => s.userId)]).catch(() => []) : [];
+        const paid = !!(await tqOne<RowDataPacket>(cid, "SELECT id FROM commission_lines WHERE ro_id = ? AND kind = 'commission' AND paid_at IS NOT NULL LIMIT 1", [id]));
+        return {
+          people: sp.map(s => ({ seq: s.seq, userId: s.userId, pct: ctx.caps.commissionMoney ? s.pct : null,
+            name: names.find(n => Number(n.user_id) === s.userId)?.display_name ?? null })),
+          locked: paid && !ctx.caps.editPayPlans,
+          canEdit: (ctx.caps.editAssignments && !paid) || ctx.caps.editPayPlans
+        };
+      })(),
+      promiseLocked: ctx.caps.money && !ctx.caps.editPayPlans
+        ? !!(await tqOne<RowDataPacket>(cid, 'SELECT id FROM commission_reviews WHERE ro_id = ? LIMIT 1', [id]))
+        : false,
+      commissionReviews: ctx.caps.editPayPlans
+        ? await tq<RowDataPacket[]>(cid, `
+            SELECT cr.id, cr.from_cents, cr.to_cents, cr.delta_cents, cr.rate_pct, cr.raised_by_name, cr.raised_at,
+                   cr.decision, cr.adjust_cents, cr.decided_by_name, cr.decided_at, cr.note,
+                   COALESCE(s.display_name, '') AS sales_name,
+                   ROUND(-cr.delta_cents * cr.rate_pct / 100) AS suggest_cents
+            FROM commission_reviews cr LEFT JOIN staff s ON s.user_id = cr.user_id
+            WHERE cr.ro_id = ? ORDER BY cr.id DESC`, [id]).catch(() => [])
+        : [],
       supplements: ctx.caps.money ? supplements : supplements.map(s => scrubMoney(s as Record<string, unknown>, ctx.caps)),
       sublets: sublets.map(s => scrubMoney(s as Record<string, unknown>, ctx.caps)),
       parts: parts.map(p => scrubMoney(p as Record<string, unknown>, ctx.caps)),
@@ -168,6 +207,7 @@ export async function registerRepairOrders(app: FastifyInstance): Promise<void> 
         (ctx.caps.viewPaperwork || d.is_pdf !== 1)),
       voids,
       insurers,
+      accounts,
       canVoid: ctx.caps.voidRepairOrders,
       canClose: ctx.caps.closeRepairOrders,
       canTotalLoss: ctx.caps.markTotalLoss,
@@ -196,18 +236,18 @@ export async function registerRepairOrders(app: FastifyInstance): Promise<void> 
     if (!slot && !note) return reply.code(400).send({ error: 'Nothing to save' });
     if (!await mayTouch(ctx, id)) return reply.code(403).send({ error: 'Not your file' });
 
-    const current = await tqOne<RowDataPacket & { status_slot: string | null; lane: string | null; label: string | null }>(
-      cid, `SELECT r.status_slot, s.lane_key AS lane, s.label
+    const current = await tqOne<RowDataPacket & { status_slot: string | null; lane: string | null; label: string | null; group_id: string | null }>(
+      cid, `SELECT r.status_slot, s.lane_key AS lane, s.label, s.group_id
             FROM repair_orders r LEFT JOIN statuses s ON s.slot_id = r.status_slot
             WHERE r.id = ?`, [id]
     );
     if (!current) return reply.code(404).send({ error: 'No such repair order' });
 
-    let target: (RowDataPacket & { slot_id: string; label: string; lane_key: string | null; is_terminal: number; owner_role: string }) | null = null;
+    let target: (RowDataPacket & { slot_id: string; label: string; lane_key: string | null; is_terminal: number; owner_role: string; group_id: string | null }) | null = null;
 
     if (slot) {
       target = await tqOne(cid,
-        `SELECT slot_id, label, lane_key, is_terminal, owner_role FROM statuses WHERE slot_id = ?`, [slot]);
+        `SELECT slot_id, label, lane_key, is_terminal, owner_role, group_id FROM statuses WHERE slot_id = ?`, [slot]);
       if (!target) return reply.code(400).send({ error: 'Unknown status' });
 
       if (!mayMoveTo(ctx.caps, ctx.positionKeys, target.lane_key)) {
@@ -215,15 +255,28 @@ export async function registerRepairOrders(app: FastifyInstance): Promise<void> 
       }
     }
 
+    /* The Date picked up box is stamped when the car is marked Picked Up — or
+       any status after it, so a file moved straight to Paperwork Verified or
+       File Closed gets it too. It used to wait for the terminal status, so
+       Picked Up left the box empty and someone typed it by hand. An existing
+       date is kept (typed, or from an earlier move). Moving back before
+       Picked Up, on a file not closed, clears it: the car is in the shop. */
+    const pastPickup = target ? !!(await tqOne<RowDataPacket>(cid, `
+      SELECT 1 FROM statuses t JOIN status_groups tg ON tg.group_id = t.group_id,
+                    statuses p JOIN status_groups pg ON pg.group_id = p.group_id
+      WHERE t.slot_id = ? AND p.slot_id = 'deliver.pickup'
+        AND (tg.sort_order > pg.sort_order OR (tg.sort_order = pg.sort_order AND t.sort_order >= p.sort_order))`,
+      [target.slot_id])) || !!target.is_terminal : false;
+
     await withTenantTx(cid, async (c: PoolConnection) => {
       if (target) {
         const laneChanged = (current.lane ?? null) !== (target.lane_key ?? null);
 
         await c.query(
           `UPDATE repair_orders SET status_slot = ?, status_since = NOW(),
-             closed_at = IF(? = 1, NOW(), closed_at)
+             closed_at = IF(? = 1, COALESCE(closed_at, NOW()), IF(close_date IS NULL, NULL, closed_at))
            WHERE id = ?`,
-          [target.slot_id, target.is_terminal, id]
+          [target.slot_id, pastPickup ? 1 : 0, id]
         );
 
         await c.query(
@@ -282,11 +335,14 @@ export async function registerRepairOrders(app: FastifyInstance): Promise<void> 
 
       /* The pay stamps. Slot ids are canonical — automations bind here, not to
          labels — so a shop renaming its statuses does not move the money.
-         Approval fires on leaving Awaiting Approval, which is the real event:
-         the file is released to parts. */
+         Approval fires the first time the file crosses from intake / teardown /
+         estimate into anything past it — Parts, Body, any production lane —
+         whichever status it skipped through. A move back within the estimate
+         states (Awaiting Approval → Supplement Needed) is not approval. The
+         stamp is first-wins, so a later supplement loop never re-dates it. */
       const fired: string[] = [];
       if (target.slot_id === 'intake.arrived') fired.push('arrived');
-      if (target.slot_id === 'est.approved' || current.status_slot === 'est.awaiting') fired.push('approval');
+      if (isPreApproval(current.status_slot, current.group_id) && !isPreApproval(target.slot_id, target.group_id)) fired.push('approval');
       if (target.slot_id === 'deliver.pickup') fired.push('car_gone');
 
       for (const key of fired) {
@@ -602,7 +658,8 @@ export async function registerRepairOrders(app: FastifyInstance): Promise<void> 
     if (!ctx.caps.money) return reply.code(403).send({ error: 'Not permitted' });
 
     const id = Number((req.params as { id: string }).id);
-    const b = req.body as { amountCents?: number; deductibleCents?: number; laborHours?: number };
+    const b = req.body as { amountCents?: number; deductibleCents?: number; laborHours?: number;
+      discountCents?: number; shortpayCents?: number };
 
     const sets: string[] = [];
     const vals: unknown[] = [];
@@ -621,6 +678,39 @@ export async function registerRepairOrders(app: FastifyInstance): Promise<void> 
       sets.push('labor_hours = ?'); vals.push(Math.max(0, Number(b.laborHours)));
       notes.push('Labor hours set to ' + Number(b.laborHours));
     }
+    /* What the shop gave away on top (a promise to the customer), and what the
+       insurer refused to pay. Both narrow a net-of-costs commission base when
+       the person's plan ticks them. */
+    /* A promise after the commission was paid is not automatic. It is held out
+       of the formula and put to owner and accounting, who decide whether it
+       comes off this week's sales pay. Once one is raised on a file, only they
+       may change the promise amount. */
+    let late: { from: number; to: number; paid: { id: number; userId: number; ratePct: number } } | null = null;
+    if (b.discountCents !== undefined) {
+      const to = Math.max(0, Math.round(b.discountCents));
+      const cur = await tqOne<RowDataPacket & { discount_cents: number }>(ctx.company!.id,
+        'SELECT discount_cents FROM repair_orders WHERE id = ?', [id]);
+      const from = Number(cur?.discount_cents) || 0;
+      if (to !== from) {
+        const paid = await paidCommission(ctx.company!.id, id);
+        if (paid) {
+          const raised = await tqOne<RowDataPacket>(ctx.company!.id,
+            'SELECT id FROM commission_reviews WHERE ro_id = ? LIMIT 1', [id]);
+          if (raised && !ctx.caps.editPayPlans) {
+            return reply.code(403).send({ error: 'The sales commission on this file has been paid and a promise is already flagged. Only owner and accounting can change the promise amount now.' });
+          }
+          late = { from, to, paid };
+        }
+      }
+    }
+    if (b.discountCents !== undefined) {
+      sets.push('discount_cents = ?'); vals.push(Math.max(0, Math.round(b.discountCents)));
+      notes.push('Promises given set to ' + dollars(Math.max(0, Math.round(b.discountCents))));
+    }
+    if (b.shortpayCents !== undefined) {
+      sets.push('shortpay_cents = ?'); vals.push(Math.max(0, Math.round(b.shortpayCents)));
+      notes.push('Insurance short-pay set to ' + dollars(Math.max(0, Math.round(b.shortpayCents))));
+    }
     if (!sets.length) return reply.code(400).send({ error: 'Nothing to change' });
 
     vals.push(id);
@@ -629,7 +719,98 @@ export async function registerRepairOrders(app: FastifyInstance): Promise<void> 
       `INSERT INTO ro_notes (ro_id, kind, body, user_id, user_name) VALUES (?, 'auto', ?, ?, ?)`,
       [id, notes.join('. ') + '.', ctx.user.id, ctx.user.name]
     );
+
+    /* The commission follows the money. A supplement that adds $2k, or an
+       insurer who pays $8k on a $10k approval, re-works the salesperson's line:
+       unpaid it is corrected in place; already paid, the difference lands as an
+       adjustment, plus or minus, on the week the change is made. */
+    if (late) {
+      const cid = ctx.company!.id;
+      await texec(cid, `
+        INSERT INTO commission_reviews
+          (ro_id, user_id, paid_line_id, from_cents, to_cents, delta_cents, rate_pct, raised_by, raised_by_name)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [id, late.paid.userId, late.paid.id, late.from, late.to, late.to - late.from, late.paid.ratePct,
+         ctx.user.id, ctx.user.name]);
+      const ro = await tqOne<RowDataPacket & { ro_number: string }>(cid, 'SELECT ro_number FROM repair_orders WHERE id = ?', [id]);
+      /* Amounts stay out of the message: it goes by email too, and commission is
+         its own capability. The figures are on the file for those who hold it. */
+      await notify({
+        companyId: cid, event: 'pay.review', roId: id,
+        title: `Promise changed after commission was paid — RO ${ro?.ro_number ?? id}`,
+        body: `${ctx.user.name} changed the promise amount on a file whose sales commission was already paid. Open the file to decide whether it comes off this week's sales pay.`,
+        actorUserId: ctx.user.id, directUserIds: await payPlanEditors(cid), onlyDirect: true,
+        dedupeKey: `payreview:${id}:${Date.now()}`
+      }).catch(e => req.log.error(e));
+      await audit(cid, actorFrom(req), {
+        entity: 'ro', entityId: id, roId: id, action: 'promise_after_payout', area: 'Money',
+        label: `Promise changed after the commission was paid — RO ${ro?.ro_number ?? id}`,
+        changes: [{ field: 'Promises given', from: String(late.from / 100), to: String(late.to / 100) }]
+      });
+    }
+    if (b.amountCents !== undefined || b.discountCents !== undefined || b.shortpayCents !== undefined) {
+      await reconcile(ctx.company!.id, id, `money changed by ${ctx.user.name}`).catch(e => req.log.error(e));
+    }
+    return { ok: true, flagged: !!late };
+  });
+
+  /**
+   * Salesperson 2 and 3 and the percentages. Salesperson 1 is the ordinary
+   * sales assignment. Once a commission on the file is paid, only owner and
+   * accounting may change it, and the change is settled as adjustments on this
+   * week — paid lines are never rewritten.
+   */
+  app.patch('/api/ro/:id/sales-split', async (req, reply) => {
+    const ctx = requireCompany(req, reply);
+    if (!ctx) return;
+    const cid = ctx.company!.id;
+    const id = Number((req.params as { id: string }).id);
+    const paid = !!(await tqOne<RowDataPacket>(cid, "SELECT id FROM commission_lines WHERE ro_id = ? AND kind = 'commission' AND paid_at IS NOT NULL LIMIT 1", [id]));
+    if (paid ? !ctx.caps.editPayPlans : !(ctx.caps.editAssignments || ctx.caps.editPayPlans)) {
+      return reply.code(403).send({ error: paid
+        ? 'The commission on this file has been paid. Only owner and accounting can change the split now.'
+        : 'Not permitted' });
+    }
+    const b = req.body as { ownerPct?: number; sales2UserId?: number | null; sales2Pct?: number; sales3UserId?: number | null; sales3Pct?: number };
+    const s1 = await tqOne<RowDataPacket & { user_id: number }>(cid, "SELECT user_id FROM ro_assignments WHERE ro_id = ? AND position_key = 'sales'", [id]);
+    const err = splitError(s1?.user_id ? Number(s1.user_id) : null, b);
+    if (err) return reply.code(400).send({ error: err });
+    const cols = splitColumns('sales_pct', b);
+    await texec(cid, `UPDATE repair_orders SET ${cols.map(([c]) => c + ' = ?').join(', ')} WHERE id = ?`, [...cols.map(([, v]) => v), id]);
+    const ids = [b.sales2UserId, b.sales3UserId].filter(Boolean).map(Number);
+    const names = ids.length ? await tq<RowDataPacket[]>(cid, 'SELECT display_name FROM staff WHERE user_id IN (?)', [ids]).catch(() => []) : [];
+    await texec(cid, `INSERT INTO ro_notes (ro_id, kind, body, user_id, user_name) VALUES (?, 'auto', ?, ?, ?)`,
+      [id, ids.length ? `Sales split set: ${names.map(n => n.display_name).join(', ')} share the sale.` : 'Sales split removed.', ctx.user.id, ctx.user.name]);
+    const ro = await tqOne<RowDataPacket & { ro_number: string }>(cid, 'SELECT ro_number FROM repair_orders WHERE id = ?', [id]);
+    await warnNoPlan(cid, [...(s1?.user_id ? [Number(s1.user_id)] : []), ...ids], { roId: id, label: `RO ${ro?.ro_number ?? id}` }, ctx.user.id);
+    await audit(cid, actorFrom(req), { entity: 'ro', entityId: id, roId: id, action: 'sales_split', area: 'Money',
+      label: `Sales split — RO ${ro?.ro_number ?? id}`, changes: [{ field: 'Split', from: null, to: ids.length ? `${ids.length + 1} people` : 'none' }] });
+    await reconcile(cid, id, `sales split changed by ${ctx.user.name}`).catch(e => req.log.error(e));
     return { ok: true };
+  });
+
+  /** Owner and accounting settle a promise made after the commission was paid. */
+  app.post('/api/ro/:id/commission-reviews/:rid', async (req, reply) => {
+    const ctx = requireCompany(req, reply);
+    if (!ctx) return;
+    if (!ctx.caps.editPayPlans) return reply.code(403).send({ error: 'Not permitted' });
+    const p = req.params as { id: string; rid: string };
+    const b = req.body as { decision?: 'adjust' | 'none'; adjustCents?: number; note?: string };
+    if (b.decision !== 'adjust' && b.decision !== 'none') return reply.code(400).send({ error: 'Pick one.' });
+    try {
+      const r = await decideReview(ctx.company!.id, Number(p.id), Number(p.rid),
+        { decision: b.decision, adjustCents: b.adjustCents, note: (b.note ?? '').trim().slice(0, 200) || null },
+        { userId: ctx.user.id, userName: ctx.user.name });
+      await audit(ctx.company!.id, actorFrom(req), {
+        entity: 'ro', entityId: Number(p.id), roId: Number(p.id), action: 'promise_review_decided', area: 'Money',
+        label: r.adjustCents ? `Late promise — ${(r.adjustCents / 100).toFixed(2)} on this week's sales pay` : 'Late promise — no deduction',
+        changes: [{ field: 'Sales pay', from: null, to: r.adjustCents ? String(r.adjustCents / 100) : 'none' }]
+      });
+      return { ok: true, ...r };
+    } catch (e) {
+      const err = e as Error & { code?: number };
+      return reply.code(err.code ?? 500).send({ error: err.message });
+    }
   });
 
   app.patch('/api/ro/:id/dates', async (req, reply) => {
@@ -809,45 +990,39 @@ export async function registerRepairOrders(app: FastifyInstance): Promise<void> 
       /* A wholesale account is shared by every file billed to it. Editing the
          customer block on one file used to UPDATE that shared row, so renaming
          one One Legacy car renamed the account on all of them. On an account
-         file the block now moves THIS file to another existing account, matched
-         by name — the same rule as creating one — and never writes the account.
-         Its details are edited in Clients. */
-      const onAccount = !!ro.client_id && ro.customer_kind && ro.customer_kind !== 'retail';
+         file the customer block is never written: the drawer offers a picker,
+         which sends `clientId`, and that moves THIS file (and its car) to the
+         picked account by id. The account's own details are edited in Clients. */
+      const onAccount = !!ro.client_id && !!ro.customer_kind && ro.customer_kind !== 'retail';
       if (onAccount) {
-        const same = (a: unknown, z: unknown): boolean =>
-          (a === null || a === undefined || a === '' ? null : String(a)) ===
-          (z === null || z === undefined || z === '' ? null : String(z));
-        for (const [key, col, , len] of custCols) {
-          if (b[key] === undefined || col === 'name') continue;
-          if (!same(ro[`customer_${col}`], str(b[key], len))) {
+        for (const [key] of custCols) {
+          if (b[key] !== undefined) {
             throw Object.assign(new Error(
               `${ro.customer_name} is a wholesale account shared by its other files. ` +
-              'Change its details in Clients, or pick a different account for this file.'
+              'Pick a different account for this file, or change the account in Clients.'
             ), { statusCode: 409, field: key });
           }
         }
-        const name = b.customerName === undefined ? null : str(b.customerName, 190);
-        if (b.customerName !== undefined && !name) {
-          throw Object.assign(new Error('A customer needs a name.'), { statusCode: 400 });
-        }
-        if (name && !same(ro.customer_name, name)) {
+        const to = b.clientId === undefined || b.clientId === null ? null : Number(b.clientId);
+        if (to && to !== Number(ro.client_id)) {
           const [hit] = await c.query<RowDataPacket[]>(
             `SELECT id, name FROM clients
-              WHERE kind = 'wholesale' AND active = 1 AND name = ? LIMIT 1`, [name]);
+              WHERE id = ? AND kind = 'wholesale' AND active = 1`, [to]);
           if (!hit.length) {
-            throw Object.assign(new Error(
-              `No wholesale account is called "${name}". Add it in Clients first — ` +
-              `renaming here would rename ${ro.customer_name} on every one of its files.`
-            ), { statusCode: 400, field: 'customerName' });
+            throw Object.assign(new Error('That wholesale account is not available. Pick another.'),
+              { statusCode: 400, field: 'clientId' });
           }
-          await c.query('UPDATE repair_orders SET client_id = ? WHERE id = ?', [hit[0].id, id]);
+          await c.query('UPDATE repair_orders SET client_id = ? WHERE id = ?', [to, id]);
           if (ro.vehicle_id) {
             await c.query('UPDATE vehicles SET client_id = ? WHERE id = ? AND client_id = ?',
-              [hit[0].id, ro.vehicle_id, ro.client_id]);
+              [to, ro.vehicle_id, ro.client_id]);
           }
           changes.push(`Moved from ${ro.customer_name} to ${hit[0].name as string}`);
-          ro.client_id = hit[0].id;
+          ro.client_id = to;
         }
+      } else if (b.clientId !== undefined) {
+        throw Object.assign(new Error('Only a wholesale file is moved between accounts.'),
+          { statusCode: 400, field: 'clientId' });
       }
 
       for (const [key, col, label, len] of custCols) {
@@ -1053,6 +1228,14 @@ export async function registerRepairOrders(app: FastifyInstance): Promise<void> 
     const position = (req.params as { position: string }).position;
     const { userId, displayName } = req.body as { userId: number | null; displayName: string | null };
 
+    /* Salesperson 1 is who the commission goes to. Once it is paid, moving it is
+       owner and accounting's call, same as the split. */
+    if (position === 'sales' && !ctx.caps.editPayPlans) {
+      const paid = await tqOne<RowDataPacket>(ctx.company!.id,
+        "SELECT id FROM commission_lines WHERE ro_id = ? AND kind = 'commission' AND paid_at IS NOT NULL LIMIT 1", [id]);
+      if (paid) return reply.code(403).send({ error: 'The commission on this file has been paid. Only owner and accounting can change the salesperson now.' });
+    }
+
     await texec(ctx.company!.id,
       `INSERT INTO ro_assignments (ro_id, position_key, user_id, display_name, assigned_by)
        VALUES (?, ?, ?, ?, ?)
@@ -1066,6 +1249,13 @@ export async function registerRepairOrders(app: FastifyInstance): Promise<void> 
       [id, displayName ? `${position} assigned to ${displayName}.` : `${position} assignment cleared.`,
        ctx.user.id, ctx.user.name]
     );
+
+    /* The commission moves with the salesperson: the old one's unpaid lines go,
+       paid ones are reversed on this week, the new one's are written. */
+    if (position === 'sales') {
+      if (userId) await warnNoPlan(ctx.company!.id, [Number(userId)], { roId: id, label: `this file` }, ctx.user.id);
+      await reconcile(ctx.company!.id, id, `salesperson changed by ${ctx.user.name}`).catch(e => req.log.error(e));
+    }
 
     if (userId) {
       const ro = await tqOne<RowDataPacket & { ro_number: string; vehicle: string | null }>(

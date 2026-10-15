@@ -87,6 +87,9 @@ export const DOC_TYPES: Array<{ key: string; label: string; money: boolean }> = 
   { key: 'invoice', label: 'Invoice', money: true },
   { key: 'parts_invoice', label: 'Parts invoice', money: true },
   { key: 'sublet_invoice', label: 'Sublet invoice', money: true },
+  /* A pay screen or receipt. Anyone who can upload may file one; only `money`
+     can open it afterwards, the uploader included. */
+  { key: 'payment_proof', label: 'Proof of payment', money: true },
   { key: 'authorization', label: 'Authorization', money: false },
   { key: 'photos_intake', label: 'Intake photos', money: false },
   { key: 'photos_teardown', label: 'Teardown photos', money: false },

@@ -1,4 +1,6 @@
 import { FastifyInstance } from 'fastify';
+import { SplitInput, splitColumns, splitError, warnNoPlan, salesFromLead } from '../lib/splits';
+import { reconcile } from '../lib/pay';
 import { RowDataPacket, ResultSetHeader } from 'mysql2/promise';
 import { mq } from '../db/master';
 import { tq, texec, tqOne, withTenantTx } from '../db/tenant';
@@ -558,6 +560,7 @@ export async function registerLeads(app: FastifyInstance): Promise<void> {
       address?: string; city?: string; addrState?: string; zip?: string;
       vehicleText?: string; damageNote?: string; source?: string; payer?: string;
       ownerUserId?: number | null; receivedAt?: string;
+      split?: SplitInput;
     };
 
     if (!b.phone && !b.email && !b.lastName) {
@@ -571,6 +574,12 @@ export async function registerLeads(app: FastifyInstance): Promise<void> {
        giving one. */
     const refused = await refuseEmail(cid, b.email, 'new lead');
     if (refused) return reply.code(409).send({ error: refused, field: 'email' });
+
+    const owner1 = b.ownerUserId ?? ctx.user.id;
+    if (b.split) {
+      const se = splitError(owner1, b.split);
+      if (se) return reply.code(400).send({ error: se, field: 'split' });
+    }
 
     const id = await withTenantTx(cid, async (c) => {
       const [seq] = await c.query<RowDataPacket[]>(
@@ -595,9 +604,18 @@ export async function registerLeads(app: FastifyInstance): Promise<void> {
          VALUES (?, 'auto', ?, ?, ?)`,
         [r.insertId, `Lead created from ${b.source ?? 'phone'}.`, ctx.user.id, ctx.user.name]);
 
+      if (b.split && (b.split.sales2UserId || b.split.sales3UserId)) {
+        const cols = splitColumns('owner_pct', b.split);
+        await c.query(`UPDATE leads SET ${cols.map(([k]) => k + ' = ?').join(', ')} WHERE id = ?`, [...cols.map(([, v]) => v), r.insertId]);
+      }
+
       return r.insertId;
     });
 
+    if (b.split && (b.split.sales2UserId || b.split.sales3UserId)) {
+      await warnNoPlan(cid, [owner1, b.split.sales2UserId, b.split.sales3UserId].filter(Boolean).map(Number),
+        { leadId: id, label: 'a new lead' }, ctx.user.id);
+    }
     return { ok: true, id };
   });
 
@@ -703,9 +721,37 @@ export async function registerLeads(app: FastifyInstance): Promise<void> {
       return reply.code(400).send({ error: 'Unknown payer' });
     }
 
+    /* The split, and who is salesperson 1. Locked once the file this lead
+       became has paid a commission — after that it is changed on the file, by
+       owner and accounting. */
+    let splitWarn: number[] = [];
+    if (b.split !== undefined || b.ownerUserId !== undefined) {
+      const cur = await tqOne<RowDataPacket>(cid, `SELECT owner_user_id, owner_pct, sales2_user_id, sales2_pct, sales3_user_id, sales3_pct, ro_id FROM leads WHERE id = ?`, [id]);
+      if (cur?.ro_id && await tqOne<RowDataPacket>(cid, "SELECT id FROM commission_lines WHERE ro_id = ? AND kind = 'commission' AND paid_at IS NOT NULL LIMIT 1", [cur.ro_id])) {
+        return reply.code(403).send({ error: 'The commission on this lead\'s file has been paid. Change the salesperson or split on the file — owner and accounting only.' });
+      }
+      const owner = b.ownerUserId !== undefined ? (b.ownerUserId ? Number(b.ownerUserId) : null) : (cur?.owner_user_id ? Number(cur.owner_user_id) : null);
+      const sp = (b.split ?? { ownerPct: cur?.owner_pct, sales2UserId: cur?.sales2_user_id, sales2Pct: cur?.sales2_pct, sales3UserId: cur?.sales3_user_id, sales3Pct: cur?.sales3_pct }) as SplitInput;
+      const se = splitError(owner, sp);
+      if (se) return reply.code(400).send({ error: se, field: 'split' });
+      if (b.split !== undefined) {
+        for (const [k, v] of splitColumns('owner_pct', sp)) { sets.push(`${k} = ?`); vals.push(v); }
+        notes.push(sp.sales2UserId || sp.sales3UserId ? 'Sales split changed' : 'Sales split removed');
+        splitWarn = [owner, sp.sales2UserId, sp.sales3UserId].filter(Boolean).map(Number);
+      }
+    }
+
     if (b.state !== undefined) {
       const next = String(b.state);
       if (!STATES.includes(next)) return reply.code(400).send({ error: 'Unknown state' });
+
+      /* "Appraisal booked" means a time on the schedule. Picking it from the
+         list wrote the word and booked nothing. It is reached by booking. */
+      if (next === 'appraisal_booked') {
+        const live = await tqOne<RowDataPacket>(cid,
+          'SELECT id FROM appointments WHERE lead_id = ? AND cancelled_at IS NULL AND starts_at >= NOW() LIMIT 1', [id]);
+        if (!live) return reply.code(400).send({ error: 'Pick a date and time in Add appointment — that books it on the schedule and marks the lead booked.', field: 'appointment' });
+      }
 
       /* The amount is what makes the state mean anything, so the state cannot
          be reached without one. POST /estimate is the way in — it takes the
@@ -755,6 +801,7 @@ export async function registerLeads(app: FastifyInstance): Promise<void> {
         `INSERT INTO lead_events (lead_id, kind, body, user_id, user_name) VALUES (?, 'auto', ?, ?, ?)`,
         [id, notes.join('. ') + '.', ctx.user.id, ctx.user.name]);
     }
+    if (splitWarn.length) await warnNoPlan(cid, splitWarn, { leadId: id, label: 'a lead' }, ctx.user.id);
 
     /* Every field that moved, named. A lead edited quietly — a promise date
        pushed, an owner swapped — is exactly what nobody writes a note about. */
@@ -922,6 +969,9 @@ export async function registerLeads(app: FastifyInstance): Promise<void> {
       changes: [{ field: 'State', from: lead.state, to: 'won' }]
     });
 
+    if (file && await salesFromLead(cid, id, Number(file.id), ctx.user).catch(() => false)) {
+      await reconcile(cid, Number(file.id), `salesperson set from lead by ${ctx.user.name}`).catch(e => req.log.error(e));
+    }
     return { ok: true, roId: file ? Number(file.id) : null };
   });
 
@@ -934,11 +984,12 @@ export async function registerLeads(app: FastifyInstance): Promise<void> {
 
     const cid = ctx.company!.id;
     const id = Number((req.params as { id: string }).id);
-    const roId = Number((req.body as { roId?: number })?.roId);
+    const lb = (req.body ?? {}) as { roId?: number; renameClient?: boolean };
+    const roId = Number(lb.roId);
     if (!roId) return reply.code(400).send({ error: 'Pick the file to link.' });
 
-    const lead = await tqOne<RowDataPacket & { lead_number: string; ro_id: number | null }>(
-      cid, 'SELECT lead_number, ro_id FROM leads WHERE id = ?', [id]);
+    const lead = await tqOne<RowDataPacket & { lead_number: string; ro_id: number | null; first_name: string | null; last_name: string | null }>(
+      cid, 'SELECT lead_number, ro_id, first_name, last_name FROM leads WHERE id = ?', [id]);
     if (!lead) return reply.code(404).send({ error: 'No such lead' });
     if (lead.ro_id) {
       return reply.code(409).send({ error: 'That lead is already on a file. Unlink it first.' });
@@ -947,10 +998,43 @@ export async function registerLeads(app: FastifyInstance): Promise<void> {
     const file = await openFileForLink(cid, roId, reply);
     if (!file) return;
 
+    /* The name on the estimate is sometimes not the name on the lead — a
+       spouse, a business, a typo at the insurer. Optionally the file takes the
+       lead's name. Only when that customer record is this file's alone:
+       renaming a client with other files would rename those too. */
+    let rename: { clientId: number; from: string; to: string } | null = null;
+    if (lb.renameClient) {
+      if (!ctx.caps.editRepairOrders) return reply.code(403).send({ error: 'You cannot change the name on a file.' });
+      const to = [lead.first_name, lead.last_name].map(s => String(s ?? '').trim()).filter(Boolean).join(' ');
+      if (!to) return reply.code(400).send({ error: 'The lead has no name to copy.' });
+      const cl = await tqOne<RowDataPacket & { client_id: number | null; name: string | null; others: number }>(cid, `
+        SELECT r.client_id, c.name,
+               (SELECT COUNT(*) FROM repair_orders o WHERE o.client_id = r.client_id AND o.id <> r.id) AS others
+        FROM repair_orders r LEFT JOIN clients c ON c.id = r.client_id WHERE r.id = ?`, [roId]);
+      if (!cl?.client_id) return reply.code(400).send({ error: 'That file has no customer record to rename.' });
+      if (Number(cl.others) > 0) {
+        return reply.code(409).send({ error: `${cl.name ?? 'That customer'} has other files, so the name is not changed from here. Link without renaming, or correct it on the client.` });
+      }
+      if (String(cl.name ?? '') !== to) rename = { clientId: Number(cl.client_id), from: String(cl.name ?? ''), to };
+    }
+
     await texec(cid, `
       UPDATE leads
       SET ro_id = ?, ro_link_kind = 'linked', ro_linked_at = NOW(), ro_linked_by = ?
       WHERE id = ?`, [roId, ctx.user.id, id]);
+
+    if (rename) {
+      await texec(cid, 'UPDATE clients SET name = ? WHERE id = ?', [rename.to, rename.clientId]);
+      await texec(cid,
+        `INSERT INTO ro_notes (ro_id, kind, body, user_id, user_name) VALUES (?, 'auto', ?, ?, ?)`,
+        [roId, `Customer name changed from ${rename.from || '(blank)'} to ${rename.to}, to match lead ${lead.lead_number}.`,
+         ctx.user.id, ctx.user.name]);
+      await audit(cid, actorFrom(req), {
+        entity: 'client', entityId: rename.clientId, roId, action: 'client_renamed_from_lead', area: 'Customer',
+        label: `Name set from lead ${lead.lead_number}`,
+        changes: [{ field: 'Name', from: rename.from, to: rename.to }]
+      });
+    }
 
     await texec(cid,
       `INSERT INTO lead_events (lead_id, kind, body, user_id, user_name)
@@ -963,7 +1047,12 @@ export async function registerLeads(app: FastifyInstance): Promise<void> {
       changes: [{ field: 'Repair order', from: null, to: file.ro_number }]
     });
 
-    return { ok: true, roId };
+    /* The lead's owner is the salesperson, when they are on a sales pay plan
+       and the file has nobody yet. Their split comes with them. */
+    const salesSet = await salesFromLead(cid, id, roId, ctx.user).catch(() => false);
+    if (salesSet) await reconcile(cid, roId, `salesperson set from lead by ${ctx.user.name}`).catch(e => req.log.error(e));
+
+    return { ok: true, roId, renamed: !!rename, salesSet };
   });
 
   /**
@@ -1098,6 +1187,10 @@ export async function registerLeads(app: FastifyInstance): Promise<void> {
       actorUserId: ctx.user.id,
       dedupeKey: `leadconv:${id}`
     }).catch(() => {});
+
+    if (await salesFromLead(cid, id, roId, ctx.user).catch(() => false)) {
+      await reconcile(cid, roId, `salesperson set from lead by ${ctx.user.name}`).catch(e => req.log.error(e));
+    }
 
     return { ok: true, roId };
   });
